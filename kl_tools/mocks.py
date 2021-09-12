@@ -112,8 +112,6 @@ def make_mock_COSMOS_observations(config):
 
     outfile = os.path.join(outdir, 'kl-mocks-COSMOS.fits')
 
-    # real_galaxy_catalog = galsim.RealGalaxyCatalog(config['cosmos_file'],
-    #                                                dir=config['cosmos_dir'])
     use_real = config['use_real']
     area = config['telescope_area']
     exp_time = config['exposure_time']
@@ -127,7 +125,6 @@ def make_mock_COSMOS_observations(config):
                                           area=area,
                                           exptime=exp_time)
                                           # sample='25.2')
-    # config['cosmos_catalog'] = cosmos_catalog
 
     Nobjs = cosmos_catalog.nobjects
     logger.info(f'Read in {Nobjs} real galaxies from catalog')
@@ -140,7 +137,6 @@ def make_mock_COSMOS_observations(config):
     Ngals = config['ngals']
     logger.info(f'Starting generation of {Ngals} cutouts, ' +\
                 f'each with {Nspec} bands')
-    # im_list = []
     ncores = config['ncores']
 
     chromatic = config['chromatic']
@@ -195,24 +191,7 @@ def make_mock_COSMOS_observations(config):
         galsim.fits.writeCube(im_list, im_outfile)
         logger.info(f'Wrote image to fits data cube {im_outfile}')
 
-    # for mp over gals
-    # with Pool(ncores) as pool:
-    #     im_list.append(pool.starmap(_make_single_COSMOS_im,
-    #                                 [(k,
-    #                                   cosmos_catalog.makeGalaxy(), # random selection
-    #                                   config,
-    #                                   logger)
-    #                                  for k in range(Ngals)])
-    #                    )
-
-    # haven't figured out why it does this yet
-    # im_list = im_list[0]
-
     logger.info('Done making all images')
-
-    # Write the images to a fits data cube.
-    # galsim.fits.writeCube(im_list, outfile)
-    # logger.info(f'Wrote image to fits data cube {outfile}')
 
     return
 
@@ -237,18 +216,8 @@ def _make_single_COSMOS_im(k, gal, bandpass, config, logger, theta=None):
     seed = config['seed']
     rng = galsim.UniformDeviate(seed+k+1)
 
-    # gal = cosmos_catalog.makeGalaxy()
-    # gal = galsim.RealGalaxy(real_catalog,
-    #                         random=True,
-    #                         flux_rescale=rescale)
-
     logger.info('   Read in training sample galaxy and PSF from file')
     t2 = time.time()
-
-    # TODO: Rescale flux!
-    # NOTE: Now trying this out through init of COSMOS catalog
-    # rescale = config['flux_rescale']
-    # gal *= rescale
 
     # Rotate by a random angle (but consistent between exp's)
     if theta is None:

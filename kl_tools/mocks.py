@@ -1,6 +1,7 @@
 import numpy as np
 import sys
 import os
+import pickle
 import time
 import logging
 import galsim
@@ -193,6 +194,11 @@ def make_mock_COSMOS_observations(config):
 
     logger.info('Done making all images')
 
+    bp_outfile = os.path.join(outdir, 'bandpass_list.pkl')
+    logger.info(f'Saving bandpass object to {bp_outfile}')
+    with open(bp_outfile, 'wb') as f:
+        pickle.dump(bandpass_list, f)
+
     return
 
 def _make_single_COSMOS_im(k, gal, bandpass, config, logger, theta=None):
@@ -301,14 +307,14 @@ def make_test_COSMOS_config():
         'psf_outer_fraction': 0.2,  # fraction of PSF flux in the outer Gaussian
         'noise_sigma': 50, # counts
         'box_size': 32,
-        'ngals': 10,
+        'ngals': 100,
         'ncores': 8,
         # params related to SED
         'throughput': '0.85', # str that can be evaluated as a function
         'throughput_unit': 'nm', # Unit for 'wave' in throughput func
         'lambda_start': 500, # nm
         'lambda_end': 1000, # nm
-        'dlambda': 50, # nm
+        'dlambda': 10, # nm
         }
 
     return config

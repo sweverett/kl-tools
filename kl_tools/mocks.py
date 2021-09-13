@@ -5,6 +5,7 @@ import pickle
 import time
 import logging
 import galsim
+from astropy.table import Table
 from multiprocessing import Pool
 import pudb
 
@@ -127,8 +128,8 @@ def make_mock_COSMOS_observations(config):
                                           exptime=exp_time)
                                           # sample='25.2')
 
-    Nobjs = cosmos_catalog.nobjects
-    logger.info(f'Read in {Nobjs} real galaxies from catalog')
+    Ncosmos = cosmos_catalog.nobjects
+    logger.info(f'Read in {Ncosmos} real galaxies from catalog')
 
     # Determine number of bands per source
     bandpass_list = config['bandpass_list']
@@ -142,12 +143,24 @@ def make_mock_COSMOS_observations(config):
 
     chromatic = config['chromatic']
 
+    # Setup truth catalog
+    truth = []
+
     # for mp over bandpasses
     for i in range(Ngals):
         im_list = []
 
         # random selection
-        gal = cosmos_catalog.makeGalaxy(chromatic=chromatic)
+        seed = config['seed']
+        rng = galsim.UniformDeviate(seed+i+1)
+        indx = int(Ncosmos * rng())
+        gal = cosmos_catalog.makeGalaxy(index=indx,
+                                        chromatic=chromatic)
+
+        # Update truth catalog
+        truth_dict = cosmos_catalog.getParametricRecord(indx)
+        truth_dict['mock_id'] = i
+        truth.append(truth_dict)
 
         # Don't understand this. makeGalaxy() returns a GSObject or
         # ChromaticObject, but when saved to gal it seems to make a
@@ -157,8 +170,6 @@ def make_mock_COSMOS_observations(config):
             gal = gal[0]
 
         # Want a consistent rotation angle between bands
-        seed = config['seed']
-        rng = galsim.UniformDeviate(seed+i+1)
         theta = 2.*np.pi * rng() * galsim.radians
 
         if ncores == 1:
@@ -198,6 +209,11 @@ def make_mock_COSMOS_observations(config):
     logger.info(f'Saving bandpass object to {bp_outfile}')
     with open(bp_outfile, 'wb') as f:
         pickle.dump(bandpass_list, f)
+
+    truth_outfile = os.path.join(outdir, 'truth.fits')
+    logger.info(f'Saving truth catalog to {truth_outfile}')
+    truth = Table(truth)
+    truth.write(truth_outfile)
 
     return
 
@@ -312,9 +328,9 @@ def make_test_COSMOS_config():
         # params related to SED
         'throughput': '0.85', # str that can be evaluated as a function
         'throughput_unit': 'nm', # Unit for 'wave' in throughput func
-        'lambda_start': 500, # nm
-        'lambda_end': 1000, # nm
-        'dlambda': 10, # nm
+        'lambda_start': 100, # nm
+        'lambda_end': 2200, # nm
+        'dlambda': 20, # nm
         }
 
     return config
@@ -364,7 +380,7 @@ def make_bandpass_list(config):
 
     for l in range(li, le+dl, dl):
         bandpass_list.append(galsim.Bandpass(
-            throughput, unit, blue_limit=li, red_limit=le, zeropoint=zp
+            throughput, unit, blue_limit=l, red_limit=l+dl, zeropoint=zp
             ))
 
     return bandpass_list

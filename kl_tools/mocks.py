@@ -121,9 +121,15 @@ def make_mock_COSMOS_observations(config):
         min_flux = config['min_flux']
     except KeyError:
         min_flux = 0
+    try:
+        min_hlr = config['min_hlr']
+    except KeyError:
+        min_hlr = 0
     cosmos_catalog = galsim.COSMOSCatalog(file_name=config['cosmos_file'],
                                           dir=config['cosmos_dir'],
                                           use_real=use_real,
+                                          min_flux=min_flux,
+                                          min_hlr=min_hlr,
                                           area=area,
                                           exptime=exp_time)
                                           # sample='25.2')
@@ -213,7 +219,7 @@ def make_mock_COSMOS_observations(config):
     truth_outfile = os.path.join(outdir, 'truth.fits')
     logger.info(f'Saving truth catalog to {truth_outfile}')
     truth = Table(truth)
-    truth.write(truth_outfile)
+    truth.write(truth_outfile, overwrite=True)
 
     return
 
@@ -323,7 +329,7 @@ def make_test_COSMOS_config():
         'psf_outer_fraction': 0.2,  # fraction of PSF flux in the outer Gaussian
         'noise_sigma': 50, # counts
         'box_size': 32,
-        'ngals': 100,
+        'ngals': 1,
         'ncores': 8,
         # params related to SED
         'throughput': '0.85', # str that can be evaluated as a function
@@ -405,7 +411,8 @@ def main():
     config['telescope_area'] = hale_eff_area * (100.)**2 # cm
     config['exposure_time'] = exp_time
 
-    config['min_flux'] = 100
+    config['min_flux'] = 1.e2
+    config['min_hlr'] = 1.5 # arcsec
 
     # Setup bandpasses
     config['bandpass_list'] = make_bandpass_list(config)

@@ -96,6 +96,28 @@ class DataCube(object):
 
         return
 
+    def compute_aperture_spectrum(self, radius, offset=(0,0)):
+        '''
+        radius: aperture radius in pixels
+        offset: aperture center offset tuple in pixels about slice center
+        '''
+
+        mask = np.zeros((self.Nx, self.Ny), dtype=np.dtype(int))
+
+        im_center = (self.Nx/2, self.Ny/2)
+        center = np.array(im_center) + np.array(offset)
+
+        for x in range(self.Nx):
+            for y in range(self.Ny):
+                dist = np.sqrt((x-center[0])**2+(y-center[1])**2)
+                if dist < radius:
+                    mask[x,y] = 1
+
+        plt.imshow(mask)
+        # plt.show()
+
+        return
+
     def compute_pixel_spectrum(self, i, j):
         '''
         Compute the spectrum of the pixel (i,j) across
@@ -193,69 +215,6 @@ class FitsDataCube(DataCube):
         super(FitsDataCube, self).__init__(data=data, bandpasses=bandpasses)
 
         return
-
-# class DataCube(object):
-#     '''
-#     Base class for an abstract data cube.
-#     Contains astronomical images of a source
-#     at various wavelength slices
-#     '''
-
-#     def __init__(self, shape=None, Nx=None, Ny=None, Nspec=None)
-#         '''
-#         shape: a 3-tuple in the format of (Nx, Ny, Nspec)
-#                where (Nx, Ny) are the shapes of the image slices
-#                and Nspec is the Number of spectral slices.
-#         '''
-
-#         if shape is None:
-#             for N in [Nx, Ny, Nspec]:
-#                 if N is None:
-#                     raise ValueError('If DataCube.shape is not set, ' + \
-#                                      'then must pass Nx, Ny, and Nspec!')
-
-#             self.Nx = Nx
-#             self.Ny = Ny
-#             self.Nspec = Nspec
-#             self.shape = (Nx, Ny, Nspec)
-#         else:
-#             for N in [Nx, Ny, Nspec]:
-#                 if N is not None:
-#                     raise ValueError('Cannot pass a DataCube.shape ' + \
-#                                      'as well as individual shape params!')
-
-
-#         self.Nx = shape[0]
-#         self.Ny = shape[1]
-#         self.Nspec = shape[2]
-#         self.shape = shape
-
-#         self._check_shape_params()
-
-#         self.slices = self._construct_slice_list()
-
-#         return
-
-#     def _check_shape_params(self):
-#         Nzip = zip(['Nx', 'Ny', 'Nspec'], [self.Nx, self.Ny, self.Nspec])
-#         for name, val in Nzip:
-#             if val < 1:
-#                 raise ValueError(f'{name} must be greater than 0!')
-
-#         if len(self.shape != 3):
-#             raise ValueError('DataCube.shape must be len 3!')
-
-#         return
-
-#     def _construct_slice_list(self):
-#         slice_list = []
-
-#         for i in range(self.Nspec):
-#             slice_list.append(Slice(shape=))
-
-#         # The slice list is useful for abstract representation,
-#         # but for computations we want to work on a numpy array
-#         self._slice_array = np.zeros(self.shape)
 
 class SliceList(list):
     '''
@@ -391,6 +350,11 @@ def main():
                 )
             plt.legend()
             plt.show()
+
+            print('Making aperture spectrum plot')
+            radius = 4 # pixels
+            offset = (0,0) # pixels
+            fits_cube.compute_aperture_spectrum(radius, offset=offset)
 
     else:
         print('Files missing - skipping tests')

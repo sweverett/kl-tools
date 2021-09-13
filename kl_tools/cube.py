@@ -4,6 +4,8 @@ import galsim
 import os
 import pickle
 import utils
+from astropy.table import Table
+import matplotlib.pyplot as plt
 import pudb
 
 class DataCube(object):
@@ -70,7 +72,7 @@ class DataCube(object):
             # (could generalize, but not necessary)
             assert bp.wave_type == self.lambda_unit
 
-        self.slices = self._construct_slice_list()
+        self._construct_slice_list()
 
         return
 
@@ -94,6 +96,63 @@ class DataCube(object):
 
         return
 
+    def compute_pixel_spectrum(self, i, j):
+        '''
+        Compute the spectrum of the pixel (i,j) across
+        all slices
+
+        # TODO: Work out units!
+        '''
+
+        pix_spec = self._get_pixel_spectrum(i,j)
+
+        # presumably some unit conversion...
+
+        # ...
+
+        return pix_spec
+
+    def _get_pixel_spectrum(self, i, j):
+        '''
+        Return the raw spectrum of the pixel (i,j) across
+        all slices
+        '''
+
+        return self._data[i,j,:]
+
+    def plot_slice(self, slice_index, plot_kwargs):
+        self.slices[slice_index].plot(**plot_kwargs)
+
+        return
+
+    def plot_pixel_spectrum(self, i, j, show=True, close=True, outfile=None):
+        '''
+        Plot the spectrum for pixel (i,j) across
+        all slices
+
+        # TODO: Work out units!
+        '''
+
+        pix_spec = self.compute_pixel_spectrum(i,j)
+
+        lambda_means = np.mean(self.lambdas, axis=1)
+        unit = self.lambda_unit
+
+        plt.plot(lambda_means, pix_spec)
+        plt.xlabel(f'Lambda ({unit})')
+        plt.ylabel('Flux (ADU)')
+        plt.title(f'Spectrum for pixel ({i}, {j})')
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight')
+
+        if show is True:
+            plt.show()
+        elif close is True:
+            plt.close()
+
+        return
+
 class FitsDataCube(DataCube):
     '''
     Same as Datacube, but instantiated from a fitscube file
@@ -111,20 +170,11 @@ class FitsDataCube(DataCube):
 
         self.cubefile = cubefile
 
-        # fits_cube = fits.open(cubefile)
-        # pudb.set_trace()
-        # Nimages = len(fits_cube)
-        # im_shape = fits_cube[0].data.shape
-        # data = np.zeros((im_shape[0], im_shape[1], Nimages))
-
-        # for i, im in enumerate(fits_cube):
-        #     data[:,:,i] = im
         fits_cube = galsim.fits.readCube(cubefile)
         Nimages = len(fits_cube)
         im_shape = fits_cube[0].array.shape
         data = np.zeros((im_shape[0], im_shape[1], Nimages))
 
-        # pudb.set_trace()
         for i, im in enumerate(fits_cube):
             data[:,:,i] = im.array
 
@@ -230,6 +280,36 @@ class Slice(object):
 
         return
 
+    def plot(self, show=True, close=True, outfile=None, size=9, title=None,
+             imshow_kwargs=None):
+
+        if imshow_kwargs is None:
+            im = plt.imshow(self._data)
+        else:
+            im = plt.imshow(self._data, **imshow_kwargs)
+
+        plt.colorbar(im)
+
+        if title is not None:
+            plt.title(title)
+        else:
+            li, le = self.blue_limit, self.red_limit
+            unit = self.lambda_unit
+            plt.title(f'DataCube Slice; {li} {unit} < ' +\
+                      f'lambda < {le} {unit}')
+
+        plt.gcf().set_size_inches(size, size)
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight')
+
+        if show is True:
+            plt.show()
+        elif close is True:
+            plt.close()
+
+        return
+
 # Used for testing
 def main():
 
@@ -241,7 +321,7 @@ def main():
     zp = 30
     bandpasses = []
 
-    print('Building bandpasses')
+    print('Building test bandpasses')
     for l1, l2 in zip(lambdas, lambdas+1):
         bandpasses.append(galsim.Bandpass(
             throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
@@ -249,6 +329,7 @@ def main():
 
     Nspec = len(bandpasses)
 
+    print('Building empty test data')
     shape = (100, 100, Nspec)
     data = np.zeros(shape)
 
@@ -256,6 +337,10 @@ def main():
     n = 50 # slice num
     s = Slice(data[:,:,n], bandpasses[n])
 
+    print('Testing slice plots')
+    s.plot(show=False)
+
+    print('Building SliceList object')
     sl = SliceList()
     sl.append(s)
 
@@ -273,12 +358,42 @@ def main():
     if (os.path.exists(test_cubefile)) and (os.path.exists(bandpass_file)):
         print('Building from pickled bandpass list file')
         fits_cube = FitsDataCube(test_cubefile, bandpass_file)
+
         print('Building from bandpass list directly')
         with open(bandpass_file, 'rb') as f:
             bandpasses = pickle.load(f)
         fits_cube = FitsDataCube(test_cubefile, bandpasses)
+
+        print('Making slice plot from DataCube')
+        indx = fits_cube.Nspec // 2
+        plot_kwargs = {
+            'show': True,
+        }
+        fits_cube.plot_slice(indx, plot_kwargs)
+
+        print('Making pixel spectrum plot from DataCube')
+        box_size = fits_cube.slices[indx]._data.shape[0]
+        i, j = box_size // 2, box_size // 2
+        fits_cube.plot_pixel_spectrum(i, j)
+
+        truth_file = os.path.join(mock_dir, 'truth.fits')
+        if os.path.exists(truth_file):
+            print('Loading truth catalog')
+            truth = Table.read(truth_file)
+            z = truth['zphot'][0]
+            ha = 656.28 # nm
+            ha_shift = (1+z) * ha
+
+            print('Making pixel spectrum plot with true z')
+            fits_cube.plot_pixel_spectrum(i, j, show=False, close=False)
+            plt.axvline(
+                ha_shift, lw=2, ls='--', c='k', label=f'(1+{z:.2})*H_alpha'
+                )
+            plt.legend()
+            plt.show()
+
     else:
-        print('Files missing - skipping test')
+        print('Files missing - skipping tests')
 
     print('Done!')
 

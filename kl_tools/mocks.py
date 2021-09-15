@@ -12,8 +12,42 @@ import pudb
 import utils
 import cube
 
-class MockSource(object):
-    pass
+class EmissionLine(object):
+    '''
+    Base class for an emission line
+
+    For now, we definte the allowed set of lines
+    '''
+
+    # in nm
+    _valid_lines = {
+        'Halpha': 656.461,
+        'OII': [372.7092, 372.9875],
+        'OIII': [496.0295, 500.8240]
+        }
+
+    def __init__(self, line, flux=None):
+        valid = self._valid_lines.keys()
+        if line not in valid:
+            raise ValueError(f'{line} is not a valid emission line! ' +\
+                             f'For now, line must be one of {valid}')
+        self.line = line
+        self.wavelength = self._valid_lines[line] # nm
+
+        if flux is None:
+            self.flux = None
+        else:
+            self.set_flux(flux)
+
+        return
+
+    def set_flux(flux):
+        self.flux = flux
+
+        return
+
+    def get_lambda_at_z(z):
+        return self.wavelength * (1.+z)
 
 def make_mock_chromatic_observations(config):
     '''
@@ -113,6 +147,11 @@ def make_mock_COSMOS_observations(config):
     utils.make_dir(outdir)
 
     outfile = os.path.join(outdir, 'kl-mocks-COSMOS.fits')
+
+    # Setup emission lines
+    lines = []
+    for line in config['lines']:
+        lines.append(EmissionLine(line))
 
     use_real = config['use_real']
     area = config['telescope_area']
@@ -301,6 +340,50 @@ def _make_single_COSMOS_im(k, gal, bandpass, config, logger, theta=None):
 
     return im
 
+lines = {'Halpha': 656.461, 'OII': [372.7092, 372.9875], 'OIII': [496.0295,500.8240]}
+
+def _addEmissionLines(lines, template, z, config):
+    # TODO: Refactor so that we are building Emission Line SED's
+    #       should be something like:
+    #
+    #       galsim.SED(lambda_array,
+    #                  combined_gauss_line_model)
+    #
+    #       Where we want it to build a LookupTable and be dimensionless.
+    #       Then we scale it with the `withFlux(flux)` arg after multiplying
+    #       emission line gal profile with SED
+    #
+    #       The flux could be chosen to be as a frac of total flux with some width
+
+    '''
+    lines: a dict of line names & flux values
+    z: redshift of galaxy with emission lines
+    template: the SED template to add the emission lines to
+    config: simulation configuration dict
+    '''
+
+    resolution = config['resolution']
+
+    for line, flux in lines.items():
+
+        eline = EmissionLine(line, flux=flux)
+
+        shifted_lambda = eline.get_lambda_at_z(z)
+        int_line_width = config['line_sigma_int']
+
+        sigma = (shifted_lambda / resolution)**2 + int_line_width**2
+        sigma_sq = sigma**2
+
+        mu_sq = (eline.wavelength - shifted_lambda)**2
+
+        norm = 1. / np.sqrt(2*np.pi*sigma_sq)
+
+        gauss_eline = norm * np.exp(-1. * mu_sq / (2.*sigma_sq))
+
+        template += eline.flux * gauss_eline
+
+    return template
+
 def make_test_COSMOS_config():
     config = {
         # COSMOS params
@@ -312,8 +395,10 @@ def make_test_COSMOS_config():
                                'COSMOS'),
         'use_real': False,
         'chromatic': True,
+
         # Telescope params
         'flux_rescale': 1.0, # Should be replaced by specific telescope info
+
         # Sim params
         'seed': 1512413,
         'zeropoint': 25.94, # This one is for COSMOS
@@ -331,12 +416,17 @@ def make_test_COSMOS_config():
         'box_size': 32,
         'ngals': 1,
         'ncores': 8,
+
         # params related to SED
-        'throughput': '0.85', # str that can be evaluated as a function
+        'throughput': '0.10', # str that can be evaluated as a function
         'throughput_unit': 'nm', # Unit for 'wave' in throughput func
-        'lambda_start': 100, # nm
-        'lambda_end': 2200, # nm
-        'dlambda': 20, # nm
+        'lambda_start': 500, # nm
+        'lambda_end': 1500, # nm
+        'dlambda': 5, # nm
+
+        # emission line params
+        'line_sigma_int': 1, # nm
+        'lines': ['Halpha', 'OII', 'OIII']
         }
 
     return config
@@ -384,7 +474,7 @@ def make_bandpass_list(config):
 
     bandpass_list = []
 
-    for l in range(li, le+dl, dl):
+    for l in np.arange(li, le+dl, dl):
         bandpass_list.append(galsim.Bandpass(
             throughput, unit, blue_limit=l, red_limit=l+dl, zeropoint=zp
             ))

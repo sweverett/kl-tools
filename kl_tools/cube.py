@@ -6,7 +6,15 @@ import pickle
 import utils
 from astropy.table import Table
 import matplotlib.pyplot as plt
+from argparse import ArgumentParser
 import pudb
+
+parser = ArgumentParser()
+
+parser.add_argument('--show', action='store_true', default=False,
+                    help='Set to show test plots')
+parser.add_argument('--test', action='store_true', default=False,
+                    help='Set to run tests')
 
 class DataCube(object):
 #     '''
@@ -96,25 +104,69 @@ class DataCube(object):
 
         return
 
-    def compute_aperture_spectrum(self, radius, offset=(0,0)):
+    def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
         radius: aperture radius in pixels
         offset: aperture center offset tuple in pixels about slice center
         '''
 
-        mask = np.zeros((self.Nx, self.Ny), dtype=np.dtype(int))
+        mask = np.zeros((self.Nx, self.Ny), dtype=np.dtype(bool))
 
         im_center = (self.Nx/2, self.Ny/2)
         center = np.array(im_center) + np.array(offset)
+
+        aper_spec = np.zeros(self.Nspec)
 
         for x in range(self.Nx):
             for y in range(self.Ny):
                 dist = np.sqrt((x-center[0])**2+(y-center[1])**2)
                 if dist < radius:
-                    mask[x,y] = 1
+                    aper_spec += self._get_pixel_spectrum(x,y)
+                    mask[x,y] = True
 
-        plt.imshow(mask)
-        # plt.show()
+        # aper_spec = np.sum(self._data[mask, :])
+
+        if plot_mask is True:
+            plt.imshow(mask, origin='lower')
+
+            cx, cy = center[0], center[1]
+            circle = plt.Circle((cx,cy), radius, color='r', fill=False,
+                                lw=3, label='Aperture')
+
+            ax = plt.gca()
+            ax.add_patch(circle)
+            plt.legend()
+            plt.show()
+
+        return aper_spec
+
+    def plot_aperture_spectrum(self, radius, offset=(0,0), size=None,
+                               title=None, outfile=None, show=True,
+                               close=True):
+
+        aper_spec = self.compute_aperture_spectrum(radius, offset=offset)
+        lambda_means = np.mean(self.lambdas, axis=1)
+
+        plt.plot(lambda_means, aper_spec)
+        plt.xlabel(f'Lambda ({self.lambda_unit})')
+        plt.ylabel(f'Flux (ADUs)')
+
+        if title is not None:
+            plt.title(title)
+        else:
+            plt.title(f'Aperture spectrum for radius={radius} pixels; ' +\
+                      f'offset={offset}')
+
+        if size is not None:
+            plt.gcf().set_size_inches(size)
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight')
+
+        if show is True:
+            plt.show()
+        elif close is True:
+            plt.close()
 
         return
 
@@ -270,7 +322,12 @@ class Slice(object):
         return
 
 # Used for testing
-def main():
+def main(args):
+
+    show = args.show
+
+    outdir = os.path.join(utils.TEST_DIR, 'cube')
+    utils.make_dir(outdir)
 
     li, le, dl = 500, 600, 1
     lambdas = np.arange(li, le, dl)
@@ -325,15 +382,18 @@ def main():
 
         print('Making slice plot from DataCube')
         indx = fits_cube.Nspec // 2
+        outfile = os.path.join(outdir, 'slice-plot.png')
         plot_kwargs = {
-            'show': True,
+            'show': show,
+            'outfile': outfile
         }
         fits_cube.plot_slice(indx, plot_kwargs)
 
         print('Making pixel spectrum plot from DataCube')
         box_size = fits_cube.slices[indx]._data.shape[0]
         i, j = box_size // 2, box_size // 2
-        fits_cube.plot_pixel_spectrum(i, j)
+        outfile = os.path.join(outdir, 'pixel-spec-plot.png')
+        fits_cube.plot_pixel_spectrum(i, j, show=show, outfile=outfile)
 
         truth_file = os.path.join(mock_dir, 'truth.fits')
         if os.path.exists(truth_file):
@@ -349,12 +409,24 @@ def main():
                 ha_shift, lw=2, ls='--', c='k', label=f'(1+{z:.2})*H_alpha'
                 )
             plt.legend()
-            plt.show()
+            outfile = os.path.join(outdir, 'pix-spec-z.png')
+            plt.savefig(outfile, bbox_inches='tight')
+            if show is True:
+                plt.show()
 
             print('Making aperture spectrum plot')
             radius = 4 # pixels
             offset = (0,0) # pixels
-            fits_cube.compute_aperture_spectrum(radius, offset=offset)
+            fits_cube.plot_aperture_spectrum(radius, offset=offset,
+                                             show=False, close=False)
+            plt.axvline(
+                ha_shift, lw=2, ls='--', c='k', label=f'(1+{z:.2})*H_alpha'
+                )
+            plt.legend()
+            outfile = os.path.join(outdir, 'apt-spec-plot.png')
+            plt.savefig(outfile, bbox_inches='tight')
+            if show is True:
+                plt.show()
 
     else:
         print('Files missing - skipping tests')
@@ -364,10 +436,13 @@ def main():
     return 0
 
 if __name__ == '__main__':
-    print('Starting tests')
-    rc = main()
+    args = parser.parse_args()
 
-    if rc == 0:
-        print('All tests ran succesfully')
-    else:
-        print(f'Tests failed with return code of {rc}')
+    if args.test is True:
+        print('Starting tests')
+        rc = main(args)
+
+        if rc == 0:
+            print('All tests ran succesfully')
+        else:
+            print(f'Tests failed with return code of {rc}')

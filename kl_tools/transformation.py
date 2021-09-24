@@ -1,6 +1,5 @@
 import numpy as np
 import pudb
-# import numba
 
 '''
 This file contains transformation functions. These
@@ -47,37 +46,27 @@ def transform_coords(x, y, plane1, plane2, pars):
     # transforms in direction from disk to obs
     if start < end:
         transforms = [_disk2gal, _gal2source, _source2obs]
-        # transform_map = dict(zip(planes[0:-1], transforms))
+        step = 1
+
+        # for i in range(start, end):
+        #     transform = transforms[i]
+        #     x, y = transform(pars, x, y)
 
     # transforms in direction from obs to disk
     else:
         transforms = [_gal2disk, _source2gal, _obs2source]
-        # transform_map = dict(zip(planes[1:], inv_transforms))
+        step = -1
+
+        # Account for different starting point for inv transforms
+        start -= 1
+        end -= 1
 
     # there is no transform starting with the end indx
-    for i in range(start, end-1):
-        # transform = transform_map[i]
+    for i in range(start, end, step):
         transform = transforms[i]
         x, y = transform(pars, x, y)
 
     return x, y
-
-    # if plane1 == plane2:
-    #     return x, y
-
-    # if plane1 == 'disk':
-    #     xp, yp = _disk2gal(pars, x, y)
-
-    #     if plane2 == 'gal':
-    #         return xp, yp
-
-    #     xp, yp = _gal2source(pars, x, y)
-
-    #     if plane2 == 'source':
-    #         return xp, yp
-
-    #     return = _source2obs(pars, c, y)
-
 
 def _multiply(transform, x, y):
     '''
@@ -111,8 +100,8 @@ def _multiply(transform, x, y):
         for i in range(N1):
             pos = np.array([x[i,:], y[i,:]])
             out = np.matmul(transform, pos)
-            xp[:,i] = out[0]
-            yp[:,i] = out[1]
+            xp[i,:] = out[0]
+            yp[i,:] = out[1]
 
     else:
         raise ValueError('Plane transformations are not yet implemented ' +\
@@ -263,47 +252,67 @@ def _disk2gal(pars, x, y):
 
     return _multiply(transform, x, y)
 
-def _eval_in_obs_plane(pars, x, y):
+def _eval_in_obs_plane(pars, x, y, speed=False):
     '''
     pars is a dict
     (x,y) is position on obs plane
+
+    will eval speed map instead of velocity if speed is True
     '''
 
     xp, yp = _obs2source(pars, x, y)
 
-    return _eval_in_source_plane(pars, xp, yp)
+    return _eval_in_source_plane(pars, xp, yp, speed=speed)
 
-def _eval_in_source_plane(pars, x, y):
+def _eval_in_source_plane(pars, x, y, speed=False):
     '''
     pars is a dict
     (x,y) is position on source plane
+
+    will eval speed map instead of velocity if speed is True
     '''
 
     xp, yp = _source2gal(pars, x, y)
 
-    return _eval_in_gal_plane(pars, xp, yp)
+    return _eval_in_gal_plane(pars, xp, yp, speed=speed)
 
-def _eval_in_gal_plane(pars, x, y):
+def _eval_in_gal_plane(pars, x, y, speed=False):
     '''
     pars is a dict
     (x,y) is position on galaxy plane
+
+    will eval speed map instead of velocity if speed is True
     '''
 
     xp, yp = _gal2disk(pars, x, y)
+    speed_map = _eval_in_disk_plane(pars, xp, yp, speed=True)
 
-    return _eval_in_disk_plane(pars, xp, yp)
+    if speed is True:
+        return speed_map
 
-def _eval_in_disk_plane(pars, x, y):
+    else:
+        # euler angles which handle the vector aspect of velocity transform
+        sini = pars['sini']
+        phi = np.arctan2(yp, xp)
+        return sini * np.cos(phi) * speed_map
+
+def _eval_in_disk_plane(pars, x, y, speed=False):
     '''
     Evaluates model at posiiton array in the galaxy plane, where
     pos=(x,y) is defined relative to galaxy center
 
     pars is a dict with model parameters
 
+    will eval speed map instead of velocity if speed is True
+
     # TODO: For now, this only works for the default model.
     We can make this flexible with a passed model name & builder,
     but not necessary yet
     '''
+
+    if speed is False:
+        # Velocity is 0 in the z-hat direction for a disk galaxy
+        return np.zeros(np.shape(x))
 
     r = np.sqrt(x**2 + y**2)
 

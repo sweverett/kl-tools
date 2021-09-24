@@ -3,10 +3,13 @@ from astropy.io import fits
 import galsim
 import os
 import pickle
-import utils
 from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
+
+# from . import utils
+import utils
+
 import pudb
 
 parser = ArgumentParser()
@@ -30,7 +33,7 @@ class DataCube(object):
 
         data: A numpy array containing all image slice data.
                For now, assumed to be the shape format given below.
-        shape: A 3-tuple in the format of (Nx, Ny, Nspec)
+        shape: A 3-tuple in the format of (Nspec, Nx, Ny)
                where (Nx, Ny) are the shapes of the image slices
                and Nspec is the Number of spectral slices.
         bandpasses: A list of galsim.Bandpass objects containing
@@ -66,6 +69,9 @@ class DataCube(object):
             self.Ny = self.shape[1]
             self.Nspec = self.shape[2]
 
+        # a bit awkward, but this allows flexible setup for other params
+        if bandpasses is None:
+            raise ValueError('Must pass a list of bandpasses!')
         self.bandpasses = bandpasses
 
         # Not necessarily needed, but could help ease of access
@@ -90,7 +96,7 @@ class DataCube(object):
             if val < 1:
                 raise ValueError(f'{name} must be greater than 0!')
 
-        if len(self.shape != 3):
+        if len(self.shape) != 3:
             raise ValueError('DataCube.shape must be len 3!')
 
         return
@@ -193,6 +199,47 @@ class DataCube(object):
         '''
 
         return self._data[i,j,:]
+
+    def truncate(self, blue_cut, red_cut, trunc_type='edge'):
+        '''
+        Return a truncated DataCube to slices between blue_cut and
+        red_cut using either the lambda on a slice center or edge
+        '''
+
+        for l in [blue_cut, red_cut]:
+            if (not isinstance(l, float)) and (not isinstance(l, int)):
+                raise ValueError('Truncation wavelengths must be ints or floats!')
+
+        if (blue_cut >= red_cut):
+            raise ValueError('blue_cut must be less than red_cut!')
+
+        if trunc_type not in ['edge', 'center']:
+            raise ValueError('trunc_type can only be at the edge or center!')
+
+        if trunc_type == 'center':
+            # truncate on slice center lambda value
+            lambda_means = np.mean(self.lambdas, axis=1)
+
+            cut = (lambda_means >= blue_cut) & (lambda_means <= red_cut)
+
+        else:
+            # truncate on slice lambda edge values
+            lambda_blues = np.array([self.lambdas[i][0] for i in range(self.Nspec)])
+            lambda_reds  = np.array([self.lambdas[i][1] for i in range(self.Nspec)])
+
+            cut = (lambda_blues >= blue_cut) & (lambda_reds  <= red_cut)
+
+        # could either update attributes or return new DataCube
+        # for now, just return a new one
+        trunc_data = self._data[:,:,cut]
+
+        # Have to do it this way as lists cannot be indexed by np arrays
+        # trunc_bandpasses = self.bandpasses[cut]
+        trunc_bandpasses = [self.bandpasses[i]
+                            for i in range(self.Nspec)
+                            if cut[i] == True]
+
+        return DataCube(data=trunc_data, bandpasses=trunc_bandpasses)
 
     def plot_slice(self, slice_index, plot_kwargs):
         self.slices[slice_index].plot(**plot_kwargs)
@@ -362,6 +409,22 @@ def main(args):
 
     print('Building DataCube object from array')
     cube = DataCube(data=data, bandpasses=bandpasses)
+
+    print('Testing DataCube truncation on slice centers')
+    lambda_range = le - li
+    blue_cut = li + 0.25*lambda_range + 0.5
+    red_cut  = li + 0.75*lambda_range - 0.5
+    truncated = cube.truncate(blue_cut, red_cut, trunc_type='center')
+    nslices_cen = len(truncated.slices)
+    print(f'----Truncation resulted in {nslices_cen} slices')
+
+    print('Testing DataCube truncation on slice edges')
+    truncated = cube.truncate(blue_cut, red_cut, trunc_type='edge')
+    nslices_edg = len(truncated.slices)
+    print(f'----Truncation resulted in {nslices_edg} slices')
+
+    if nslices_edg != (nslices_cen-2):
+        return 1
 
     print('Building DataCube from simulated fitscube file')
     mock_dir = os.path.join(utils.TEST_DIR,

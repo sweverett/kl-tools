@@ -8,6 +8,7 @@ from galsim.angle import Angle, radians
 import matplotlib.pyplot as plt
 
 import utils
+import priors
 from velocity import VelocityMap2D
 from cube import DataCube
 
@@ -89,25 +90,50 @@ class DCLogLikelihood(object):
 
         return
 
-def log_posterior(theta, data, pars):
+def log_posterior(theta, data, pars={}):
     '''
     Natural log of the posterior dist. Target function for zeus
     to sample over
 
     theta: Parameters sampled by zeus. Order defined in PARS_ORDER
     data: DataCube object, truncated to desired lambda bounds
-    pars: Dict of any other parameters needed to evaluate likelihood
+    [pars]: Dict of any other parameters needed to evaluate
+            likelihood
     '''
 
-    return log_prior(theta) + log_likelihood(theta, data, pars)
+    logprior = log_prior(theta, pars)
 
-def log_prior(theta):
+    if logprior == -np.inf:
+        return -np.inf
+
+    else:
+        return logprior + log_likelihood(theta, data, pars)
+
+def log_prior(theta, pars):
     '''
     theta: Parameters sampled by zeus. Order defined in PARS_ORDER
     '''
 
-    # Until implemented, contribute nothing to posterior
-    return 0
+    max_size = pars['max_size']
+    max_velocity =pars['max_velocity']
+    theta_priors = {
+        'g1': priors.GaussPrior(0., 0.15),
+        'g2': priors.GaussPrior(0., 0.15),
+        'theta_int': priors.UniformPrior(0., np.pi),
+        'sini': priors.UniformPrior(0., 1.),
+        'v0': priors.GaussPrior(0, max_velocity),
+        'vcirc': priors.GaussPrior(0, max_velocity),
+        'r0': priors.UniformPrior(0, max_size),
+        'rscale': priors.UniformPrior(0, max_size),
+    }
+
+    logprior = 0
+
+    for name, prior in theta_priors.items():
+        indx = PARS_ORDER[name]
+        logprior += prior(theta[indx], log=True)
+
+    return logprior
 
 def log_likelihood(theta, datacube, pars):
     '''
@@ -137,7 +163,7 @@ def log_likelihood(theta, datacube, pars):
     # create 2D velocity & intensity maps given sampled transformation
     # parameters
     vmap = _setup_vmap(theta_pars)
-    imap = _setup_imap(theta_pars)
+    imap = _setup_imap(theta_pars, pars)
 
     # Setup SED interpolation table
     # TODO: Prefer to set this up once and pass into function,
@@ -149,7 +175,7 @@ def log_likelihood(theta, datacube, pars):
 
     # TODO: Implement!
     # i_array = imap(X, Y)
-    i_array = np.ones((Nx, Ny))
+    i_array = imap
 
     Npix = Nx * Ny
     cov = _setup_cov_matrix(Npix, pars)
@@ -194,7 +220,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
         lblue, lred = lambdas[i]
         sed_b = sed(lblue * zfactor)
         sed_r = sed(lred  * zfactor)
-        mean_sed= np.mean([sed_b, sed_r])
+        mean_sed = np.mean([sed_b, sed_r], axis=0)
         # model[:,:,i] = imap * sed(lam * zfactor)
 
         # model[:,:,i] = imap * mean_sed
@@ -203,7 +229,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
         diff = (datacube[:,:,i] - model).reshape(Nx*Ny)
         chi2 = diff.T.dot(cov.dot(diff))
 
-        loglike += chi2
+        loglike += -0.5*chi2
 
     return loglike
 
@@ -243,14 +269,31 @@ def _setup_vmap(pars, model_name='default', runit='kpc', vunit='km/s'):
 
     return VelocityMap2D(model_name, vmodel)
 
-def _setup_imap(pars, model_name='default'):
+def _setup_imap(theta_pars, pars, model_name='default'):
     '''
     TODO: Implement!
+
+    NOTE: For now, just doing an inclined exp with truth info
+    for testing
     '''
+
+    # A = theta_pars['A']
+    inc = Angle(np.arcsin(theta_pars['sini']), radians)
+
+    imap = gs.InclinedExponential(
+        inc, flux=1e4, half_light_radius=3
+        )
+
+    rot_angle = Angle(theta_pars['theta_int'], radians)
+    imap = imap.rotate(rot_angle)
+    imap = imap.shear(g1=theta_pars['g1'], g2=theta_pars['g2'])
+
+    Nx, Ny = 30, 30
+    imap = imap.drawImage(nx=Nx, ny=Ny)
 
     # imap = IntensityMap2D(pars)
 
-    return None
+    return imap.array
 
 def _setup_sed(pars):
     '''
@@ -306,8 +349,9 @@ def _setup_likelihood_test(true_pars, pars, shape, lambdas):
     zp = pars['bandpass_zp']
 
     bandpasses = []
-    dl = lambdas[1] - lambdas[0]
-    for l1, l2 in zip(lambdas, lambdas+dl):
+    # dl = lambdas[1] - lambdas[0]
+    # for l1, l2 in zip(lambdas, lambdas+dl):
+    for l1, l2 in lambdas:
         bandpasses.append(gs.Bandpass(
             throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
             ))
@@ -316,11 +360,11 @@ def _setup_likelihood_test(true_pars, pars, shape, lambdas):
 
     sed = _setup_sed(pars)
 
-    datacube, true_im = _setup_test_datacube(
+    datacube, vmap, true_im = _setup_test_datacube(
         shape, lambdas, bandpasses, sed, true_pars, pars
         )
 
-    return datacube, true_im
+    return datacube, vmap, true_im
 
 def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     Nx, Ny, Nspec = shape[0], shape[1], shape[2]
@@ -336,8 +380,8 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
         )
 
     rot_angle = Angle(true_pars['theta_int'], radians)
-    true.rotate(rot_angle)
-    true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
+    true = true.rotate(rot_angle)
+    true = true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
 
     true_im = true.drawImage(nx=Nx, ny=Ny)
 
@@ -356,18 +400,22 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
 
     for i in range(Nspec):
         zfactor = 1. / (1 + V)
-        lam = lambdas[i]
 
-        obs_im = true_im * sed(lam * zfactor)
+        lblue, lred = lambdas[i]
+        sed_b = sed(lblue * zfactor)
+        sed_r = sed(lred  * zfactor)
+        mean_sed = np.mean([sed_b, sed_r], axis=0)
+
+        obs_im = true_im * mean_sed
 
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
-        obs_im = obs_im.addNoise(noise)
+        obs_im.addNoise(noise)
 
-        data[:,:,i] = obs_im
+        data[:,:,i] = obs_im.array
 
     datacube = DataCube(data=data, bandpasses=bandpasses)
 
-    return datacube, true_im.array
+    return datacube, V, true_im.array
 
 def main(args):
 
@@ -379,7 +427,7 @@ def main(args):
     true_pars = {
         'g1': 0.1,
         'g2': 0.2,
-        'sini': 0.5,
+        'sini': 0.75,
         'theta_int': np.pi / 3,
         'v0': 250,
         'vcirc': 25,
@@ -387,12 +435,16 @@ def main(args):
         'rscale': 20,
         'v_unit': Unit('km / s'),
         'r_unit': Unit('kpc'),
-        'flux': 1000, # counts
+        'flux': 1e4, # counts
         'hlr': 3, # pixels
     }
 
     # additional args needed for prior / likelihood evaluation
     pars = {
+        'Nx': 30, # pixels
+        'Ny': 30, # pixels
+        'max_size': 30, # pixels
+        'max_velocity': 0.01, # for v / c
         'line_std': 2, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
@@ -406,22 +458,51 @@ def main(args):
         'bandpass_zp': 30,
     }
 
-    li, le, dl = 655, 657, 1
-    lambdas = np.arange(li, le+dl, dl)
+    li, le, dl = 654, 657, 1
+    lambdas = [(l, l+dl) for l in range(li, le, dl)]
 
-    Nx, Ny = 30, 30
+    Nx, Ny = pars['Nx'], pars['Ny']
     Nspec = len(lambdas)
     shape = (Nx, Ny, Nspec)
 
     print('Setting up test datacube and true Halpha image')
-    datacube, true_im = _setup_likelihood_test(
+    datacube, vmap, true_im = _setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
 
     outfile = os.path.join(outdir, 'true-im.png')
+    print(f'Saving true intensity profile in obs plane to {outfile}')
     plt.imshow(true_im, origin='lower')
     plt.colorbar()
-    plt.title('True Halpha profile')
+    plt.title('True Halpha profile in obs plane')
+    plt.savefig(outfile, bbox_inches='tight')
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    outfile = os.path.join(outdir, 'vmap.png')
+    print(f'Saving true vamp in obs plane to {outfile}')
+    plt.imshow(vmap, origin='lower')
+    plt.colorbar(label='v / c')
+    plt.title('True velocity map in obs plane')
+    plt.savefig(outfile, bbox_inches='tight')
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    outfile = os.path.join(outdir, 'datacube.fits')
+    print(f'Saving test datacube to {outfile}')
+    datacube.write(outfile)
+
+    outfile = os.path.join(outdir, 'datacube-slice.png')
+    print(f'Saving example datacube slice im to {outfile}')
+    lc = Nspec // 2
+    s = datacube.slices[lc]
+    plt.imshow(s._data, origin='lower')
+    plt.colorbar()
+    plt.title(f'Test datacube slice at lambda={lambdas[lc]}')
     plt.savefig(outfile, bbox_inches='tight')
     if show is True:
         plt.show()
@@ -431,9 +512,67 @@ def main(args):
     theta = pars2theta(true_pars)
 
     print('Computing log posterior for correct theta')
-    p = log_posterior(theta, datacube, pars)
+    ptrue = log_posterior(theta, datacube, pars)
+    chi2_true = -2.*ptrue / (Nx*Ny*Nspec - len(theta))
+    print(f'Posterior value = {ptrue:.2f}')
 
-    print(f'Posterior value = {p}')
+    print('Computing log posterior for random scatter about correct theta')
+    N = 1000
+    p = []
+    chi2 = []
+    new_thetas = []
+    radius = 0.25
+    for i in range(N):
+        scale = radius * np.array(theta)
+        new_theta = theta + scale * np.random.rand(len(theta))
+        new_thetas.append(new_theta)
+        p.append(log_posterior(new_theta, datacube, pars))
+        chi2.append(-2.*p[i] / (Nx*Ny*Nspec - len(new_theta)))
+    if N <= 10:
+        print(f'Posterior values:\n{p}')
+
+    # outfile = os.path.join(outdir, 'posterior-dist-ball.png')
+    outfile = os.path.join(outdir, 'posterior-dist-ball.png')
+    print('Plotting hist of reduced chi2 vs. chi2 at truth to {outfile}')
+    cmin = np.min(chi2)
+    cmax = np.max(chi2)
+    Nbins = 20
+    bins = np.linspace(cmin, cmax, num=Nbins, endpoint=True)
+    plt.hist(chi2, ec='k', bins=bins)
+    plt.axvline(chi2_true, ls='--', c='k', lw=2, label='Eval at true theta')
+    plt.legend()
+    plt.xlabel('Reduced Chi2')
+    plt.ylabel('Counts')
+    plt.yscale('log')
+    plt.title('Reduced chi2 evaluations for a random ball centered at truth\n '
+              f'with radius = {radius} * truth')
+    plt.savefig(outfile, bbox_inches='tight')
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    outfile = os.path.join(outdir, 'theta-diff.png')
+    print('Plotting diff between true theta and MAP')
+    best = new_thetas[int(np.where(chi2 == np.min(chi2))[0])]
+    plt.plot(100. * (best-theta) / theta, 'o', c='k', markersize=5)
+    plt.axhline(0, c='k', ls='--', lw=2)
+    xx = range(0, len(best))
+    plt.fill_between(
+        xx, -10*np.ones(len(xx)), 10*np.ones(len(xx)), color='gray', alpha=0.25
+        )
+    my_xticks = len(best)*['']
+    for name, indx in PARS_ORDER.items():
+        my_xticks[indx] = name
+    plt.xticks(xx, my_xticks)
+    plt.xlabel('theta params')
+    plt.ylabel('Percent Error (MAP - true)')
+    plt.title('% Error in MAP vs. true sampled params')
+    plt.savefig(outfile, bbox_inches='tight')
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
 
     return 0
 

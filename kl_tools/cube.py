@@ -6,6 +6,7 @@ import pickle
 from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
+import galsim as gs
 
 # from . import utils
 import utils
@@ -271,6 +272,19 @@ class DataCube(object):
             plt.show()
         elif close is True:
             plt.close()
+
+        return
+
+    def write(self, outfile):
+        d = os.path.dirname(outfile)
+
+        utils.make_dir(d)
+
+        im_list = []
+        for s in self.slices:
+            im_list.append(s._data)
+
+        gs.fits.writeCube(im_list, outfile)
 
         return
 

@@ -5,7 +5,9 @@ from argparse import ArgumentParser
 import zeus
 
 import utils
-from likelihood import log_posterior
+from likelihood import log_posterior, PARS_ORDER
+
+import pudb
 
 parser = ArgumentParser()
 
@@ -22,12 +24,14 @@ class ZeusRunner(object):
     might want to do something fancier in the future
     '''
 
-    def __init__(self, nwalkers, ndim, pfunc, args=None):
+    def __init__(self, nwalkers, ndim, pfunc, args=None, kwargs=None):
         '''
         nwalkers: Number of MCMC walkers. Must be at least 2*ndim
         ndim:     Number of sampled dimensions
         pfunc:    Posterior function to sample from
         args:     List of additional args needed to evaluate posterior,
+                    such as the data vector, covariance matrix, etc.
+        kwargs:     List of additional kwargs needed to evaluate posterior,
                     such as the data vector, covariance matrix, etc.
         '''
 
@@ -49,6 +53,7 @@ class ZeusRunner(object):
         self.ndim = ndim
         self.pfunc = pfunc
         self.args = args
+        self.kwargs = kwargs
 
         self._initialize_walkers()
         self._initialize_sampler()
@@ -67,13 +72,21 @@ class ZeusRunner(object):
         each prior, centered at the max of the prior
         '''
 
-        self.start = scale * np.random.randn(self.nwalkers, self.ndim)
+        # self.start = np.zeros((self.nwalkers, self.ndim))
+        self.start = 0.01*np.ones((self.nwalkers, self.ndim))
+
+        # self.start = scale * np.random.randn(self.nwalkers, self.ndim)
+        # self.start = scale * np.random.rand(self.nwalkers, self.ndim)
+
+        # sini_indx = PARS_ORDER['sini']
+        # self.start[:,sini_indx] *= np.sign(self.start[:,sini_indx])
 
         return
 
     def _initialize_sampler(self):
         self.sampler = zeus.EnsembleSampler(
-            self.nwalkers, self.ndim, self.pfunc, args=self.args
+            self.nwalkers, self.ndim, self.pfunc,
+            args=self.args, kwargs=self.kwargs
             )
 
         return
@@ -90,7 +103,8 @@ class ZeusRunner(object):
         '''
 
         if start is None:
-            start = self._initialize_walkers()
+            self._initialize_walkers()
+            start = self.start
 
         self.sampler.run_mcmc(start, nsteps)
 
@@ -113,7 +127,8 @@ def main(args):
     ndims = 10
     nwalkers = 2*ndims
     args = None
-    runner = ZeusRunner(nwalkers, ndims, log_posterior, args=args)
+    kwargs = None
+    runner = ZeusRunner(nwalkers, ndims, log_posterior, args=args, kwargs=kwargs)
 
     return 0
 

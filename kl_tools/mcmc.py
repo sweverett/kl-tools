@@ -1,10 +1,12 @@
 import types
 import numpy as np
 import os
+from multiprocessing import Pool
 from argparse import ArgumentParser
 import zeus
 
 import utils
+import priors
 from likelihood import log_posterior, PARS_ORDER
 
 import pudb
@@ -24,7 +26,7 @@ class ZeusRunner(object):
     might want to do something fancier in the future
     '''
 
-    def __init__(self, nwalkers, ndim, pfunc, args=None, kwargs=None):
+    def __init__(self, nwalkers, ndim, pfunc, args=None, kwargs=None, priors=None):
         '''
         nwalkers: Number of MCMC walkers. Must be at least 2*ndim
         ndim:     Number of sampled dimensions
@@ -60,7 +62,7 @@ class ZeusRunner(object):
 
         return
 
-    def _initialize_walkers(self, scale=0.01):
+    def _initialize_walkers(self, scale=0.20):
         ''''
         TODO: Not obvious that this scale factor is reasonable
         for our problem, should experiment & test further
@@ -72,16 +74,63 @@ class ZeusRunner(object):
         each prior, centered at the max of the prior
         '''
 
-        # self.start = np.zeros((self.nwalkers, self.ndim))
-        self.start = 0.01*np.ones((self.nwalkers, self.ndim))
+        if 'priors' in self.kwargs['pars']:
+            # use peak of priors for initialization
+            self.start = np.zeros((self.nwalkers, self.ndim))
 
-        # self.start = scale * np.random.randn(self.nwalkers, self.ndim)
-        # self.start = scale * np.random.rand(self.nwalkers, self.ndim)
+            for name, indx in PARS_ORDER.items():
+                prior = self.kwargs['pars']['priors'][name]
+                peak, cen = prior.peak, prior.cen
 
-        # sini_indx = PARS_ORDER['sini']
-        # self.start[:,sini_indx] *= np.sign(self.start[:,sini_indx])
+                base = peak if peak is not None else cen
+                radius = base*scale if base !=0 else scale
+
+                # random ball about base value
+                ball = radius * np.random.randn(self.nwalkers)
+
+                # if name == 'v0':
+                #     pudb.set_trace()
+
+                # rejcect 2+ sigma outliers or out of prior bounds
+                outliers, Noutliers = self._compute_start_outliers(
+                    base, ball, radius, prior
+                    )
+
+                # replace outliers
+                while Noutliers > 0:
+                    ball[outliers] = radius * np.random.randn(Noutliers)
+                    outliers, Noutliers = self._compute_start_outliers(
+                        base, ball, radius, prior
+                        )
+
+                self.start[:,indx] = base + ball
+
+                # self.start[:,indx] = base + radius*\
+                    # np.random.randn(self.nwalkers)
+
+        else:
+            # don't have much to go on
+            self.start = scale * np.random.rand(self.nwalkers, self.ndim)
 
         return
+
+    def _compute_start_outliers(self, base, ball, radius, prior):
+        '''
+        base: The reference value
+        radius: The radius of the random ball
+        ball: A ball of random points centered at 0 with given radius
+        prior: prior being sampled with random points about ball
+        '''
+
+        outliers = np.abs(ball) > 2.*radius
+        if isinstance(prior, priors.UniformPrior):
+            left, right = prior.left, prior.right
+            outliers = outliers | \
+                        ((base + ball) < left) | \
+                        ((base + ball) > right)
+        Noutliers = len(np.where(outliers == True)[0])
+
+        return outliers, Noutliers
 
     def _initialize_sampler(self):
         self.sampler = zeus.EnsembleSampler(
@@ -91,13 +140,15 @@ class ZeusRunner(object):
 
         return
 
-    def run(self, nsteps, start=None, return_sampler=False, vb=True):
+    def run(self, nsteps, ncores=1, start=None, return_sampler=False,
+            vb=True):
         '''
         nsteps: Number of MCMC steps / iterations
+        ncores: Number of CPU cores to use
         start:  Can provide starting walker positions if you don't
                 want to use the default initialization
-        vb:     Will print out zeus summary if True
         return_sampler: Set to True if you want the sampler returned
+        vb:     Will print out zeus summary if True
 
         returns: zeus.EnsembleSampler object that contains the chains
         '''
@@ -106,7 +157,12 @@ class ZeusRunner(object):
             self._initialize_walkers()
             start = self.start
 
-        self.sampler.run_mcmc(start, nsteps)
+        if ncores > 1:
+            with Pool(ncores) as pool:
+                self.sampler.run_mcmc(start, nsteps)
+
+        else:
+            self.sampler.run_mcmc(start, nsteps)
 
         if vb is True:
             print(self.sampler.summary)

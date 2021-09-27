@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 import galsim as gs
 from galsim.angle import Angle, radians
 import matplotlib.pyplot as plt
+from numba import njit
 
 import utils
 import priors
@@ -36,10 +37,10 @@ PARS_ORDER = {
     'g2': 1,
     'theta_int': 2,
     'sini': 3,
-    'r0': 4,
-    'rscale': 5,
-    'v0': 6,
-    'vcirc': 7
+    'v0': 4,
+    'vcirc': 5,
+    'r0': 6,
+    'rscale': 7
     }
 
 def theta2pars(theta):
@@ -101,6 +102,7 @@ def log_posterior(theta, data, pars={}):
             likelihood
     '''
 
+
     logprior = log_prior(theta, pars)
 
     if logprior == -np.inf:
@@ -114,18 +116,7 @@ def log_prior(theta, pars):
     theta: Parameters sampled by zeus. Order defined in PARS_ORDER
     '''
 
-    max_size = pars['max_size']
-    max_velocity =pars['max_velocity']
-    theta_priors = {
-        'g1': priors.GaussPrior(0., 0.15),
-        'g2': priors.GaussPrior(0., 0.15),
-        'theta_int': priors.UniformPrior(0., np.pi),
-        'sini': priors.UniformPrior(0., 1.),
-        'v0': priors.GaussPrior(0, max_velocity),
-        'vcirc': priors.GaussPrior(0, max_velocity),
-        'r0': priors.UniformPrior(0, max_size),
-        'rscale': priors.UniformPrior(0, max_size),
-    }
+    theta_priors = pars['priors']
 
     logprior = 0
 
@@ -155,7 +146,7 @@ def log_likelihood(theta, datacube, pars):
     Ny = datacube.Ny
     Nspec = datacube.Nspec
 
-    lambdas = datacube.lambdas
+    lambdas = np.array(datacube.lambdas)
 
     # create grid of pixel centers in image coords
     X, Y = _build_map_grid(Nx, Ny)
@@ -168,22 +159,42 @@ def log_likelihood(theta, datacube, pars):
     # Setup SED interpolation table
     # TODO: Prefer to set this up once and pass into function,
     #       but may cause problems with numba
-    sed  = _setup_sed(pars)
+    # sed  = _setup_sed(pars)
 
     # evaluate maps at pixel centers in obs plane
     v_array = vmap('obs', X, Y, normalized=True)
+
+    # try:
+    #     print(theta)
+    #     plt.subplot(1,2,1)
+    #     plt.imshow(v_array, origin='lower')
+    #     plt.colorbar()
+    #     plt.title('obs plane')
+    #     plt.subplot(1,2,2)
+    #     plt.imshow(vmap('disk', X, Y, normalized=True, speed=True), origin='lower')
+    #     plt.colorbar()
+    #     plt.title('disk plane')
+    #     plt.tight_layout()
+    #     plt.show()
+    # except KeyboardInterrupt:
+    #     raise
 
     # TODO: Implement!
     # i_array = imap(X, Y)
     i_array = imap
 
+    # numba can't handle interp tables, so we do it ourselves
+    sed = pars['sed']
+    sed_array = np.array([sed.x, sed.y])
+
     Npix = Nx * Ny
     cov = _setup_cov_matrix(Npix, pars)
 
     return _log_likelihood(
-        datacube._data, lambdas, v_array, i_array, sed, cov
+        datacube._data, lambdas, v_array, i_array, sed_array, cov
         )
 
+@njit
 def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     '''
     datacube: The (Nx,Ny,Nspec) data array of a DataCube object,
@@ -195,7 +206,12 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
             obs plane returned by a call from a VelocityMap2D object
     imap: An (Nx,Ny) array of intensity values in the obs plane
             returned by a call from a IntensityMap object
-    sed: An interpolation table of the SED of the emission line
+    # sed: An interpolation table of the SED of the emission line
+    #      NOTE: Numba can't understand a scipy.interp1d object,
+    #            so we will do the interpolation ourselves
+    sed: A 2D numpy array with axis=0 being the lambda values of
+         a 1D interpolation table, with axis=1 being the corresponding
+         SED values
     cov: A (Nx*Ny, Nx*Ny) covariance matrix for the image pixels
 
     TODO: Need to check that the sed values are correct for this expression
@@ -207,7 +223,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
 
     # vmap is ~z in this case, as it has been normalized by c
     # approx valid for v << c
-    zfactor = 1. / (1 + vmap)
+    zfactor = 1. / (1. + vmap)
 
     # model = np.empty(datacube.shape)
 
@@ -218,13 +234,16 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     for i in range(Nslices):
         # Get mean SED vlaue in slice range
         lblue, lred = lambdas[i]
-        sed_b = sed(lblue * zfactor)
-        sed_r = sed(lred  * zfactor)
-        mean_sed = np.mean([sed_b, sed_r], axis=0)
-        # model[:,:,i] = imap * sed(lam * zfactor)
 
-        # model[:,:,i] = imap * mean_sed
-        model = imap * mean_sed
+        # sed_b = sed(lblue * zfactor)
+        # sed_r = sed(lred  * zfactor)
+        sed_b = _interp1d(sed, lblue*zfactor)
+        sed_r = _interp1d(sed, lred*zfactor)
+
+        # Numba won't let us use np.mean w/ axis=0
+        mean_sed = (sed_b + sed_r) / 2.
+        int_sed = (lred - lblue) * mean_sed
+        model = imap * int_sed
 
         diff = (datacube[:,:,i] - model).reshape(Nx*Ny)
         chi2 = diff.T.dot(cov.dot(diff))
@@ -232,6 +251,24 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
         loglike += -0.5*chi2
 
     return loglike
+
+@njit
+def _interp1d(table, values, kind='linear'):
+    '''
+    Interpolate table(value)
+
+    table: A 2D numpy array with axis=0 being the x-values and
+           axis=1 being the function evaluated at x
+    values: The values to interpolate the table on
+    '''
+
+    if kind == 'linear':
+        # just use numpy linear interpolation, as it works with numba
+        interp = np.interp(values, table[0], table[1])
+    else:
+        raise ValueError('Non-linear interpolations not yet implemented!')
+
+    return interp
 
 def _build_map_grid(Nx, Ny):
     '''
@@ -281,12 +318,17 @@ def _setup_imap(theta_pars, pars, model_name='default'):
     inc = Angle(np.arcsin(theta_pars['sini']), radians)
 
     imap = gs.InclinedExponential(
-        inc, flux=1e4, half_light_radius=3
+        inc, flux=pars['true_flux'], half_light_radius=pars['true_hlr']
         )
 
     rot_angle = Angle(theta_pars['theta_int'], radians)
     imap = imap.rotate(rot_angle)
+
     imap = imap.shear(g1=theta_pars['g1'], g2=theta_pars['g2'])
+
+    psf = pars['psf']
+
+    imap = gs.Convolve([imap, psf])
 
     Nx, Ny = 30, 30
     imap = imap.drawImage(nx=Nx, ny=Ny)
@@ -364,14 +406,14 @@ def _setup_likelihood_test(true_pars, pars, shape, lambdas):
         shape, lambdas, bandpasses, sed, true_pars, pars
         )
 
-    return datacube, vmap, true_im
+    return datacube, sed, vmap, true_im
 
 def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     Nx, Ny, Nspec = shape[0], shape[1], shape[2]
 
     # make true obs image at Halpha
-    flux = true_pars['flux']
-    hlr = true_pars['hlr'] # without pixscale set, this is in pixels
+    flux = pars['true_flux']
+    hlr = pars['true_hlr'] # without pixscale set, this is in pixels
 
     inc = Angle(np.arcsin(true_pars['sini']), radians)
 
@@ -382,6 +424,11 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     rot_angle = Angle(true_pars['theta_int'], radians)
     true = true.rotate(rot_angle)
     true = true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
+
+    # use psf set in pars
+    psf = pars['psf']
+
+    true = gs.Convolve([true, psf])
 
     true_im = true.drawImage(nx=Nx, ny=Ny)
 
@@ -394,19 +441,24 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     vmap = VelocityMap2D('default', vel_pars)
 
     X, Y = _build_map_grid(Nx, Ny)
-    V = vmap('obs', X, Y, normalized=True)
+    Vnorm = vmap('obs', X, Y, normalized=True)
+
+    # We use this one for the return map
+    V = vmap('obs', X, Y)
 
     data = np.zeros(shape)
 
     for i in range(Nspec):
-        zfactor = 1. / (1 + V)
+        zfactor = 1. / (1 + Vnorm)
 
         lblue, lred = lambdas[i]
         sed_b = sed(lblue * zfactor)
         sed_r = sed(lred  * zfactor)
-        mean_sed = np.mean([sed_b, sed_r], axis=0)
 
-        obs_im = true_im * mean_sed
+        mean_sed = (sed_b + sed_r) / 2.
+        int_sed = (lred - lblue) * mean_sed
+
+        obs_im = true_im * int_sed
 
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
         obs_im.addNoise(noise)
@@ -435,16 +487,14 @@ def main(args):
         'rscale': 20,
         'v_unit': Unit('km / s'),
         'r_unit': Unit('kpc'),
-        'flux': 1e4, # counts
-        'hlr': 3, # pixels
     }
 
     # additional args needed for prior / likelihood evaluation
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
-        'max_size': 30, # pixels
-        'max_velocity': 0.01, # for v / c
+        'true_flux': 1e4, # counts
+        'true_hlr': 3, # pixels
         'line_std': 2, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
@@ -456,6 +506,17 @@ def main(args):
         'bandpass_throughput': '0.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
+        'priors': {
+            'g1': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
+            'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
+            'theta_int': priors.UniformPrior(0., np.pi),
+            'sini': priors.UniformPrior(0., 1.),
+            'v0': priors.UniformPrior(1400, 1600),
+            'vcirc': priors.UniformPrior(175, 225),
+            'r0': priors.UniformPrior(0, 10),
+            'rscale': priors.UniformPrior(0, 10),
+        },
+        'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
     }
 
     li, le, dl = 654, 657, 1
@@ -466,7 +527,7 @@ def main(args):
     shape = (Nx, Ny, Nspec)
 
     print('Setting up test datacube and true Halpha image')
-    datacube, vmap, true_im = _setup_likelihood_test(
+    datacube, sed, vmap, true_im = _setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
 

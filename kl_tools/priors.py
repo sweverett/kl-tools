@@ -10,6 +10,9 @@ import numpy as np
 #     return 0
 
 class Prior(object):
+    '''
+    Each subclass should set a self.cen and self.peak attribute
+    '''
     @abstractmethod
     def __call__(self):
         pass
@@ -36,6 +39,10 @@ class UniformPrior(Prior):
         self.inclusive = inclusive
         self.norm = 1. / (right - left)
 
+        # There is no defined peak for a uniform dist
+        self.peak = None
+        self.cen = np.mean([left, right])
+
         return
 
     def __call__(self, x, log=False):
@@ -61,14 +68,32 @@ class UniformPrior(Prior):
                 return np.log(val)
 
 class GaussPrior(Prior):
-    def __init__(self, mu, sigma):
+    def __init__(self, mu, sigma, clip_sigmas=None):
+        '''
+        mu: mean of dist
+        sigma: std of dist
+        clip_sigmas: if set, reject samples beyond this many sigmas
+                     from mu
+        '''
+
         for p in [mu, sigma]:
             if not isinstance(p, (int, float)):
                 raise TypeError('Prior parameters must be floats or ints!')
 
+        if clip_sigmas is not None:
+            if not isinstance(clip_sigmas, (int, float)):
+                raise TypeError('clip_sigmas must be either an int or float!')
+            if clip_sigmas <= 0:
+                raise ValueError('clip_sigmas must be positive!')
+
         self.mu = mu
         self.sigma = sigma
+
         self.norm = 1. / (sigma * np.sqrt(2.*np.pi))
+        self.clip_sigmas = clip_sigmas
+
+        self.peak = mu
+        self.cen = mu
 
         return
 
@@ -76,6 +101,11 @@ class GaussPrior(Prior):
         '''
         log: Set to return the log of the probability
         '''
+
+        if self.clip_sigmas is not None:
+            if (x - self.mu) > self.clip_sigmas:
+                # sample clipped; ignore
+                return -np.inf
 
         base = -0.5 * (x - self.mu)**2 / self.sigma**2
 

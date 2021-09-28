@@ -48,10 +48,6 @@ def transform_coords(x, y, plane1, plane2, pars):
         transforms = [_disk2gal, _gal2source, _source2obs]
         step = 1
 
-        # for i in range(start, end):
-        #     transform = transforms[i]
-        #     x, y = transform(pars, x, y)
-
     # transforms in direction from obs to disk
     else:
         transforms = [_gal2disk, _source2gal, _obs2source]
@@ -135,6 +131,25 @@ def _transform_obs2source(pars):
 
     return transform
 
+def _transform_source2obs(pars):
+    '''
+    Inverse lensing transformation from source to obs plane
+
+    pars is a dict
+    (x,y) is position on obs plane
+    '''
+
+    g1, g2 = pars['g1'], pars['g2']
+
+    # Lensing transformation
+    norm = 1. / (g1**2 + g2**2 - 1.)
+    transform =  norm * np.array([
+        [-g1-1., -g2],
+        [-g2, g1-1.]
+    ])
+
+    return transform
+
 def _transform_source2gal(pars):
     '''
     Rotation by intrinsic angle
@@ -157,6 +172,25 @@ def _transform_source2gal(pars):
 
     return transform
 
+def _transform_gal2source(pars):
+    '''
+    Rotation by intrinsic angle
+
+    pars is a dict
+    (x,y) is position on source plane
+    '''
+
+    theta_int = pars['theta_int']
+
+    c, s = np.cos(theta_int), np.sin(theta_int)
+
+    transform =  np.array([
+        [c, -s],
+        [s,  c]
+    ])
+
+    return transform
+
 def _transform_gal2disk(pars):
     '''
     Account for inclination angle
@@ -170,6 +204,23 @@ def _transform_gal2disk(pars):
     transform =  np.array([
         [1., 0],
         [0, 1. / np.cos(i)]
+    ])
+
+    return transform
+
+def _transform_disk2gal(pars):
+    '''
+    Account for inclination angle
+    pars is a dict
+    (x,y) is position on galaxy plane
+    '''
+
+    sini = pars['sini']
+    i = np.arcsin(sini)
+
+    transform =  np.array([
+        [1., 0],
+        [0, np.cos(i)]
     ])
 
     return transform
@@ -218,9 +269,11 @@ def _source2obs(pars, x, y):
     returns: (x', y') in obs plane
     '''
 
-    obs2source = _transform_obs2source(pars)
+    transform = _transform_source2obs(pars)
 
-    transform = np.linalg.inv(obs2source)
+    # Old way:
+    # obs2source = _transform_obs2source(pars)
+    # transform = np.linalg.inv(obs2source)
 
     return _multiply(transform, x, y)
 
@@ -232,9 +285,11 @@ def _gal2source(pars, x, y):
     returns: (x', y') in source plane
     '''
 
-    source2gal = _transform_source2gal(pars)
+    transform = _transform_gal2source(pars)
 
-    transform = np.linalg.inv(source2gal)
+    # Old way:
+    # source2gal = _transform_source2gal(pars)
+    # transform = np.linalg.inv(source2gal)
 
     return _multiply(transform, x, y)
 
@@ -246,9 +301,11 @@ def _disk2gal(pars, x, y):
     returns: (x', y') in gal plane
     '''
 
-    gal2disk = _transform_gal2disk(pars)
+    transform = _transform_disk2gal(pars)
 
-    transform = np.linalg.inv(gal2disk)
+    # Old way:
+    # gal2disk = _transform_gal2disk(pars)
+    # transform = np.linalg.inv(gal2disk)
 
     return _multiply(transform, x, y)
 
@@ -288,12 +345,14 @@ def _eval_in_gal_plane(pars, x, y, speed=False):
     speed_map = _eval_in_disk_plane(pars, xp, yp, speed=True)
 
     if speed is True:
+
         return speed_map
 
     else:
         # euler angles which handle the vector aspect of velocity transform
         sini = pars['sini']
         phi = np.arctan2(yp, xp)
+
         return sini * np.cos(phi) * speed_map
 
 def _eval_in_disk_plane(pars, x, y, speed=False):
@@ -307,7 +366,7 @@ def _eval_in_disk_plane(pars, x, y, speed=False):
 
     # TODO: For now, this only works for the default model.
     We can make this flexible with a passed model name & builder,
-    but not necessary yet
+    but not necessary yet & causes problems with numba version
     '''
 
     if speed is False:
@@ -316,8 +375,8 @@ def _eval_in_disk_plane(pars, x, y, speed=False):
 
     r = np.sqrt(x**2 + y**2)
 
-    atan_r = np.arctan((r - pars['r0']) / pars['rscale'])
+    atan_r = np.arctan(r  / pars['rscale'])
 
-    v_r = pars['v0'] + (pars['vcirc'] / (np.pi/2.)) * atan_r
+    v_r = pars['v0'] + (2./ np.pi) * pars['vcirc'] * atan_r
 
     return v_r

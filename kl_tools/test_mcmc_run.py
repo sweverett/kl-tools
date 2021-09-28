@@ -8,19 +8,25 @@ import matplotlib.pyplot as plt
 import zeus
 
 import utils
-from mcmc import ZeusRunner
+from mcmc import KLensZeusRunner
 import priors
-from likelihood import log_posterior, _setup_likelihood_test, PARS_ORDER
+import likelihood
+from parameters import PARS_ORDER
+from likelihood import log_posterior
+from velocity import VelocityMap2D
 
 import pudb
 
 parser = ArgumentParser()
 
+parser.add_argument('nsteps', type=int,
+                    help='Number of mcmc iterations per walker')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 
 def main(args):
 
+    nsteps = args.nsteps
     show = args.show
 
     outdir = os.path.join(utils.TEST_DIR, 'test-mcmc-run')
@@ -31,12 +37,10 @@ def main(args):
         'g2': -0.025,
         'theta_int': np.pi / 3,
         'sini': 0.9,
-        'v0': 1500,
+        'v0': 1500.,
+        # 'v0': 5.,
         'vcirc': 200,
-        'r0': 5,
         'rscale': 5,
-        'v_unit': Unit('km / s'),
-        'r_unit': Unit('kpc'),
     }
 
     # additional args needed for prior / likelihood evaluation
@@ -45,40 +49,45 @@ def main(args):
         'Ny': 30, # pixels
         'true_flux': 5e4, # counts
         'true_hlr': 5, # pixels
-        'line_std': 2, # emission line SED std; nm
+        'v_unit': Unit('km / s'),
+        'r_unit': Unit('kpc'),
+        'line_std': 3, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
-        'sed_start': 600,
-        'sed_end': 700,
-        'sed_resolution': 0.5,
+        'sed_start': 650,
+        'sed_end': 660,
+        'sed_resolution': 0.1,
         'sed_unit': Unit('nm'),
         'cov_sigma': 1, # pixel counts; dummy value
         'bandpass_throughput': '0.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
-            'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
+            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2.5),
+            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2.5),
             'theta_int': priors.UniformPrior(0., np.pi),
             'sini': priors.UniformPrior(0., 1.),
-            'v0': priors.UniformPrior(1400, 1600),
-            'vcirc': priors.UniformPrior(175, 225),
-            'r0': priors.UniformPrior(0, 10),
+            # 'v0': priors.UniformPrior(0, 10),
+            # 'v0': priors.UniformPrior(1300, 1700),
+            'v0': priors.GaussPrior(1500, 75),
+            # 'vcirc': priors.UniformPrior(175, 225),
+            'vcirc': priors.GaussPrior(200, 10),
             'rscale': priors.UniformPrior(0, 10),
         },
         'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
+        'use_numba': False,
     }
 
-    # li, le, dl = 656, 657, 1
-    li, le, dl = 651, 661, 1
-    lambdas = [(l, l+dl) for l in range(li, le, dl)]
+    li, le, dl = 651, 660, 1
+    # li, le, dl = 655.9, 656.8, .1
+    lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
 
     Nx, Ny = 30, 30
     Nspec = len(lambdas)
     shape = (Nx, Ny, Nspec)
 
     print('Setting up test datacube and true Halpha image')
-    datacube, sed, vmap, true_im = _setup_likelihood_test(
+    datacube, sed, vmap, true_im = likelihood._setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
 
@@ -96,7 +105,7 @@ def main(args):
     outfile = os.path.join(outdir, 'vmap.png')
     print(f'Saving true vamp in obs plane to {outfile}')
     plt.imshow(vmap, origin='lower')
-    plt.colorbar(label='v / c')
+    plt.colorbar(label='v')
     plt.title('True velocity map in obs plane')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
     if show is True:
@@ -139,24 +148,32 @@ def main(args):
     else:
         plt.close()
 
-
     pars['sed'] = sed
 
     print('Setting up ZeusRunner object')
     ndims = len(PARS_ORDER)
     nwalkers = 2*ndims
-    args = [datacube]
-    kwargs = {'pars': pars}
-    runner = ZeusRunner(
-        nwalkers, ndims, log_posterior, args=args, kwargs=kwargs,
-        priors=pars['priors']
+
+    runner = KLensZeusRunner(
+        nwalkers, ndims, log_posterior, datacube, pars
         )
 
-    nsteps = 10000
-    runner.run(nsteps, ncores=8)
+    try:
+        runner.run(nsteps, ncores=8)
+    except Exception as e:
+        g1 = runner.start[:,0]
+        g2 = runner.start[:,1]
+        print('Starting ball for (g1, g2):')
+        print(f'g1: {g1}')
+        print(f'g2: {g2}')
+        val = np.sqrt(g1**2+g2**2)
+        print(f' |g1+ig2| = {val}')
+        raise e
+
+    runner.burn_in = nsteps // 2
 
     outfile = os.path.join(outdir, 'test-mcmc-sampler.pkl')
-    print(f'Pickling result to {outfile}')
+    print(f'Pickling sampler to {outfile}')
     with open(outfile, 'wb') as f:
         pickle.dump(runner.sampler, f)
 
@@ -167,6 +184,51 @@ def main(args):
     print(f'Pickling truth to {outfile}')
     with open(outfile, 'wb') as f:
         pickle.dump(truth, f)
+
+    outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+    print(f'Pickling runner to {outfile}')
+    with open(outfile, 'wb') as f:
+        pickle.dump(runner, f)
+
+    outfile = os.path.join(outdir, 'chains.png')
+    print(f'Saving chain plots to {outfile}')
+    reference = likelihood.pars2theta(true_pars)
+    runner.plot_chains(
+        outfile=outfile, reference=reference, show=show
+        )
+
+    outfile = os.path.join(outdir, 'corner-truth.png')
+    print(f'Saving corner plot to {outfile}')
+    title = 'Reference lines are param truth values'
+    runner.plot_corner(
+        outfile=outfile, reference=truth, title=title, show=show
+        )
+
+    runner.compute_MAP()
+    map_medians = runner.MAP_medians
+    print('(median) MAP values:')
+    for name, indx in PARS_ORDER.items():
+        m = map_medians[indx]
+        print(f'{name}: {m:.4f}')
+
+    outfile = os.path.join(outdir, 'compare-data-to-map.png')
+    print(f'Plotting MAP comparison to data in {outfile}')
+    runner.compare_MAP_to_data(outfile=outfile, show=show)
+
+    outfile = os.path.join(outdir, 'compare-vmap-to-map.png')
+    print(f'Plotting MAP comparison to velocity map in {outfile}')
+    vmap_pars = true_pars
+    vmap_pars['r_unit'] = pars['r_unit']
+    vmap_pars['v_unit'] = pars['v_unit']
+    vmap_true = VelocityMap2D('default', vmap_pars)
+    runner.compare_MAP_to_truth(vmap_true, outfile=outfile, show=show)
+
+    outfile = os.path.join(outdir, 'corner-map.png')
+    print(f'Saving corner plot compare to MAP in {outfile}')
+    title = 'Reference lines are param MAP values'
+    runner.plot_corner(
+        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
+        )
 
     return 0
 

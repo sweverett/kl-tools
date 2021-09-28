@@ -12,6 +12,7 @@ import astropy.units as units
 import utils
 import transformation as transform
 import numba_transformation as numba_transform
+from parameters import pars2theta
 
 import pudb
 
@@ -28,11 +29,11 @@ class VelocityModel(object):
     define your own model
     '''
 
-    name = 'default'
-    _model_params = ['v0', 'vcirc', 'r0', 'rscale', 'sini',
+    name = 'centered'
+    _model_params = ['v0', 'vcirc', 'rscale', 'sini',
                      'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
 
-    def __init__(self, model_pars, use_numba=False):
+    def __init__(self, model_pars):
         if not isinstance(model_pars, dict):
             t = type(model_pars)
             raise TypeError(f'model_pars must be a dict, not a {t}!')
@@ -41,13 +42,8 @@ class VelocityModel(object):
 
         self._check_model_pars()
 
-        self.use_numba = use_numba
-
-        if use_numba is True:
-            self._build_pars_array()
-        else:
-            self.pars_def = None
-            self.pars_arr = None
+        # Needed if using numba for transformations
+        self._build_pars_array()
 
         return
 
@@ -71,7 +67,8 @@ class VelocityModel(object):
         # Make sure units are astropy.unit objects
         for u in [self.pars['r_unit'], self.pars['v_unit']]:
             if (not isinstance(u, units.Unit)) and \
-               (not isinstance(u, units.CompositeUnit)):
+               (not isinstance(u, units.CompositeUnit)) and \
+               (not isinstance(u, units.IrreducibleUnit)):
                 raise TypeError('unit params must be an astropy unit class!')
 
         return
@@ -81,11 +78,7 @@ class VelocityModel(object):
         Numba requires a pars array instead of a more flexible dict
         '''
 
-        self.pars_def = numba_transform.PARS_DEF
-        self.pars_arr = np.zeros(len(self.pars_def))
-
-        for key, indx in self.pars_def.items():
-            self.pars_arr[indx] = self.pars[key]
+        self.pars_arr = pars2theta(self.pars)
 
         return
 
@@ -143,14 +136,18 @@ class VelocityMap2D(VelocityMap):
 
         return
 
-    def __call__(self, plane, x, y, speed=False, normalized=False):
+    def __call__(self, plane, x, y, speed=False, normalized=False,
+                 use_numba=False):
         '''
         Evaluate the velocity map at position (x,y) in the given plane. Note
         that position must be defined in the same plane
 
-        Can compute speed map instead if desired
-
-        Can normalize to v / c if desired
+        speed: bool
+            Set to True to return speed map instead of velocity
+        normalized: bool
+            Set to True to return velocity / c
+        use_numba: bool
+            Set to True to use numba versions of transformations
         '''
 
         if plane not in self._planes:
@@ -169,9 +166,11 @@ class VelocityMap2D(VelocityMap):
         else:
             norm = 1.
 
-        return norm * self._eval_map_in_plane(plane, x, y, speed=speed)
+        return norm * self._eval_map_in_plane(
+            plane, x, y, speed=speed, use_numba=use_numba
+            )
 
-    def _eval_map_in_plane(self, plane, x, y, speed=False):
+    def _eval_map_in_plane(self, plane, x, y, speed=False, use_numba=False):
         '''
         We use static methods defined in transformation.py
         to speed up these very common function calls
@@ -180,9 +179,12 @@ class VelocityMap2D(VelocityMap):
 
         # The input (x,y) position is transformed from the obs
         # plane to the relevant plane
-        '''
 
-        use_numba = self.model.use_numba
+        speed: bool
+            Set to True to return speed map instead of velocity
+        use_numba: bool
+            Set to True to use numba versions of transformations
+        '''
 
         # Need to use array for numba
         if use_numba is True:
@@ -230,7 +232,7 @@ class VelocityMap2D(VelocityMap):
         pars = self.model.pars
 
         if rmax is None:
-            rmax = 3. * pars['r0']
+            rmax = 5. * pars['rscale']
 
         if (x is None) or (y is None):
             if (x is not None) or (y is not None):
@@ -284,9 +286,9 @@ class VelocityMap2D(VelocityMap):
         if title is not None:
             plt.title(title)
         else:
-            r0 = pars['r0']
+            rscale = pars['rscale']
             plt.title(f'{mtype} map in {plane} plane\n' +\
-                      f'r_0 = {r0} {runit}')
+                      f'r_0 = {rscale} {runit}')
 
         if size is not None:
             plt.gcf().set_size_inches(size)
@@ -303,7 +305,7 @@ class VelocityMap2D(VelocityMap):
         return
 
     def plot_all_planes(self, plot_kwargs={}, show=True, close=True, outfile=None,
-                        size=(9, 8), speed=False, normalized=False):
+                        size=(9, 8), speed=False, normalized=False, center=True):
         if size not in plot_kwargs:
             plot_kwargs['size'] = size
 
@@ -323,7 +325,7 @@ class VelocityMap2D(VelocityMap):
         if 'rmax' in plot_kwargs:
             rmax = plot_kwargs['rmax']
         else:
-            rmax = 3. * pars['r0']
+            rmax = 5. * pars['rscale']
             plot_kwargs['rmax'] = rmax
 
         # Create square grid centered at source for all planes
@@ -353,7 +355,7 @@ class VelocityMap2D(VelocityMap):
             # Xplane, Yplane = transform.transform_coords(X,Y, plane)
             # X,Y = transform.transform_coords(Xdisk, Ydisk, 'disk', 'obs', pars)
             self.plot(plane, x=X, y=Y, show=False, close=False, speed=speed,
-                      normalized=normalized, **plot_kwargs)
+                      normalized=normalized, center=center, **plot_kwargs)
             k += 1
 
         plt.tight_layout()
@@ -376,9 +378,9 @@ class VelocityMap2D(VelocityMap):
 
         runit = pars['r_unit']
         vunit = pars['v_unit']
-        r0 = pars['r0']
+        rscale = pars['rscale']
 
-        rmax = 3. * r0
+        rmax = 5. * rscale
         Nr = 100
 
         Nx = 2*Nr + 1
@@ -410,7 +412,7 @@ class VelocityMap2D(VelocityMap):
             plt.xlabel(f'{runit}')
             plt.ylabel(f'{runit}')
             plt.title(f'{mtype} map for {plane} plane\n' +\
-                      f'r_0 = {r0} {runit}')
+                      f'r_scale = {rscale} {runit}')
 
             if center is True:
                 plt.plot(0, 0, 'r', ms=10, markeredgewidth=2, marker='x')
@@ -439,9 +441,9 @@ class VelocityMap2D(VelocityMap):
 
         runit = pars['r_unit']
         vunit = pars['v_unit']
-        r0 = pars['r0']
+        rscale = pars['rscale']
 
-        rmax = 3. * r0
+        rmax = 5. * rscale
         Nr = 100
 
         Nx = 2*Nr + 1
@@ -465,7 +467,7 @@ class VelocityMap2D(VelocityMap):
         plt.xlabel(f'{runit}')
         plt.ylabel(f'{runit}')
         plt.title('Alt speed map for disk plane\n' +\
-                      f'r_0 = {r0} {runit}')
+                      f'r_scale = {rscale} {runit}')
 
         # transform disk coords to gal plane
         # Xgal, Ygal = transform._disk2gal(pars, Xdisk, Ydisk)
@@ -479,7 +481,7 @@ class VelocityMap2D(VelocityMap):
         plt.xlabel(f'{runit}')
         plt.ylabel(f'{runit}')
         plt.title('Alt speed map for gal plane\n' +\
-                      f'r_0 = {r0} {runit}')
+                      f'r_scale = {rscale} {runit}')
 
         # transform disk coords to source plane
         # Xsource, Ysource = transform.transform_coords(Xdisk, Ydisk, 'disk', 'source', pars)
@@ -493,7 +495,7 @@ class VelocityMap2D(VelocityMap):
         plt.xlabel(f'{runit}')
         plt.ylabel(f'{runit}')
         plt.title('Alt speed map for source plane\n' +\
-                      f'r_0 = {r0} {runit}')
+                      f'r_scale = {rscale} {runit}')
 
         # transform disk coords to obs plane
         Xobs, Yobs = transform.transform_coords(Xdisk, Ydisk, 'disk', 'obs', pars)
@@ -507,7 +509,7 @@ class VelocityMap2D(VelocityMap):
         plt.xlabel(f'{runit}')
         plt.ylabel(f'{runit}')
         plt.title('Alt speed map for obs plane\n' +\
-                      f'r_0 = {r0} {runit}')
+                      f'r_scale = {rscale} {runit}')
 
         plt.gcf().set_size_inches(size)
         plt.tight_layout()
@@ -529,6 +531,7 @@ def get_model_types():
 # NOTE: This is where you must register a new model
 MODEL_TYPES = {
     'default': VelocityModel,
+    'centered': VelocityModel,
     }
 
 def build_model(name, pars, logger=None):
@@ -549,20 +552,22 @@ def main(args):
 
     show = args.show
 
-    model_name = 'default'
+    center = False
+
+    model_name = 'centered'
     model_pars = {
-        'v0': 250, # km/s
-        'vcirc': 25, # km/s
-        'r0': 10, # kpc
-        'rscale': 10, #kpc
-        'sini': np.sqrt(3)/2, # sini=0.5
+        'v0': 0, # km/s
+        'vcirc': 200, # km/s
+        # 'r0': 0, # kpc
+        'rscale': 3, #kpc
+        # 'rscale': 128./5, # pixels
+        'sini': 0.8,
         'theta_int': np.pi/3, # rad
-        # 'theta_int': np.pi/2, # rad
-        # 'theta_int': np.pi/4, # rad
-        'r_unit': units.kpc,
+        # 'r_unit': units.kpc,
+        'r_unit': units.Unit('pixel'),
         'v_unit': units.km / units.s,
-        'g1': 0.4,
-        'g2': 0.2,
+        'g1': 0.1,
+        'g2': 0.05,
         # 'g1': 0,
         # 'g2': 0
     }
@@ -572,11 +577,14 @@ def main(args):
 
     print('Making speed map transform plots')
     outfile = os.path.join(outdir, f'speedmap-transorms.png')
-    vmap.plot_map_transforms(outfile=outfile, show=show, speed=True)
+    vmap.plot_map_transforms(
+        outfile=outfile, show=show, speed=True, center=center
+        )
 
     print('Making velocity map transform plots')
     outfile = os.path.join(outdir, f'vmap-transorms.png')
-    vmap.plot_map_transforms(outfile=outfile, show=show, speed=False)
+    vmap.plot_map_transforms(
+        outfile=outfile, show=show, speed=False, center=center)
 
     # print('Making alt speed map transform plots')
     # outfile = os.path.join(outdir, f'alt-speedmap-transorms.png')
@@ -585,18 +593,24 @@ def main(args):
     for plane in ['disk', 'gal', 'source', 'obs']:
         print(f'Making plot of velocity field in {plane} plane')
         outfile = os.path.join(outdir, f'vmap-{plane}.png')
-        vmap.plot(plane, outfile=outfile, show=False)
+        vmap.plot(
+            plane, outfile=outfile, show=False, center=center
+            )
 
     print('Making combined velocity field plot')
     plot_kwargs = {}
     outfile = os.path.join(outdir, 'vmap-all.png')
-    vmap.plot_all_planes(plot_kwargs=plot_kwargs, show=show, outfile=outfile)
+    vmap.plot_all_planes(
+        plot_kwargs=plot_kwargs, show=show, outfile=outfile, center=center
+        )
 
     print('Making combined velocity field plot normalized by c')
     plot_kwargs = {}
     outfile = os.path.join(outdir, 'vmap-all-normed.png')
-    vmap.plot_all_planes(plot_kwargs=plot_kwargs, show=show, outfile=outfile,
-                         normalized=True)
+    vmap.plot_all_planes(
+        plot_kwargs=plot_kwargs, show=show, outfile=outfile,
+                         normalized=True, center=center
+        )
 
     return 0
 

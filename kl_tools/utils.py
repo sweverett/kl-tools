@@ -1,3 +1,4 @@
+import numpy as np
 import os, sys
 import yaml
 import pdb, pudb
@@ -21,6 +22,28 @@ def read_yaml(yaml_file):
     with open(yaml_file, 'r') as stream:
         return yaml.safe_load(stream)
 
+def build_map_grid(Nx, Ny):
+    '''
+    We define the grid positions as the center of pixels
+
+    For a given dimension: if # of pixels is even, then
+    image center is on pixel corners. Else, a pixel center
+    '''
+
+    # max distance in given direction
+    # even pixel counts requires offset by 0.5 pixels
+    Rx = (Nx // 2) - 0.5 * ((Nx-1) % 2)
+    Ry = (Ny // 2) - 0.5 * ((Ny-1) % 2)
+
+    x = np.arange(-Rx, Rx+1, 1)
+    y = np.arange(-Ry, Ry+1, 1)
+
+    assert len(x) == Nx
+    assert len(y) == Ny
+
+    X, Y = np.meshgrid(x, y)
+
+    return X, Y
 
 def make_dir(d):
     '''

@@ -10,6 +10,7 @@ from numba import njit
 
 import utils
 import priors
+from parameters import PARS_ORDER, theta2pars, pars2theta
 from velocity import VelocityMap2D
 from cube import DataCube
 
@@ -29,46 +30,6 @@ parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
-
-# order of sampled mcmc parameters
-# NOTE: This won't be accessible if we use numba
-PARS_ORDER = {
-    'g1': 0,
-    'g2': 1,
-    'theta_int': 2,
-    'sini': 3,
-    'v0': 4,
-    'vcirc': 5,
-    'r0': 6,
-    'rscale': 7
-    }
-
-def theta2pars(theta):
-    '''
-    uses PARS_ORDER to convert list of sampled params to dict
-    '''
-
-    assert len(theta) == len(PARS_ORDER)
-
-    pars = {}
-
-    for key, indx in PARS_ORDER.items():
-        pars[key] = theta[indx]
-
-    return pars
-
-def pars2theta(pars):
-    '''
-    convert dict of paramaeters to theta list
-    '''
-
-    # initialize w/ junk
-    theta = len(PARS_ORDER) * ['']
-
-    for name, indx in PARS_ORDER.items():
-        theta[indx] = pars[name]
-
-    return theta
 
 class DCLogLikelihood(object):
     '''
@@ -149,20 +110,21 @@ def log_likelihood(theta, datacube, pars):
     lambdas = np.array(datacube.lambdas)
 
     # create grid of pixel centers in image coords
-    X, Y = _build_map_grid(Nx, Ny)
+    X, Y = utils.build_map_grid(Nx, Ny)
 
     # create 2D velocity & intensity maps given sampled transformation
     # parameters
-    vmap = _setup_vmap(theta_pars)
+    vmap = _setup_vmap(theta_pars, pars)
     imap = _setup_imap(theta_pars, pars)
 
-    # Setup SED interpolation table
-    # TODO: Prefer to set this up once and pass into function,
-    #       but may cause problems with numba
-    # sed  = _setup_sed(pars)
-
     # evaluate maps at pixel centers in obs plane
-    v_array = vmap('obs', X, Y, normalized=True)
+    if 'use_numba' in pars:
+        use_numba = pars['use_numba']
+    else:
+        use_numba = False
+    v_array = vmap(
+        'obs', X, Y, normalized=True, use_numba=use_numba
+        )
 
     # try:
     #     print(theta)
@@ -188,6 +150,11 @@ def log_likelihood(theta, datacube, pars):
     sed_array = np.array([sed.x, sed.y])
 
     Npix = Nx * Ny
+
+    # sigma = pars['cov_sigma']
+    # cov = _setup_cov_matrix(Npix, sigma)
+
+    # NOTE: This doesn't work with numba
     cov = _setup_cov_matrix(Npix, pars)
 
     return _log_likelihood(
@@ -206,9 +173,6 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
             obs plane returned by a call from a VelocityMap2D object
     imap: An (Nx,Ny) array of intensity values in the obs plane
             returned by a call from a IntensityMap object
-    # sed: An interpolation table of the SED of the emission line
-    #      NOTE: Numba can't understand a scipy.interp1d object,
-    #            so we will do the interpolation ourselves
     sed: A 2D numpy array with axis=0 being the lambda values of
          a 1D interpolation table, with axis=1 being the corresponding
          SED values
@@ -232,18 +196,10 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     # can figure out how to remove this for loop later
     # will be fast enough with numba anyway
     for i in range(Nslices):
-        # Get mean SED vlaue in slice range
-        lblue, lred = lambdas[i]
 
-        # sed_b = sed(lblue * zfactor)
-        # sed_r = sed(lred  * zfactor)
-        sed_b = _interp1d(sed, lblue*zfactor)
-        sed_r = _interp1d(sed, lred*zfactor)
-
-        # Numba won't let us use np.mean w/ axis=0
-        mean_sed = (sed_b + sed_r) / 2.
-        int_sed = (lred - lblue) * mean_sed
-        model = imap * int_sed
+        model = _compute_slice_model(
+            lambdas[i], sed, zfactor, imap
+            )
 
         diff = (datacube[:,:,i] - model).reshape(Nx*Ny)
         chi2 = diff.T.dot(cov.dot(diff))
@@ -251,6 +207,39 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
         loglike += -0.5*chi2
 
     return loglike
+
+@njit
+def _compute_slice_model(lambdas, sed, zfactor, imap):
+    '''
+    lambdas: tuple
+        The wavelength tuple (lambda_blue, lambda_red) for a
+        given slice
+    sed: np.ndarray
+        A 2D numpy array with axis=0 being the lambda values of
+        a 1D interpolation table, with axis=1 being the corresponding
+        SED values
+    zfactor: np.ndarray
+        A 2D numpy array corresponding to the (normalized by c) velocity
+        map at each pixel
+    imap: np.ndarray
+        A 2D numpy array corresponding to the source intensity map
+        at the emission line
+    '''
+
+    lblue, lred = lambdas[0], lambdas[1]
+
+    # Get mean SED vlaue in slice range
+    # NOTE: We do it this way as numba won't allow
+    #       interp1d objects
+    sed_b = _interp1d(sed, lblue*zfactor)
+    sed_r = _interp1d(sed, lred*zfactor)
+
+    # Numba won't let us use np.mean w/ axis=0
+    mean_sed = (sed_b + sed_r) / 2.
+    int_sed = (lred - lblue) * mean_sed
+    model = imap * int_sed
+
+    return model
 
 @njit
 def _interp1d(table, values, kind='linear'):
@@ -270,39 +259,24 @@ def _interp1d(table, values, kind='linear'):
 
     return interp
 
-def _build_map_grid(Nx, Ny):
+def _setup_vmap(theta_pars, pars, model_name='default'):
     '''
-    We define the grid positions as the center of pixels
-
-    For a given dimension: if # of pixels is even, then
-    image center is on pixel corners. Else, a pixel center
-    '''
-
-    # max distance in given direction
-    # even pixel counts requires offset by 0.5 pixels
-    Rx = (Nx // 2) - 0.5 * ((Nx-1) % 2)
-    Ry = (Ny // 2) - 0.5 * ((Ny-1) % 2)
-
-    x = np.arange(-Rx, Rx+1, 1)
-    y = np.arange(-Ry, Ry+1, 1)
-
-    assert len(x) == Nx
-    assert len(y) == Ny
-
-    X, Y = np.meshgrid(x, y)
-
-    return X, Y
-
-def _setup_vmap(pars, model_name='default', runit='kpc', vunit='km/s'):
-    '''
-    pars is already a dict of the sampled
-    parameters for both the velocity map
-    and transformation matrices
+    theta_pars: dict
+        A dict of the sampled mcmc params for both the velocity
+        map and the tranformation matrices
+    pars: dict
+        A dict of anything else needed to compute the posterior
+    model_name: str
+        The model name to use when constructing the velocity map
     '''
 
-    vmodel = pars
-    vmodel['r_unit'] = Unit(runit)
-    vmodel['v_unit'] = Unit(vunit)
+    vmodel = theta_pars
+
+    for name in ['r_unit', 'v_unit']:
+        if name in pars:
+            vmodel[name] = Unit(pars[name])
+        else:
+            raise AttributeError(f'pars must have a value for {name}!')
 
     return VelocityMap2D(model_name, vmodel)
 
@@ -369,8 +343,10 @@ def _setup_cov_matrix(Npix, pars):
     '''
     Build covariance matrix for slice images
 
-    Npix: number of pixels
-    pars: dict containing parameters needed to build cov matrix
+    Npix: int
+        number of pixels
+    pars: dict
+        dictionary containing parameters needed to build cov matrix
 
     # TODO: For now, a single cov matrix for each slice. However, this could be
             generalized to a list of cov matrices
@@ -380,7 +356,7 @@ def _setup_cov_matrix(Npix, pars):
     #       and uniform for a given slice
     sigma = pars['cov_sigma']
 
-    cov = sigma * np.identity(Npix)
+    cov = sigma**2 * np.identity(Npix)
 
     return cov
 
@@ -435,12 +411,12 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     vel_pars = {}
     for name in PARS_ORDER.keys():
         vel_pars[name] = true_pars[name]
-    vel_pars['v_unit'] = true_pars['v_unit']
-    vel_pars['r_unit'] = true_pars['r_unit']
+    vel_pars['v_unit'] = pars['v_unit']
+    vel_pars['r_unit'] = pars['r_unit']
 
     vmap = VelocityMap2D('default', vel_pars)
 
-    X, Y = _build_map_grid(Nx, Ny)
+    X, Y = utils.build_map_grid(Nx, Ny)
     Vnorm = vmap('obs', X, Y, normalized=True)
 
     # We use this one for the return map
@@ -448,17 +424,27 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
 
     data = np.zeros(shape)
 
+    # numba won't allow a scipy.interp1D object
+    sed_array = np.array([sed.x, sed.y])
+
     for i in range(Nspec):
         zfactor = 1. / (1 + Vnorm)
 
-        lblue, lred = lambdas[i]
-        sed_b = sed(lblue * zfactor)
-        sed_r = sed(lred  * zfactor)
+        # TODO: add _model call!!
+        obs_array = _compute_slice_model(
+            lambdas[i], sed_array, zfactor, true_im.array
+            )
 
-        mean_sed = (sed_b + sed_r) / 2.
-        int_sed = (lred - lblue) * mean_sed
+        obs_im = gs.Image(obs_array)
 
-        obs_im = true_im * int_sed
+        # lblue, lred = lambdas[i]
+        # sed_b = sed(lblue * zfactor)
+        # sed_r = sed(lred  * zfactor)
+
+        # mean_sed = (sed_b + sed_r) / 2.
+        # int_sed = (lred - lblue) * mean_sed
+
+        # obs_im = true_im * int_sed
 
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
         obs_im.addNoise(noise)
@@ -483,10 +469,7 @@ def main(args):
         'theta_int': np.pi / 3,
         'v0': 250,
         'vcirc': 25,
-        'r0': 10,
         'rscale': 20,
-        'v_unit': Unit('km / s'),
-        'r_unit': Unit('kpc'),
     }
 
     # additional args needed for prior / likelihood evaluation
@@ -495,6 +478,8 @@ def main(args):
         'Ny': 30, # pixels
         'true_flux': 1e4, # counts
         'true_hlr': 3, # pixels
+        'v_unit': Unit('km / s'),
+        'r_unit': Unit('kpc'),
         'line_std': 2, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
@@ -513,7 +498,6 @@ def main(args):
             'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(1400, 1600),
             'vcirc': priors.UniformPrior(175, 225),
-            'r0': priors.UniformPrior(0, 10),
             'rscale': priors.UniformPrior(0, 10),
         },
         'psf': gs.Gaussian(fwhm=3), # fwhm in pixels

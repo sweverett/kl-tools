@@ -28,17 +28,6 @@ the pars list. This is a dict in no_numba_transformation.py to be flexible on
 models.
 '''
 
-PARS_DEF = {
-    'g1': 0,
-    'g2': 1,
-    'theta_int': 2,
-    'sini': 3,
-    'r0': 4,
-    'rscale': 5,
-    'v0': 6,
-    'vcirc': 7
-    }
-
 @njit
 def transform_coords(x, y, plane1, plane2, pars):
     '''
@@ -85,19 +74,25 @@ def transform_coords(x, y, plane1, plane2, pars):
     return x, y
 
 @njit
-def _multiply(transform, x, y):
+def _multiply(transform, pos):
     '''
     transform: a (2x2) coordinate transformation matrix
-    x: np array of x position
-    y: np array of y position
+    pos: np.ndarray [x, y]
+        x: np.array of x position
+        y: np.array of y position
 
-    returns: (x', y')
+    returns: np.ndarray [x', y']
     '''
 
     # Can't just do a matrix multiplication because we can't assume
     # structure of pos; e.g. it might be a meshgrid array
 
+    x = pos[0]
+    y = pos[1]
+
     assert x.shape == y.shape
+
+    new_pos = np.empty(pos.shape)
 
     # x,y are vectors
     if len(x.shape) == 1:
@@ -108,37 +103,40 @@ def _multiply(transform, x, y):
 
         # numba doesn't seem to work with matmul
         # out = np.matmul(transform, pos)
-        out = np.dot(transform, pos)
-        xp, yp = out[0], out[1]
+        # new_pos[0,1] = np.dot(transform, pos)
+        # xp, yp = out[0], out[1]
 
     # x,y are matrices
     elif len(x.shape) == 2:
         # gotta do it the slow way
         # out = np.zeros((2, x.shape[0], x.shape[1]))
-        xp = np.zeros(x.shape)
-        yp = np.zeros(y.shape)
+        # xp = np.empty(x.shape)
+        # yp = np.empty(y.shape)
+
+        new_pos = np.zeros(pos.shape)
 
         N1, N2 = x.shape
         for i in range(N1):
             # have to do it this way for numba
             # pos = np.array([x[i,:], y[i,:]])
-            pos = np.empty((2, len(x)))
-            pos[0] = x[i,:]
-            pos[1] = y[i,:]
+            # pos = np.empty((2, len(x)))
+            # pos[0] = x[i,:]
+            # pos[1] = y[i,:]
+
+            pos_slice = pos[i,:]
 
             # numba doesn't seem to work with matmul
             # out = np.matmul(transform, pos)
-            out = np.dot(transform, pos)
-            xp[i,:] = out[0]
-            yp[i,:] = out[1]
+            new_pos[i,:] = np.dot(transform, pos_slice)
+            # xp[i,:] = out[0]
+            # yp[i,:] = out[1]
 
     else:
         raise ValueError('Plane transformations are only implemented ' +\
                          'for scalars, vectors, and arrays!')
-        # raise ValueError('Plane transformations are not yet implemented ' +\
-        #                  f'for input positions of shape {x.shape}!')
 
-    return xp, yp
+    # return xp, yp
+    return new_pos
 
 # The following transformation definitions require basic knowledge
 # of the source shear, intrinsic orientation, and profile inclination
@@ -340,12 +338,15 @@ def _eval_in_gal_plane(pars, x, y, speed=False):
     speed_map = _eval_in_disk_plane(pars, xp, yp, speed=True)
 
     if speed is True:
+
         return speed_map
 
     else:
-        # euler angle which handles vector aspect of velocity transform
+        # euler angles which handle the vector aspect of velocity transform
+        sini = pars[3]
         phi = np.arctan2(yp, xp)
-        return np.cos(phi) * speed_map
+
+        return sini * np.cos(phi) * speed_map
 
 @njit
 def _eval_in_disk_plane(pars, x, y, speed=False):
@@ -369,14 +370,34 @@ def _eval_in_disk_plane(pars, x, y, speed=False):
     r = np.sqrt(x**2 + y**2)
 
     # Grab relevant pars
-    # See PARS_DEF
-    r0 = pars[4]
-    rscale = pars[5]
-    v0 = pars[6]
-    vcirc = pars[7]
+    # See PARS_ORDER
+    v0 = pars[4]
+    vcirc = pars[5]
+    rscale = pars[6]
 
-    atan_r = np.arctan((r - r0) / rscale)
+    atan_r = np.arctan(r  / rscale)
 
-    v_r = v0 + (vcirc / (np.pi/2.)) * atan_r
+    v_r = v0 + (2. / np.pi) * vcirc * atan_r
 
     return v_r
+
+def main():
+    print('Starting multiply test')
+    x = np.random.randn(10, 10)
+    y = np.random.randn(10, 10)
+    pos = np.array([x, y])
+
+    pudb.set_trace()
+
+    transform = np.array([
+        [1., 0.],
+        [0., 1.]
+        ])
+    xp, yp = _multiply(transform, pos)
+
+    print('Done!')
+
+    return
+
+if __name__ == '__main__':
+    main()

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import zeus
 
 import utils
-from mcmc import KLensZeusRunner
+from mcmc import KLensZeusRunner, KLensEmceeRunner
 import priors
 import likelihood
 from parameters import PARS_ORDER
@@ -21,12 +21,15 @@ parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
+parser.add_argument('--sampler', type=str, choices=['zeus', 'emcee'],
+                    help='Which sampler to use for mcmc')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 
 def main(args):
 
     nsteps = args.nsteps
+    sampler = args.sampler
     show = args.show
 
     outdir = os.path.join(utils.TEST_DIR, 'test-mcmc-run')
@@ -36,56 +39,58 @@ def main(args):
         'g1': 0.05,
         'g2': -0.025,
         'theta_int': np.pi / 3,
-        'sini': 0.9,
-        'v0': 1500.,
-        # 'v0': 5.,
+        'sini': 0.7,
+        'v0': 10.,
         'vcirc': 200,
         'rscale': 5,
     }
 
     # additional args needed for prior / likelihood evaluation
+    halpha = 656.28 # nm
+    R = 5000.
+    z = 0.3
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
-        'true_flux': 5e4, # counts
+        'true_flux': 1e5, # counts
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),
         'r_unit': Unit('kpc'),
-        'line_std': 3, # emission line SED std; nm
+        # 'z': z,
+        # 'spec_resolution': R,
+        'line_std': 0.17,
+        # 'line_std': (halpha+z) / R, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
         'sed_start': 650,
         'sed_end': 660,
-        'sed_resolution': 0.1,
+        'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 1, # pixel counts; dummy value
-        'bandpass_throughput': '0.2',
+        'cov_sigma': 0.5, # pixel counts; dummy value
+        'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2.5),
-            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2.5),
+            'g1': priors.GaussPrior(0., 0.1),# clip_sigmas=2.5),
+            'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=2.5),
             'theta_int': priors.UniformPrior(0., np.pi),
             'sini': priors.UniformPrior(0., 1.),
-            # 'v0': priors.UniformPrior(0, 10),
-            # 'v0': priors.UniformPrior(1300, 1700),
-            'v0': priors.GaussPrior(1500, 75),
-            # 'vcirc': priors.UniformPrior(175, 225),
+            'v0': priors.UniformPrior(0, 20),
             'vcirc': priors.GaussPrior(200, 10),
             'rscale': priors.UniformPrior(0, 10),
         },
-        'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
+        # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
     }
 
-    li, le, dl = 651, 660, 1
+    # li, le, dl = 655.5, 657, 0.1
+    li, le, dl = 655.8, 656.8, 0.1
     # li, le, dl = 655.9, 656.8, .1
     lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
 
     Nx, Ny = 30, 30
     Nspec = len(lambdas)
     shape = (Nx, Ny, Nspec)
-
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = likelihood._setup_likelihood_test(
         true_pars, pars, shape, lambdas
@@ -119,28 +124,29 @@ def main(args):
 
     outfile = os.path.join(outdir, 'datacube-slices.png')
     print(f'Saving example datacube slice images to {outfile}')
-    if Nspec < 10:
-        sqrt = int(np.ceil(np.sqrt(Nspec)))
-        slice_indices = range(Nspec)
+    # if Nspec < 10:
+    sqrt = int(np.ceil(np.sqrt(Nspec)))
+    slice_indices = range(Nspec)
 
-    else:
-        sqrt = 3
-        slice_indices = np.sort(
-            np.random.choice(
-                range(Nspec),
-                size=sqrt**2,
-                replace=False
-                )
-            )
+    # else:
+    #     sqrt = 3
+    #     slice_indices = np.sort(
+    #         np.random.choice(
+    #             range(Nspec),
+    #             size=sqrt**2,
+    #             replace=False
+    #             )
+    #         )
 
     k = 1
     for i in slice_indices:
         plt.subplot(sqrt, sqrt, k)
         plt.imshow(datacube.slices[i]._data, origin='lower')
         plt.colorbar()
-        plt.title(f'Test datacube slice\n lambda={lambdas[i]}')
+        l, r = lambdas[i]
+        plt.title(f'lambda=({l:.1f}, {r:.1f})')
         k += 1
-    plt.gcf().set_size_inches(9,9)
+    plt.gcf().set_size_inches(12,12)
     plt.tight_layout()
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
     if show is True:
@@ -150,14 +156,24 @@ def main(args):
 
     pars['sed'] = sed
 
-    print('Setting up ZeusRunner object')
-    ndims = len(PARS_ORDER)
-    nwalkers = 2*ndims
+    if sampler == 'zeus':
+        print('Setting up KLensZeusRunner')
+        ndims = len(PARS_ORDER)
+        nwalkers = 2*ndims
+        runner = KLensZeusRunner(
+            nwalkers, ndims, log_posterior, datacube, pars
+            )
 
-    runner = KLensZeusRunner(
-        nwalkers, ndims, log_posterior, datacube, pars
-        )
+    elif sampler == 'emcee':
+        print('Setting up KLensEmceeRunner')
+        ndims = len(PARS_ORDER)
+        nwalkers = 2*ndims
 
+        runner = KLensEmceeRunner(
+            nwalkers, ndims, log_posterior, datacube, pars
+            )
+
+    print('Starting mcmc run')
     try:
         runner.run(nsteps, ncores=8)
     except Exception as e:

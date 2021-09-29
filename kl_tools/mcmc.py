@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from corner import corner
 import zeus
+import emcee
 
 import utils
 import priors
@@ -481,7 +482,8 @@ class KLensZeusRunner(ZeusRunner):
             im = ax.imshow(data, origin='lower')
             if i == 0:
                 ax.set_ylabel('Data')
-            ax.set_title(f'{lambdas[i]} nm')
+            l, r = lambdas[i]
+            ax.set_title(f'({l:.1f}, {r:.1f}) nm')
             divider = make_axes_locatable(ax)
             cax = divider.append_axes('right', size='5%', pad=0.05)
             plt.colorbar(im, cax=cax)
@@ -534,6 +536,52 @@ class KLensZeusRunner(ZeusRunner):
             plt.close()
 
         return
+
+class KLensEmceeRunner(KLensZeusRunner):
+
+    def _initialize_sampler(self):
+        self.sampler = emcee.EnsembleSampler(
+            self.nwalkers, self.ndim, self.pfunc,
+            args=self.args, kwargs=self.kwargs
+            )
+        return
+
+    def run(self, nsteps, ncores=1, start=None, return_sampler=False,
+            vb=True):
+        '''
+        nsteps: Number of MCMC steps / iterations
+        ncores: Number of CPU cores to use
+        start:  Can provide starting walker positions if you don't
+                want to use the default initialization
+        return_sampler: Set to True if you want the sampler returned
+        vb:     Will print out zeus summary if True
+
+        returns: zeus.EnsembleSampler object that contains the chains
+        '''
+
+        if start is None:
+            self._initialize_walkers()
+            start = self.start
+
+        if vb is True:
+            progress = True
+        else:
+            progress = False
+
+        if ncores > 1:
+            with Pool(ncores) as pool:
+                self.sampler.run_mcmc(start, nsteps, progress=progress)
+
+        else:
+            self.sampler.run_mcmc(start, nsteps, progress=progress)
+
+        self.has_run = True
+
+        if return_sampler is True:
+            return self.sampler
+        else:
+            return
+
 
 def main(args):
 

@@ -34,6 +34,9 @@ parser.add_argument('--test', action='store_true', default=False,
 class DCLogLikelihood(object):
     '''
     Base class to evaluate a datacube log-likelihood.
+
+    TODO: Either fully implement or clean up. For now, not
+          all that useful when using numba
     '''
 
     def __init__(self):
@@ -298,11 +301,19 @@ def _setup_imap(theta_pars, pars, model_name='default'):
     rot_angle = Angle(theta_pars['theta_int'], radians)
     imap = imap.rotate(rot_angle)
 
-    imap = imap.shear(g1=theta_pars['g1'], g2=theta_pars['g2'])
+    # TODO: still don't understand why this sometimes randomly fails
+    try:
+        g1 = theta_pars['g1']
+        g2 = theta_pars['g2']
+        imap = imap.shear(g1=g1, g2=g2)
+    except Exception as e:
+        print('imap generation failed!')
+        print(f'Shear values used: g=({g1}, {g2})')
+        raise e
 
-    psf = pars['psf']
-
-    imap = gs.Convolve([imap, psf])
+    if 'psf' in pars:
+        psf = pars['psf']
+        imap = gs.Convolve([imap, psf])
 
     Nx, Ny = 30, 30
     imap = imap.drawImage(nx=Nx, ny=Ny)
@@ -402,9 +413,9 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     true = true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
 
     # use psf set in pars
-    psf = pars['psf']
-
-    true = gs.Convolve([true, psf])
+    if 'psf' in pars:
+        psf = pars['psf']
+        true = gs.Convolve([true, psf])
 
     true_im = true.drawImage(nx=Nx, ny=Ny)
 
@@ -430,21 +441,11 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     for i in range(Nspec):
         zfactor = 1. / (1 + Vnorm)
 
-        # TODO: add _model call!!
         obs_array = _compute_slice_model(
             lambdas[i], sed_array, zfactor, true_im.array
             )
 
         obs_im = gs.Image(obs_array)
-
-        # lblue, lred = lambdas[i]
-        # sed_b = sed(lblue * zfactor)
-        # sed_r = sed(lred  * zfactor)
-
-        # mean_sed = (sed_b + sed_r) / 2.
-        # int_sed = (lred - lblue) * mean_sed
-
-        # obs_im = true_im * int_sed
 
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
         obs_im.addNoise(noise)

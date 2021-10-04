@@ -1,5 +1,6 @@
 import numpy as np
 import os
+from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 import astropy.constants as const
@@ -10,6 +11,7 @@ import astropy.units as units
 # from . import transformation as transform
 # from . import numba_transformation as numba_transform
 import utils
+from transformation import TransformableImage
 import transformation as transform
 import numba_transformation as numba_transform
 from parameters import pars2theta
@@ -82,20 +84,16 @@ class VelocityModel(object):
 
         return
 
-class VelocityMap(object):
+    def get_transform_pars(self):
+        pars = {}
+        for name in ['g1', 'g2', 'sini', 'theta_int']:
+            pars[name] = self.pars[name]
+
+        return pars
+
+class VelocityMap(TransformableImage):
     '''
     Base class for a velocity map
-    '''
-
-    def __init__(self, model_name, model_pars):
-        self.model_name = model_name
-        self.model = build_model(model_name, model_pars)
-
-        return
-
-class VelocityMap2D(VelocityMap):
-    '''
-    Extra features for a 2D map
 
     It is helpful to compute various things in different coordinate
     planes. The available ones are defined as follows:
@@ -112,8 +110,6 @@ class VelocityMap2D(VelocityMap):
     obs:  Observed image plane. Sheared version of source plane
     '''
 
-    _planes = ['disk', 'gal', 'source', 'obs']
-
     def __init__(self, model_name, model_pars):
         '''
         model_name: The name of the velocity to model.
@@ -121,18 +117,12 @@ class VelocityMap2D(VelocityMap):
                     Must be a registered velocity model.
         '''
 
-        super(VelocityMap2D, self).__init__(model_name, model_pars)
 
-        self._setup_transformations()
+        self.model_name = model_name
+        self.model = build_model(model_name, model_pars)
 
-        return
-
-    def _setup_transformations(self):
-        pars = self.model.pars
-
-        self.obs2source = transform._transform_obs2source(pars)
-        self.source2gal = transform._transform_source2gal(pars)
-        self.gal2disk = transform._transform_gal2disk(pars)
+        transform_pars = self.model.get_transform_pars()
+        super(VelocityMap, self).__init__(transform_pars)
 
         return
 
@@ -150,16 +140,20 @@ class VelocityMap2D(VelocityMap):
             Set to True to use numba versions of transformations
         '''
 
-        if plane not in self._planes:
-            raise ValueError(f'{plane} not a valid image plane!')
+        super(VelocityMap, self).__call__(
+            plane, x, y, use_numba=use_numba
+            )
 
-        if not isinstance(x, np.ndarray):
-            assert not isinstance(y, np.ndarray)
-            x = np.array(x)
-            y = np.array(y)
+        # if plane not in self._planes:
+        #     raise ValueError(f'{plane} not a valid image plane!')
 
-        if x.shape != y.shape:
-            raise Exception('x and y arrays must be the same shape!')
+        # if not isinstance(x, np.ndarray):
+        #     assert not isinstance(y, np.ndarray)
+        #     x = np.array(x)
+        #     y = np.array(y)
+
+        # if x.shape != y.shape:
+        #     raise Exception('x and y arrays must be the same shape!')
 
         if normalized is True:
             norm = 1. / const.c.to(self.model.pars['v_unit']).value
@@ -572,8 +566,8 @@ def main(args):
         # 'g2': 0
     }
 
-    print('Creating VelocityMap2D from params')
-    vmap = VelocityMap2D(model_name, model_pars)
+    print('Creating VelocityMap from params')
+    vmap = VelocityMap(model_name, model_pars)
 
     print('Making speed map transform plots')
     outfile = os.path.join(outdir, f'speedmap-transorms.png')

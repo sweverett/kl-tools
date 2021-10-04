@@ -103,7 +103,7 @@ class GaussPrior(Prior):
         '''
 
         if self.clip_sigmas is not None:
-            if (x - self.mu) > self.clip_sigmas:
+            if abs(x - self.mu) > self.clip_sigmas:
                 # sample clipped; ignore
                 return -np.inf
 

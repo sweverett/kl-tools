@@ -22,7 +22,10 @@ parser = ArgumentParser()
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
 parser.add_argument('--sampler', type=str, choices=['zeus', 'emcee'],
+                    default='emcee',
                     help='Which sampler to use for mcmc')
+parser.add_argument('--ncores', type=int, default=1,
+                    help='Number of CPUs to use')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 
@@ -30,6 +33,7 @@ def main(args):
 
     nsteps = args.nsteps
     sampler = args.sampler
+    ncores = args.ncores
     show = args.show
 
     outdir = os.path.join(utils.TEST_DIR, 'test-mcmc-run')
@@ -39,7 +43,7 @@ def main(args):
         'g1': 0.05,
         'g2': -0.025,
         'theta_int': np.pi / 3,
-        'sini': 0.7,
+        'sini': 0.8,
         'v0': 10.,
         'vcirc': 200,
         'rscale': 5,
@@ -56,28 +60,37 @@ def main(args):
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),
         'r_unit': Unit('kpc'),
-        # 'z': z,
-        # 'spec_resolution': R,
-        'line_std': 0.17,
-        # 'line_std': (halpha+z) / R, # emission line SED std; nm
+        'z': z,
+        'spec_resolution': R,
+        # 'line_std': 0.17,
+        'line_std': halpha * (1.+z) / R, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
         'sed_start': 650,
         'sed_end': 660,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 0.5, # pixel counts; dummy value
+        'cov_sigma': 3, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1),# clip_sigmas=2.5),
-            'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=2.5),
+            'g1': priors.GaussPrior(0., 0.1),#, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.1),#, clip_sigmas=2),
             'theta_int': priors.UniformPrior(0., np.pi),
+            # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
             'sini': priors.UniformPrior(0., 1.),
+            # 'sini': priors.GaussPrior()
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 10),
+            # 'vcirc': priors.GaussPrior(200, 10),#, clip_sigmas=2),
+            'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
+        },
+        'intensity': {
+            # For this test, use truth info
+            'type': 'inclined_exp',
+            'flux': 1e5, # counts
+            'hlr': 5, # pixels
         },
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
@@ -92,7 +105,7 @@ def main(args):
     Nspec = len(lambdas)
     shape = (Nx, Ny, Nspec)
     print('Setting up test datacube and true Halpha image')
-    datacube, sed, vmap, true_im = likelihood._setup_likelihood_test(
+    datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
 
@@ -175,7 +188,7 @@ def main(args):
 
     print('Starting mcmc run')
     try:
-        runner.run(nsteps, ncores=8)
+        runner.run(nsteps, ncores=ncores)
     except Exception as e:
         g1 = runner.start[:,0]
         g2 = runner.start[:,1]
@@ -188,10 +201,19 @@ def main(args):
 
     runner.burn_in = nsteps // 2
 
-    outfile = os.path.join(outdir, 'test-mcmc-sampler.pkl')
-    print(f'Pickling sampler to {outfile}')
-    with open(outfile, 'wb') as f:
-        pickle.dump(runner.sampler, f)
+    if (ncores > 1) and (sampler == 'zeus'):
+        # The sampler isn't pickleable for some reason in this scenario
+        pass
+    else:
+        outfile = os.path.join(outdir, 'test-mcmc-sampler.pkl')
+        print(f'Pickling sampler to {outfile}')
+        with open(outfile, 'wb') as f:
+            pickle.dump(runner.sampler, f)
+
+        outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+        print(f'Pickling runner to {outfile}')
+        with open(outfile, 'wb') as f:
+            pickle.dump(runner, f)
 
     truth = np.zeros(len(PARS_ORDER))
     for name, indx in PARS_ORDER.items():
@@ -200,11 +222,6 @@ def main(args):
     print(f'Pickling truth to {outfile}')
     with open(outfile, 'wb') as f:
         pickle.dump(truth, f)
-
-    outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
-    print(f'Pickling runner to {outfile}')
-    with open(outfile, 'wb') as f:
-        pickle.dump(runner, f)
 
     outfile = os.path.join(outdir, 'chains.png')
     print(f'Saving chain plots to {outfile}')

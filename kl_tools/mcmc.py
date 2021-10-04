@@ -65,7 +65,6 @@ class ZeusRunner(object):
         self.kwargs = kwargs
 
         self._initialize_walkers()
-        self._initialize_sampler()
 
         self.has_run = False
         self.has_MAP = False
@@ -79,7 +78,7 @@ class ZeusRunner(object):
 
         return
 
-    def _initialize_walkers(self, scale=0.20):
+    def _initialize_walkers(self, scale=0.1):
         ''''
         TODO: Not obvious that this scale factor is reasonable
         for our problem, should experiment & test further
@@ -144,17 +143,21 @@ class ZeusRunner(object):
             outliers = outliers | \
                         ((base + ball) < left) | \
                         ((base + ball) > right)
+        elif isinstance(prior, priors.GaussPrior):
+            if prior.clip_sigmas is not None:
+                outliers = outliers | \
+                    (abs(base + ball - prior.mu) > prior.clip_sigmas)
         Noutliers = len(np.where(outliers == True)[0])
 
         return outliers, Noutliers
 
-    def _initialize_sampler(self):
-        self.sampler = zeus.EnsembleSampler(
+    def _initialize_sampler(self, pool=None):
+        sampler = zeus.EnsembleSampler(
             self.nwalkers, self.ndim, self.pfunc,
-            args=self.args, kwargs=self.kwargs
+            args=self.args, kwargs=self.kwargs, pool=pool
             )
 
-        return
+        return sampler
 
     def run(self, nsteps, ncores=1, start=None, return_sampler=False,
             vb=True):
@@ -174,11 +177,16 @@ class ZeusRunner(object):
             start = self.start
 
         if ncores > 1:
+            os.environ['OMP_NUM_THREADS'] = '1'
             with Pool(ncores) as pool:
-                self.sampler.run_mcmc(start, nsteps)
+                sampler = self._initialize_sampler(pool=pool)
+                sampler.run_mcmc(start, nsteps)
 
         else:
-            self.sampler.run_mcmc(start, nsteps)
+            sampler = self._initialize_sampler()
+            sampler.run_mcmc(start, nsteps)
+
+        self.sampler = sampler
 
         if vb is True:
             print(self.sampler.summary)
@@ -388,11 +396,12 @@ class KLensZeusRunner(ZeusRunner):
         theta_pars = likelihood.theta2pars(self.MAP_medians)
 
         # Now compute the corresonding (median) MAP velocity map
-        vel_pars = theta_pars.copy()
-        vel_pars['r_unit'] = self.pars['r_unit']
-        vel_pars['v_unit'] = self.pars['v_unit']
+        # vel_pars = theta_pars.copy()
+        # vel_pars['r_unit'] = self.pars['r_unit']
+        # vel_pars['v_unit'] = self.pars['v_unit']
 
-        self.MAP_vmap = VelocityMap2D('default', vel_pars)
+        # self.MAP_vmap = VelocityMap2D('default', vel_pars)
+        self.MAP_vmap = likelihood._setup_imap(theta_pars, self.pars)
 
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
@@ -469,8 +478,13 @@ class KLensZeusRunner(ZeusRunner):
         Ny = datacube.Ny
         X, Y = utils.build_map_grid(Nx, Ny)
 
+        # Compute zfactor from MAP velocity map
         V = vmap('obs', X, Y, normalized=True)
         zfactor = 1. / (1. + V)
+
+        # compute intensity map from MAP
+        # TODO: Eventually this should be called like vmap
+        intensity = imap.render(thet)
 
         Nspec = datacube.Nspec
 
@@ -491,7 +505,7 @@ class KLensZeusRunner(ZeusRunner):
             # second, model
             ax = axs[1,i]
             model = likelihood._compute_slice_model(
-                lambdas[i], sed_array, zfactor, imap
+                lambdas[i], sed_array, zfactor, intensity
                 )
             im = ax.imshow(model, origin='lower')
             if i == 0:
@@ -539,12 +553,13 @@ class KLensZeusRunner(ZeusRunner):
 
 class KLensEmceeRunner(KLensZeusRunner):
 
-    def _initialize_sampler(self):
-        self.sampler = emcee.EnsembleSampler(
+    def _initialize_sampler(self, pool=None):
+        sampler = emcee.EnsembleSampler(
             self.nwalkers, self.ndim, self.pfunc,
-            args=self.args, kwargs=self.kwargs
+            args=self.args, kwargs=self.kwargs, pool=pool
             )
-        return
+
+        return sampler
 
     def run(self, nsteps, ncores=1, start=None, return_sampler=False,
             vb=True):
@@ -569,11 +584,18 @@ class KLensEmceeRunner(KLensZeusRunner):
             progress = False
 
         if ncores > 1:
+            os.environ['OMP_NUM_THREADS'] = '1'
             with Pool(ncores) as pool:
-                self.sampler.run_mcmc(start, nsteps, progress=progress)
+                sampler = self._initialize_sampler(pool=pool)
+                sampler.run_mcmc(
+                    start, nsteps, progress=progress
+                    )
 
         else:
-            self.sampler.run_mcmc(start, nsteps, progress=progress)
+            sampler = self._initialize_sampler()
+            sampler.run_mcmc(start, nsteps, progress=progress)
+
+        self.sampler = sampler
 
         self.has_run = True
 

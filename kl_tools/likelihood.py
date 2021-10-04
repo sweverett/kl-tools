@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from scipy.interpolate import interp1d
+from scipy.sparse import identity
 from astropy.units import Unit
 from argparse import ArgumentParser
 import galsim as gs
@@ -10,6 +11,7 @@ from numba import njit
 
 import utils
 import priors
+import intensity
 from parameters import PARS_ORDER, theta2pars, pars2theta
 from velocity import VelocityMap2D
 from cube import DataCube
@@ -129,24 +131,7 @@ def log_likelihood(theta, datacube, pars):
         'obs', X, Y, normalized=True, use_numba=use_numba
         )
 
-    # try:
-    #     print(theta)
-    #     plt.subplot(1,2,1)
-    #     plt.imshow(v_array, origin='lower')
-    #     plt.colorbar()
-    #     plt.title('obs plane')
-    #     plt.subplot(1,2,2)
-    #     plt.imshow(vmap('disk', X, Y, normalized=True, speed=True), origin='lower')
-    #     plt.colorbar()
-    #     plt.title('disk plane')
-    #     plt.tight_layout()
-    #     plt.show()
-    # except KeyboardInterrupt:
-    #     raise
-
-    # TODO: Implement!
-    # i_array = imap(X, Y)
-    i_array = imap
+    i_array = imap.render(theta_pars, pars)
 
     # numba can't handle interp tables, so we do it ourselves
     sed = pars['sed']
@@ -164,7 +149,7 @@ def log_likelihood(theta, datacube, pars):
         datacube._data, lambdas, v_array, i_array, sed_array, cov
         )
 
-@njit
+# @njit
 def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     '''
     datacube: The (Nx,Ny,Nspec) data array of a DataCube object,
@@ -211,7 +196,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
 
     return loglike
 
-@njit
+# @njit
 def _compute_slice_model(lambdas, sed, zfactor, imap):
     '''
     lambdas: tuple
@@ -244,7 +229,7 @@ def _compute_slice_model(lambdas, sed, zfactor, imap):
 
     return model
 
-@njit
+# @njit
 def _interp1d(table, values, kind='linear'):
     '''
     Interpolate table(value)
@@ -284,43 +269,14 @@ def _setup_vmap(theta_pars, pars, model_name='default'):
     return VelocityMap2D(model_name, vmodel)
 
 def _setup_imap(theta_pars, pars, model_name='default'):
-    '''
-    TODO: Implement!
 
-    NOTE: For now, just doing an inclined exp with truth info
-    for testing
-    '''
+    imap_pars = pars['intensity'].copy()
+    imap_type = imap_pars['type']
+    del imap_pars['type']
+    imap_pars['nx'] = pars['Nx']
+    imap_pars['ny'] = pars['Ny']
 
-    # A = theta_pars['A']
-    inc = Angle(np.arcsin(theta_pars['sini']), radians)
-
-    imap = gs.InclinedExponential(
-        inc, flux=pars['true_flux'], half_light_radius=pars['true_hlr']
-        )
-
-    rot_angle = Angle(theta_pars['theta_int'], radians)
-    imap = imap.rotate(rot_angle)
-
-    # TODO: still don't understand why this sometimes randomly fails
-    try:
-        g1 = theta_pars['g1']
-        g2 = theta_pars['g2']
-        imap = imap.shear(g1=g1, g2=g2)
-    except Exception as e:
-        print('imap generation failed!')
-        print(f'Shear values used: g=({g1}, {g2})')
-        raise e
-
-    if 'psf' in pars:
-        psf = pars['psf']
-        imap = gs.Convolve([imap, psf])
-
-    Nx, Ny = 30, 30
-    imap = imap.drawImage(nx=Nx, ny=Ny)
-
-    # imap = IntensityMap2D(pars)
-
-    return imap.array
+    return intensity.build_intensity_map(imap_type, imap_pars)
 
 def _setup_sed(pars):
     '''
@@ -367,11 +323,12 @@ def _setup_cov_matrix(Npix, pars):
     #       and uniform for a given slice
     sigma = pars['cov_sigma']
 
-    cov = sigma**2 * np.identity(Npix)
+    # cov = sigma**2 * np.identity(Npix)
+    cov = sigma**2 * identity(Npix)
 
     return cov
 
-def _setup_likelihood_test(true_pars, pars, shape, lambdas):
+def setup_likelihood_test(true_pars, pars, shape, lambdas):
 
     throughput = pars['bandpass_throughput']
     unit = pars['bandpass_unit']
@@ -396,28 +353,42 @@ def _setup_likelihood_test(true_pars, pars, shape, lambdas):
     return datacube, sed, vmap, true_im
 
 def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
+    '''
+    TODO: Restructure to allow for more general truth input
+    '''
+
     Nx, Ny, Nspec = shape[0], shape[1], shape[2]
 
     # make true obs image at Halpha
-    flux = pars['true_flux']
-    hlr = pars['true_hlr'] # without pixscale set, this is in pixels
+    # flux = pars['true_flux']
+    # hlr = pars['true_hlr'] # without pixscale set, this is in pixels
 
-    inc = Angle(np.arcsin(true_pars['sini']), radians)
+    imap_pars = {
+        'nx': Nx,
+        'ny': Ny,
+        'flux': pars['true_flux'],
+        'hlr': pars['true_hlr']
+    }
 
-    true = gs.InclinedExponential(
-        inc, flux=flux, half_light_radius=hlr
-        )
+    imap = intensity.build_intensity_map('inclined_exp', imap_pars)
+    true_im = imap.render(true_pars, pars)
 
-    rot_angle = Angle(true_pars['theta_int'], radians)
-    true = true.rotate(rot_angle)
-    true = true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
+    # inc = Angle(np.arcsin(true_pars['sini']), radians)
 
-    # use psf set in pars
-    if 'psf' in pars:
-        psf = pars['psf']
-        true = gs.Convolve([true, psf])
+    # true = gs.InclinedExponential(
+    #     inc, flux=flux, half_light_radius=hlr
+    #     )
 
-    true_im = true.drawImage(nx=Nx, ny=Ny)
+    # rot_angle = Angle(true_pars['theta_int'], radians)
+    # true = true.rotate(rot_angle)
+    # true = true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
+
+    # # use psf set in pars
+    # if 'psf' in pars:
+    #     psf = pars['psf']
+    #     true = gs.Convolve([true, psf])
+
+    # true_im = true.drawImage(nx=Nx, ny=Ny)
 
     vel_pars = {}
     for name in PARS_ORDER.keys():
@@ -442,7 +413,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
         zfactor = 1. / (1 + Vnorm)
 
         obs_array = _compute_slice_model(
-            lambdas[i], sed_array, zfactor, true_im.array
+            lambdas[i], sed_array, zfactor, true_im
             )
 
         obs_im = gs.Image(obs_array)
@@ -454,7 +425,57 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
 
     datacube = DataCube(data=data, bandpasses=bandpasses)
 
-    return datacube, V, true_im.array
+    return datacube, V, true_im
+
+def setup_test_pars(nx, ny):
+    '''
+    Initialize a test set of true_pars and pars for
+    reasonable values
+
+    nx: int
+        Size of image on x-axis
+    ny: int
+        Size of image on y-axis
+    '''
+
+    true_pars = {
+        'g1': 0.05,
+        'g2': -0.025,
+        'theta_int': np.pi / 3,
+        'sini': 0.8,
+        'v0': 10.,
+        'vcirc': 200,
+        'rscale': 5,
+    }
+
+    # additional args
+    halpha = 656.28 # nm
+    R = 5000.
+    z = 0.3
+    pars = {
+        'true_flux': 1e5, # counts
+        'true_hlr': 5, # pixels
+        'v_unit': Unit('km / s'),
+        'r_unit': Unit('kpc'),
+        'z': z,
+        'spec_resolution': R,
+        'line_std': halpha * (1.+z) / R, # emission line SED std; nm
+        'line_value': 656.28, # emission line SED std; nm
+        'line_unit': Unit('nm'),
+        'sed_start': 650,
+        'sed_end': 660,
+        'sed_resolution': 0.025,
+        'sed_unit': Unit('nm'),
+        'cov_sigma': 3, # pixel counts; dummy value
+        'bandpass_throughput': '.2',
+        'bandpass_unit': 'nm',
+        'bandpass_zp': 30,
+        'use_numba': False
+        }
+    pars['Nx'] = nx
+    pars['Ny'] = ny
+
+    return true_pars, pars
 
 def main(args):
 
@@ -512,7 +533,7 @@ def main(args):
     shape = (Nx, Ny, Nspec)
 
     print('Setting up test datacube and true Halpha image')
-    datacube, sed, vmap, true_im = _setup_likelihood_test(
+    datacube, sed, vmap, true_im = setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
 

@@ -20,6 +20,73 @@ Definition of each plane:
     obs:  Observed image plane. Sheared version of source plane
 '''
 
+class TransformableImage(object):
+    '''
+    This base class defines the transformation properties
+    and structure for an image (e.g. velocity map, source
+    intensity)that can be rendered in the various planes
+    relevant to kinematic lensing: disk, gal, source, and obs
+
+    The unifying feature of these images will be that their
+    rendering in a given plane will be handled by the __call__
+    attribute, along with the plane name, image coords to eval
+    at, and any necessary transformation parameters
+    '''
+
+    def __init__(self, transform_pars):
+        '''
+        transform_pars: dict
+            A dictionary that defines the parameters needed
+            to evaluate the plane transformations
+        '''
+
+        self.transform_pars = transform_pars
+        self._planes = ['disk', 'gal', 'source', 'obs']
+
+        self._setup_transformations()
+
+        return
+
+    def _setup_transformations(self):
+        '''
+        TODO: Do we need this?
+        '''
+
+        pars = self.transform_pars
+
+        self.obs2source = _transform_obs2source(pars)
+        self.source2gal = _transform_source2gal(pars)
+        self.gal2disk = _transform_gal2disk(pars)
+
+        return
+
+    def __call__(self, plane, x, y, use_numba=False):
+        '''
+        plane: str
+            The plane to evaluate the image in
+        x: np.ndarray
+            The x position(s) to evaluate the image at
+        y: np.ndarray
+            The y position(s) to evaluate the image at
+        use_numba: bool
+            Whether to use numba-friendly versions of the
+            transformation functions
+            NOTE: Not yet fully implemented
+        '''
+
+        if plane not in self._planes:
+            raise ValueError(f'{plane} not a valid image plane!')
+
+        if not isinstance(x, np.ndarray):
+            assert not isinstance(y, np.ndarray)
+            x = np.array(x)
+            y = np.array(y)
+
+        if x.shape != y.shape:
+            raise Exception('x and y arrays must be the same shape!')
+
+        return
+
 def transform_coords(x, y, plane1, plane2, pars):
     '''
     Transform coords (x,y) defined in plane1 into plane2

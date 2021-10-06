@@ -7,12 +7,9 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from argparse import ArgumentParser
 import galsim as gs
 from galsim.angle import Angle, radians
-import astropy.constants as const
-import astropy.units as units
-from scipy.special import eval_hermitenorm
-from scipy.special import factorial
 
 import utils
+import basis
 import likelihood
 
 import pudb
@@ -35,16 +32,17 @@ class IntensityMap(object):
     '''
     If needed, could have this be the return class of
     IntensityMapFitter.fit()
-
-    name: str
-        Name of intensity map type
-    nx: int
-        Size of image on x-axis
-    ny: int
-        Size of image on y-axis
     '''
 
     def __init__(self, name, nx, ny):
+        '''
+        name: str
+            Name of intensity map type
+        nx: int
+            Size of image on x-axis
+        ny: int
+            Size of image on y-axis
+        '''
 
         if not isinstance(name, str):
             raise TypeError('IntensityMap name must be a str!')
@@ -61,65 +59,6 @@ class IntensityMap(object):
         return
 
     @abstractmethod
-    def render(self, theta_pars, pars):
-        '''
-        theta_pars: dict
-            A dict of the sampled mcmc params for both the velocity
-            map and the tranformation matrices
-        pars: dict
-            A dictionary of any additional parameters needed
-            to render the intensity map
-        redo: bool
-            Set to remake rendered image regardless of whether
-            it is already internally stored
-
-        return: np.ndarray
-            The rendered intensity map
-        '''
-        pass
-
-    @abstractmethod
-    def _render(self, theta_pars, pars):
-        pass
-
-class InclinedExponential(IntensityMap):
-    '''
-    This class is mostly for testing purposes. Can give the
-    true flux, hlr for a simulated datacube to ensure perfect
-    intensity map modeling for validation tests.
-
-    We explicitly use an exponential over a general InclinedSersic
-    as it is far more efficient to render, and is only used for
-    testing anyway
-    '''
-
-    def __init__(self, nx, ny, flux=None, hlr=None):
-        '''
-        nx: int
-            Size of image on x-axis
-        ny: int
-            Size of image on y-axis
-        flux: float
-            Object flux
-        hlr: float
-            Object half-light radius (in pixels)
-        '''
-
-        super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
-
-        pars = {'flux': flux, 'hlr': hlr}
-        for name, val in pars.items():
-            if val is None:
-                pars[name] = 1.
-            else:
-                if not isinstance(val, (float, int)):
-                    raise TypeError(f'{name} must be a float or int!')
-
-        self.flux = pars['flux']
-        self.hlr = pars['hlr']
-
-        return
-
     def render(self, theta_pars, pars, redo=False):
         '''
         theta_pars: dict
@@ -140,7 +79,94 @@ class InclinedExponential(IntensityMap):
         # explicitly asked
         if self.image is not None:
             if redo is False:
-                return image
+                return self.image
+
+        else:
+            return self._render(theta_pars, pars)
+
+    @abstractmethod
+    def _render(self, theta_pars, pars):
+        pass
+
+    def plot(self, show=True, close=True, outfile=None, size=(7,7)):
+        if self.image is None:
+            raise Exception('Must render profile first! This can be ' +\
+                            'done by calling render() with relevant params')
+
+        ax = plt.gca()
+        im = ax.imshow(self.image, origin='lower')
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        plt.colorbar(im, cax=cax)
+        ax.set_title('BasisIntensityMap.render() call')
+
+        plt.gcf().set_size_inches(size)
+        plt.tight_layout()
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight', dpi=300)
+
+        if show is True:
+            plt.show()
+
+        if close is True:
+            plt.close()
+
+        return
+
+class InclinedExponential(IntensityMap):
+    '''
+    This class is mostly for testing purposes. Can give the
+    true flux, hlr for a simulated datacube to ensure perfect
+    intensity map modeling for validation tests.
+
+    We explicitly use an exponential over a general InclinedSersic
+    as it is far more efficient to render, and is only used for
+    testing anyway
+    '''
+
+    def __init__(self, datacube, flux=None, hlr=None):
+        '''
+        datacube: DataCube
+            While this implementation will not use the datacube
+            image explicitly (other than shape info), most will
+        flux: float
+            Object flux
+        hlr: float
+            Object half-light radius (in pixels)
+        '''
+
+        nx, ny = datacube.Nx, datacube.Ny
+        super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
+
+        pars = {'flux': flux, 'hlr': hlr}
+        for name, val in pars.items():
+            if val is None:
+                pars[name] = 1.
+            else:
+                if not isinstance(val, (float, int)):
+                    raise TypeError(f'{name} must be a float or int!')
+
+        self.flux = pars['flux']
+        self.hlr = pars['hlr']
+
+        return
+
+    def _render(self, theta_pars, pars):
+        '''
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        pars: dict
+            A dictionary of any additional parameters needed
+            to render the intensity map
+        redo: bool
+            Set to remake rendered image regardless of whether
+            it is already internally stored
+
+        return: np.ndarray
+            The rendered intensity map
+        '''
 
         # A = theta_pars['A']
         inc = Angle(np.arcsin(theta_pars['sini']), radians)
@@ -148,6 +174,13 @@ class InclinedExponential(IntensityMap):
         gal = gs.InclinedExponential(
             inc, flux=self.flux, half_light_radius=self.hlr
         )
+
+        # Only add knots if a psf is provided
+        if 'psf' in pars:
+            if 'knots' in pars:
+                knot_pars = pars['knots']
+                knots = gs.RandomKnots(**knot_pars)
+                gal = gal + knots
 
         rot_angle = Angle(theta_pars['theta_int'], radians)
         gal = gal.rotate(rot_angle)
@@ -181,13 +214,58 @@ class BasisIntensityMap(IntensityMap):
     TODO: Need a better name!
     '''
 
-    def __init__(self, basis_type):
-        # TODO: Add something here that does the fitting
-        # with IntensityMapFitter ...
+    def __init__(self, datacube, basis_type='default', basis_kwargs=None):
+        '''
+        basis_type: str
+            Name of basis type to use
+        datacube: DataCube
+            A truncated datacube whose stacked slices will be fit to
+        basis_kwargs: dict
+            Dictionary of kwargs needed to construct basis
+        '''
+
+        # # Must pass nx, ny somewhere
+        # for name, n in {'nx':nx, 'ny':ny}.items():
+        #     if n is None:
+        #         if (basis_kwargs is None) or (name not in basis_kwargs):
+        #             raise ValueError(f'{name} must be passed either ' +\
+        #                              'explicitly or in basis_kwargs!')
+        #         else:
+        #             val = basis_kwargs[name]
+        #     else:
+        #         if name in basis_kwargs:
+        #             raise Exception(f'Can only pass {name} in one way!')
+        #         basis_kwargs[name] = n
+        #         val = n
+
+        #     if not isinstance(val, int):
+        #         raise TypeError(f'{name} must be an int!')
+
+        # # now guaranteed to be in basis_kwargs
+        # nx = basis_kwargs['nx']
+        # ny = basis_kwargs['ny']
+
+        nx, ny = datacube.Nx, datacube.Ny
+        super(BasisIntensityMap, self).__init__('basis', nx, ny)
+
+        self.fitter = IntensityMapFitter(
+            basis_type, self.nx, self.ny, basis_kwargs=basis_kwargs
+            )
+
+        self._fit_to_datacube(datacube)
+
         return
 
-    # def render(self, theta_pars, pars):
-    #     return image
+    def _fit_to_datacube(self, datacube):
+        self.image = self.fitter.fit(datacube)
+
+        return
+
+    def get_basis(self):
+        return self.fitter.basis
+
+    def render(self, theta_pars, pars):
+        return self.image
 
     # def _render(self, theta_pars, pars):
     #     pass
@@ -197,14 +275,18 @@ def get_intensity_types():
 
 # NOTE: This is where you must register a new model
 INTENSITY_TYPES = {
-    'default': InclinedExponential,
+    'default': BasisIntensityMap,
+    'basis': BasisIntensityMap,
     'inclined_exp': InclinedExponential,
     }
 
-def build_intensity_map(name, kwargs):
+def build_intensity_map(name, datacube, kwargs):
     '''
     name: str
         Name of intensity map type
+    datacube: DataCube
+        The datacube whose stacked image the intensity map
+        will represent
     kwargs: dict
         Keyword args to pass to intensity constructor
     '''
@@ -213,7 +295,7 @@ def build_intensity_map(name, kwargs):
 
     if name in INTENSITY_TYPES.keys():
         # User-defined input construction
-        intensity = INTENSITY_TYPES[name](**kwargs)
+        intensity = INTENSITY_TYPES[name](datacube, **kwargs)
     else:
         raise ValueError(f'{name} is not a registered intensity!')
 
@@ -236,6 +318,12 @@ class IntensityMapFitter(object):
             Keyword args needed to build given basis type
         '''
 
+        for name, n in {'nx':nx, 'ny':ny}.items():
+            if name in basis_kwargs:
+                if n != basis_kwargs[name]:
+                    raise ValueError(f'{name} must be consistent if ' +\
+                                       'also passed in basis_kwargs!')
+
         self.basis_type = basis_type
         self.nx = nx
         self.ny = ny
@@ -256,7 +344,7 @@ class IntensityMapFitter(object):
                 'ny': self.ny,
                 }
 
-        self.basis = build_basis(self.basis_type, basis_kwargs)
+        self.basis = basis.build_basis(self.basis_type, basis_kwargs)
         self.Nbasis = self.basis.N
         self.mle_coefficients = np.zeros(self.Nbasis)
 
@@ -415,350 +503,6 @@ class IntensityMapFitter(object):
 
         return
 
-class Basis(object):
-    '''
-    Base Basis class
-    '''
-
-    def __init__(self, name, N, nx, ny):
-        '''
-        name: str
-            Name of basis
-        N: int
-            Number of basis functions to use
-        nx: int
-            Size of image on x-axis
-        ny: int
-            Size of image on y-axis
-        '''
-
-        self.name = name
-        self.N = N
-        self.im_nx = nx
-        self.im_ny = ny
-
-        self._initialize()
-
-        return
-
-    def _initialize(self):
-        pass
-
-    def get_basis_func(self, n):
-        '''
-        Return the function call that will evaluate the nth basis
-        function at (x,y) positions
-        '''
-
-        if (n < 0) or (n >= self.N):
-            raise ValueError(f'Basis functions range from 0 to {self.N-1}!')
-
-        return self._get_basis_func(n)
-
-    def render_im(self, coefficients):
-        '''
-        Render image given basis coefficients
-
-        coefficients: list, np.array
-            A list or array of basis coefficients
-        '''
-
-        if len(coefficients) != self.N:
-            raise ValueError('The len of the passed coefficients ' +\
-                             f'does not equal {self.N}!')
-
-        nx, ny = self.im_nx, self.im_ny
-        X, Y = utils.build_map_grid(nx, ny)
-
-        im = np.zeros((nx, ny))
-
-        for n in range(self.N):
-            func, func_args = self._get_basis_func(n)
-            args = [X, Y, *func_args]
-            im += coefficients[n] * func(*args)
-
-        return im
-
-    @abstractmethod
-    def _get_basis_func(self, n):
-        pass
-
-class ShapeletBasis(Basis):
-    def __init__(self, nx, ny, beta=None, Nmax=None):
-        '''
-        nx: int
-            Size of the image x-axis
-        ny: int
-            Size of the image y-axis
-        beta: float
-            Scale factor used to define basis functions. If
-            None, then set automatically given (nx, ny)
-        Nmax: int
-            Nmaxumber of basis functions to use. If None, then
-            set automatically given (nx, ny)
-        '''
-
-        pars = {'nx':nx, 'ny':ny}
-        if Nmax is not None:
-            pars['Nmax'] = Nmax
-        for name, n in pars.items():
-            if not isinstance(n, int):
-                raise TypeError(f'{name} must be an int!')
-
-        self.im_nx = nx
-        self.im_ny = ny
-
-        self._set_scale_params()
-
-        if beta is not None:
-            if not isinstance(beta, (int, float)):
-                raise TypeError('beta must be an int or float!')
-            self.beta = beta
-        else:
-            self._set_beta()
-
-        if Nmax is not None:
-            self.Nmax = Nmax
-        else:
-            self._set_Nmax()
-
-        # Compute number of independent basis vectors given Nmax
-        N = (self.Nmax+1) * (self.Nmax+2) // 2
-
-        super(ShapeletBasis, self).__init__('shapelet', N, nx, ny)
-
-        self._setup_nxny_grid()
-
-        return
-
-    def _set_scale_params(self):
-        '''
-        Set scale parameters given image size. Used for default
-        choices of beta and N
-        '''
-
-        self.theta_min = 1 # pixel
-        self.theta_max = int(
-            np.ceil(np.max([self.im_nx, self.im_ny]))
-            )
-
-        return
-
-    def _set_beta(self):
-        '''
-        Set beta automatically given image size
-        '''
-
-        self.beta = np.sqrt(self.theta_min * self.theta_max)
-
-        return
-
-    def _set_Nmax(self):
-        '''
-        Set Nmax automatically given image size
-        '''
-
-        self.Nmax = int(
-            np.ceil((self.theta_max / self.theta_min)) - 1
-            )
-
-        return
-
-    def _setup_nxny_grid(self):
-        '''
-        We define here the mapping between the nth basis
-        function and the corresponding (nx, ny pairs)
-
-        We do this by creating the triangular matrix
-        corresponding to Nmax, ordering the positions
-        such that each sub triangular matrix is consistent
-        with one another
-        '''
-
-        nmax = self.Nmax
-
-        self.ngrid = -1 * np.ones((nmax+1, nmax+1))
-
-        x, y = 0, 0
-        height = 0
-        for i in range(self.N):
-            self.ngrid[x, y] = i
-
-            if self._is_triangular(i+1):
-                x += height + 1
-                y -= height
-                height += 1
-            else:
-                x -= 1
-                y += 1
-
-        return
-
-    @staticmethod
-    def _is_triangular(n):
-        '''
-        Checks if n is a triangular number
-        '''
-
-        # this is equivalent to asking if m is square
-        m = 8*n+1
-
-        if np.sqrt(m) % 1 == 0:
-            return True
-        else:
-            return False
-
-    def _get_basis_func(self, n):
-        '''
-        Return function call along with args
-        needed to evaluate nth basis function at a
-        given image position
-        '''
-
-        Nx, Ny = self.n_to_NxNy(n)
-
-        args = [self.beta, Nx, Ny]
-
-        return (self._eval_basis_function, args)
-
-    def n_to_NxNy(self, n):
-        '''
-        Return the (Nx, Ny) pair corresponding to the nth
-        basis function
-
-        We define this relationship by traveling through the
-        triangular (nx, ny) grid in a zig-zag starting with x.
-        Thus the ordering of each sub triangular matrix will be
-        consistent.
-        '''
-
-        Nx, Ny  = np.where(self.ngrid == n)
-
-        return int(Nx), int(Ny)
-
-    def __call__(self, x, y, Nx, Ny):
-        '''
-        Evaluate the basis at positions (x,y) for order (nx, ny)
-        '''
-
-        if (Nx + Ny) > self.Nmax:
-            raise ValueError(f'Nx+Ny cannot be greater than Nmax={self.Nmax}!')
-
-        if x.shape != y.shape:
-            raise ValueError('x and y must have the same shape!')
-
-        return _eval_basis_function(x, y, self.beta, Nx, Ny)
-
-    # TODO: Can use numba here if it is helpful
-    @staticmethod
-    def _eval_basis_function(x, y, beta, Nx, Ny):
-        '''
-        Returns a single Cartesian Shapelet basis function of order
-        Nx, Ny evaluated at the points (x,y).
-
-        Adapted from code by Eric Huff in Trillian
-        '''
-
-        bfactor = (1. / np.sqrt(beta))
-        x_norm = 1. / np.sqrt(2**Nx * np.sqrt(np.pi) * factorial(Nx)) * bfactor
-        y_norm = 1. / np.sqrt(2**Ny * np.sqrt(np.pi) * factorial(Ny)) * bfactor
-
-        exp_x = np.exp(-(x/beta)**2 / 2.)
-        exp_y = np.exp(-(y/beta)**2 / 2.)
-        phi_x = x_norm * eval_hermitenorm(Nx, x/beta) * exp_x
-        phi_y = y_norm * eval_hermitenorm(Ny, y/beta) * exp_y
-
-        return phi_x * phi_y
-
-    def compute_design_matrix(self, x, y):
-        '''
-        Compute the design matrix given the basis definition and
-        image positions (x,y)
-
-        x: np.ndarray
-            x positions of image in pixel coords
-        y: np.ndarray
-            y positions of image in pixel coords
-        '''
-        pass
-
-        # phi = np.zeros()
-
-        # return phi
-
-    def plot_basis_funcs(self, outfile=None, show=True, close=True,
-                         size=(9,9)):
-
-        N = self.N
-        nmax = self.Nmax
-        sqrt = int(np.ceil(np.sqrt(N)))
-
-        X, Y = utils.build_map_grid(self.im_nx, self.im_ny)
-
-        fig, axes = plt.subplots(nrows=nmax+1, ncols=nmax+1, figsize=size,
-                                 sharex=True, sharey=True)
-        for i in range(N):
-            nx, ny = self.n_to_NxNy(i)
-            ax = axes[nx, ny]
-            func, fargs = self.get_basis_func(i)
-            args = [X, Y, *fargs]
-            image = func(*args)
-            im = ax.imshow(image, origin='lower')
-
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            plt.colorbar(im, cax=cax)
-            nx, ny = fargs[1], fargs[2]
-            ax.set_title(f'({nx},{ny})')
-
-        x = np.arange(nmax+1)
-        xx, yy = np.meshgrid(x, x)
-        empty = np.where((xx+yy) > nmax)
-
-        for x,y in zip(empty[0], empty[1]):
-            fig.delaxes(axes[x,y])
-
-        plt.tight_layout()
-        plt.subplots_adjust(hspace=0.15, wspace=0.5)
-
-        if outfile is not None:
-            plt.savefig(outfile, bbox_inches='tight', dpi=300)
-
-        if show is True:
-            plt.show()
-
-        if close is True:
-            plt.close()
-
-        return
-
-def get_basis_types():
-    return BASIS_TYPES
-
-# NOTE: This is where you must register a new model
-BASIS_TYPES = {
-    'default': ShapeletBasis,
-    'shapelets': ShapeletBasis,
-    }
-
-def build_basis(name, kwargs):
-    '''
-    name: str
-        Name of basis
-    kwargs: dict
-        Keyword args to pass to basis constructor
-    '''
-
-    name = name.lower()
-
-    if name in BASIS_TYPES.keys():
-        # User-defined input construction
-        basis = BASIS_TYPES[name](**kwargs)
-    else:
-        raise ValueError(f'{name} is not a registered basis!')
-
-    return basis
-
 def main(args):
     '''
     For now, just used for testing the classes
@@ -769,20 +513,9 @@ def main(args):
     outdir = os.path.join(utils.TEST_DIR, 'intensity')
     utils.make_dir(outdir)
 
-    print('Creating IntensityMapFitter object')
-    fitter = IntensityMapFitter
-
-    print('Creating a ShapeletBasis')
-    nx, ny = 30,30
-    nmax = 4 # To limit the plot size
-    shapelets = ShapeletBasis(nx, ny, Nmax=nmax)
-
-    outfile = os.path.join(outdir, 'shapelet-basis-funcs.png')
-    print(f'Saving plot of shapelet basis functions to {outfile}')
-    shapelets.plot_basis_funcs(outfile=outfile, show=show)
-
     print('Creating IntensityMapFitter w/ shapelet basis')
-    nmax = 20
+    nmax = 10
+    nx, ny = 30,30
     basis_kwargs = {'Nmax': nmax}
     fitter = IntensityMapFitter(
         'shapelets', nx, ny, basis_kwargs=basis_kwargs
@@ -790,6 +523,15 @@ def main(args):
 
     print('Setting up test datacube and true Halpha image')
     true_pars, pars = likelihood.setup_test_pars(nx, ny)
+
+    # add some knot features
+    knot_frac = 0.5 # not really correct, but close enough for tests
+    pars['psf'] = gs.Gaussian(fwhm=3) # pixels w/o pix_scale defined
+    pars['knots'] = {
+        'npoints': 25,
+        'half_light_radius': pars['true_hlr'],
+        'flux': knot_frac * pars['true_flux'],
+    }
 
     li, le, dl = 655.8, 656.8, 0.1
     lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
@@ -799,6 +541,8 @@ def main(args):
     datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
+
+    print('test')
 
     outfile = os.path.join(outdir, 'datacube.fits')
     print(f'Saving test datacube to {outfile}')
@@ -835,6 +579,15 @@ def main(args):
     outfile = os.path.join(outdir, 'compare-mle-to-data.png')
     print(f'Plotting MLE fit compared to stacked data to {outfile}')
     fitter.plot_mle_fit(datacube, outfile=outfile, show=show)
+
+    print('Initializing a BasisIntensityMap for shapelets')
+    imap = BasisIntensityMap(
+        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax}
+        )
+
+    outfile = os.path.join(outdir, 'shapelet-imap-render.png')
+    print(f'Saving render for shapelet basis to {outfile}')
+    imap.plot(outfile=outfile, show=show)
 
     return 0
 

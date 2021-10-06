@@ -144,17 +144,6 @@ class VelocityMap(TransformableImage):
             plane, x, y, use_numba=use_numba
             )
 
-        # if plane not in self._planes:
-        #     raise ValueError(f'{plane} not a valid image plane!')
-
-        # if not isinstance(x, np.ndarray):
-        #     assert not isinstance(y, np.ndarray)
-        #     x = np.array(x)
-        #     y = np.array(y)
-
-        # if x.shape != y.shape:
-        #     raise Exception('x and y arrays must be the same shape!')
-
         if normalized is True:
             norm = 1. / const.c.to(self.model.pars['v_unit']).value
         else:
@@ -186,28 +175,62 @@ class VelocityMap(TransformableImage):
         else:
             pars = self.model.pars
 
-        if plane == 'obs':
-            if use_numba is True:
-                func = numba_transform._eval_in_obs_plane
-            else:
-                func = transform._eval_in_obs_plane
-        elif plane == 'source':
-            if use_numba is True:
-                func = numba_transform._eval_in_source_plane
-            else:
-                func = transform._eval_in_source_plane
-        elif plane == 'gal':
-            if use_numba is True:
-                func = numba_transform._eval_in_gal_plane
-            else:
-                func = transform._eval_in_gal_plane
-        elif plane == 'disk':
-            if use_numba is True:
-                func = numba_transform._eval_in_disk_plane
-            else:
-                func = transform._eval_in_disk_plane
+        func = self._get_plane_eval_func(plane, use_numba=use_numba)
 
         return func(pars, x, y, speed=speed)
+
+    @classmethod
+    def _eval_in_gal_plane(cls, pars, x, y, **kwargs):
+        '''
+        pars: dict
+            Holds the model & transformation parameters
+        x,y: np.ndarray
+            The position coordintates in the gal plane
+
+        kwargs holds any additional params that might be needed
+        in subclass evaluations, such as using speed instead of
+        velocity
+        '''
+
+        xp, yp = transform._gal2disk(pars, x, y)
+
+        # Need the speed map in either case
+        speed = kwargs['speed']
+        kwargs['speed'] = True
+        speed_map = cls._eval_in_disk_plane(pars, xp, yp, **kwargs)
+
+        # speed will be in kwargs
+        if speed is True:
+            return speed_map
+
+        else:
+            # euler angles which handle the vector aspect of velocity transform
+            sini = pars['sini']
+            phi = np.arctan2(yp, xp)
+
+            return sini * np.cos(phi) * speed_map
+
+    @classmethod
+    def _eval_in_disk_plane(cls, pars, x, y, **kwargs):
+        '''
+        Evaluates model at posiiton array in the disk plane, where
+        pos=(x,y) is defined relative to galaxy center
+
+        pars is a dict with model parameters
+
+        will eval speed map instead of velocity if speed is True
+        '''
+
+        if kwargs['speed'] is False:
+            return np.zeros(np.shape(x))
+
+        r = np.sqrt(x**2 + y**2)
+
+        atan_r = np.arctan(r  / pars['rscale'])
+
+        v_r = pars['v0'] + (2./ np.pi) * pars['vcirc'] * atan_r
+
+        return v_r
 
     def plot(self, plane, x=None, y=None, rmax=None, show=True, close=True,
              title=None, size=(9,8), center=True, outfile=None, speed=False,
@@ -422,100 +445,6 @@ class VelocityMap(TransformableImage):
 
         if close is True:
             plt.close()
-
-        return
-
-    def plot_map_transforms_alt(self, size=(9,8), outfile=None, show=True, close=True,
-                                speed=False):
-
-        #--------------------------------------------------------
-        # Explicit way that worked for forward-modeling:
-
-        pars = self.model.pars
-
-        runit = pars['r_unit']
-        vunit = pars['v_unit']
-        rscale = pars['rscale']
-
-        rmax = 5. * rscale
-        Nr = 100
-
-        Nx = 2*Nr + 1
-        dx = 2*rmax / Nx
-        x = np.arange(-rmax, rmax+dx, dx)
-        y = np.arange(-rmax, rmax+dx, dx)
-
-        # uniform grid in all planes
-        X, Y = np.meshgrid(x, y)
-        Xdisk, Ydisk = X, Y
-
-        xlim, ylim = [-rmax, rmax], [-rmax, rmax]
-
-        Vdisk = transform._eval_in_disk_plane(pars, X, Y)
-
-        plt.subplot(2,2,1)
-        plt.pcolormesh(X, Y, Vdisk)
-        plt.colorbar(label=f'{vunit}')
-        plt.xlim(xlim)
-        plt.ylim(ylim)
-        plt.xlabel(f'{runit}')
-        plt.ylabel(f'{runit}')
-        plt.title('Alt speed map for disk plane\n' +\
-                      f'r_scale = {rscale} {runit}')
-
-        # transform disk coords to gal plane
-        # Xgal, Ygal = transform._disk2gal(pars, Xdisk, Ydisk)
-        Vgal = transform._eval_in_gal_plane(pars, X, Y)
-
-        plt.subplot(2,2,2)
-        plt.pcolormesh(X, Y, Vgal)
-        plt.colorbar(label=f'{vunit}')
-        plt.xlim(xlim)
-        plt.ylim(ylim)
-        plt.xlabel(f'{runit}')
-        plt.ylabel(f'{runit}')
-        plt.title('Alt speed map for gal plane\n' +\
-                      f'r_scale = {rscale} {runit}')
-
-        # transform disk coords to source plane
-        # Xsource, Ysource = transform.transform_coords(Xdisk, Ydisk, 'disk', 'source', pars)
-        Vsource = transform._eval_in_source_plane(pars, X, Y)
-
-        plt.subplot(2,2,3)
-        plt.pcolormesh(X, Y, Vsource)
-        plt.colorbar(label=f'{vunit}')
-        plt.xlim(xlim)
-        plt.ylim(ylim)
-        plt.xlabel(f'{runit}')
-        plt.ylabel(f'{runit}')
-        plt.title('Alt speed map for source plane\n' +\
-                      f'r_scale = {rscale} {runit}')
-
-        # transform disk coords to obs plane
-        Xobs, Yobs = transform.transform_coords(Xdisk, Ydisk, 'disk', 'obs', pars)
-        Vobs = transform._eval_in_obs_plane(pars, Xobs, Yobs)
-
-        plt.subplot(2,2,4)
-        plt.pcolormesh(Xobs, Yobs, Vobs)
-        plt.colorbar(label=f'{vunit}')
-        plt.xlim(xlim)
-        plt.ylim(ylim)
-        plt.xlabel(f'{runit}')
-        plt.ylabel(f'{runit}')
-        plt.title('Alt speed map for obs plane\n' +\
-                      f'r_scale = {rscale} {runit}')
-
-        plt.gcf().set_size_inches(size)
-        plt.tight_layout()
-
-        if outfile is not None:
-            plt.savefig(outfile, bbox_inches='tight', dpi=300)
-
-        if show is True:
-            plt.show()
-
-        if close is True:
-            plt.show()
 
         return
 

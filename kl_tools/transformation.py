@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import numpy as np
 import pudb
 
@@ -86,6 +87,112 @@ class TransformableImage(object):
             raise Exception('x and y arrays must be the same shape!')
 
         return
+
+    def _get_plane_eval_func(self, plane, use_numba=False):
+        '''
+        plane: str
+            Name of the plane to evaluate positions in
+        use_numba: bool
+            Set to use numba versions of functions
+        '''
+
+        if plane == 'obs':
+            if use_numba is True:
+                func = _nb_eval_in_obs_plane
+            else:
+                func = self._eval_in_obs_plane
+        elif plane == 'source':
+            if use_numba is True:
+                func = _nb_eval_in_source_plane
+            else:
+                func = self._eval_in_source_plane
+        elif plane == 'gal':
+            if use_numba is True:
+                func = _nb_eval_in_gal_plane
+            else:
+                func = self._eval_in_gal_plane
+        elif plane == 'disk':
+            if use_numba is True:
+                func = _nb_eval_in_disk_plane
+            else:
+                func = self._eval_in_disk_plane
+
+        return func
+
+    def _eval_map_in_plane(self, plane, x, y, use_numba=False):
+        '''
+        We use static methods defined in transformation.py
+        to speed up these very common function calls
+
+        The input (x,y) position is defined in the plane
+
+        plane: str
+            The name of the plane to evaluate the map in the given
+            coords
+        speed: bool
+            Set to True to return speed map instead of velocity
+        use_numba: bool
+            Set to True to use numba versions of transformations
+        '''
+
+        func = self._get_plane_eval_func(plane, use_numba=use_numba)
+
+        return func(pars, x, y, speed=speed)
+
+    @classmethod
+    def _eval_in_obs_plane(cls, pars, x, y, **kwargs):
+        '''
+        pars: dict
+            Holds the model & transformation parameters
+        x,y: np.ndarray
+            The position coordintates in the obs plane
+
+        kwargs holds any additional params that might be needed
+        in subclass evaluations, such as using speed instead of
+        velocity
+        '''
+
+        xp, yp = _obs2source(pars, x, y)
+
+        return cls._eval_in_source_plane(pars, xp, yp, **kwargs)
+
+    @classmethod
+    def _eval_in_source_plane(cls, pars, x, y, **kwargs):
+        '''
+        pars: dict
+            Holds the model & transformation parameters
+        x,y: np.ndarray
+            The position coordintates in the source plane
+
+        kwargs holds any additional params that might be needed
+        in subclass evaluations, such as using speed instead of
+        velocity
+        '''
+
+        xp, yp = _source2gal(pars, x, y)
+
+        return cls._eval_in_gal_plane(pars, xp, yp, **kwargs)
+
+    @classmethod
+    def _eval_in_gal_plane(cls, pars, x, y, **kwargs):
+        '''
+        pars: dict
+            Holds the model & transformation parameters
+        x,y: np.ndarray
+            The position coordintates in the gal plane
+
+        kwargs holds any additional params that might be needed
+        in subclass evaluations, such as using speed instead of
+        velocity
+        '''
+
+        xp, yp = _gal2disk(pars, x, y)
+
+        return cls._eval_in_disk_plane(pars, xp, yp, **kwargs)
+
+    @abstractmethod
+    def _eval_in_disk_plane(pars, x, y, **kwargs):
+        pass
 
 def transform_coords(x, y, plane1, plane2, pars):
     '''
@@ -376,74 +483,4 @@ def _disk2gal(pars, x, y):
 
     return _multiply(transform, x, y)
 
-def _eval_in_obs_plane(pars, x, y, speed=False):
-    '''
-    pars is a dict
-    (x,y) is position on obs plane
 
-    will eval speed map instead of velocity if speed is True
-    '''
-
-    xp, yp = _obs2source(pars, x, y)
-
-    return _eval_in_source_plane(pars, xp, yp, speed=speed)
-
-def _eval_in_source_plane(pars, x, y, speed=False):
-    '''
-    pars is a dict
-    (x,y) is position on source plane
-
-    will eval speed map instead of velocity if speed is True
-    '''
-
-    xp, yp = _source2gal(pars, x, y)
-
-    return _eval_in_gal_plane(pars, xp, yp, speed=speed)
-
-def _eval_in_gal_plane(pars, x, y, speed=False):
-    '''
-    pars is a dict
-    (x,y) is position on galaxy plane
-
-    will eval speed map instead of velocity if speed is True
-    '''
-
-    xp, yp = _gal2disk(pars, x, y)
-    speed_map = _eval_in_disk_plane(pars, xp, yp, speed=True)
-
-    if speed is True:
-
-        return speed_map
-
-    else:
-        # euler angles which handle the vector aspect of velocity transform
-        sini = pars['sini']
-        phi = np.arctan2(yp, xp)
-
-        return sini * np.cos(phi) * speed_map
-
-def _eval_in_disk_plane(pars, x, y, speed=False):
-    '''
-    Evaluates model at posiiton array in the galaxy plane, where
-    pos=(x,y) is defined relative to galaxy center
-
-    pars is a dict with model parameters
-
-    will eval speed map instead of velocity if speed is True
-
-    # TODO: For now, this only works for the default model.
-    We can make this flexible with a passed model name & builder,
-    but not necessary yet & causes problems with numba version
-    '''
-
-    if speed is False:
-        # Velocity is 0 in the z-hat direction for a disk galaxy
-        return np.zeros(np.shape(x))
-
-    r = np.sqrt(x**2 + y**2)
-
-    atan_r = np.arctan(r  / pars['rscale'])
-
-    v_r = pars['v0'] + (2./ np.pi) * pars['vcirc'] * atan_r
-
-    return v_r

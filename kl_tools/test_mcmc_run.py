@@ -13,7 +13,7 @@ import priors
 import likelihood
 from parameters import PARS_ORDER
 from likelihood import log_posterior
-from velocity import VelocityMap2D
+from velocity import VelocityMap
 
 import pudb
 
@@ -70,7 +70,7 @@ def main(args):
         'sed_end': 660,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 3, # pixel counts; dummy value
+        'cov_sigma': 0.5, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
@@ -88,9 +88,14 @@ def main(args):
         },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 1e5, # counts
-            'hlr': 5, # pixels
+            # 'type': 'inclined_exp',
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
+            'type': 'basis',
+            'basis_type': 'shapelets',
+            'basis_kwargs': {
+                'Nmax': 10,
+                }
         },
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
@@ -253,7 +258,7 @@ def main(args):
     vmap_pars = true_pars
     vmap_pars['r_unit'] = pars['r_unit']
     vmap_pars['v_unit'] = pars['v_unit']
-    vmap_true = VelocityMap2D('default', vmap_pars)
+    vmap_true = VelocityMap('default', vmap_pars)
     runner.compare_MAP_to_truth(vmap_true, outfile=outfile, show=show)
 
     outfile = os.path.join(outdir, 'corner-map.png')

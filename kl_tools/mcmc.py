@@ -13,7 +13,7 @@ import utils
 import priors
 import likelihood
 from parameters import PARS_ORDER
-from velocity import VelocityMap2D
+from velocity import VelocityMap
 from likelihood import log_posterior
 
 import pudb
@@ -400,19 +400,21 @@ class KLensZeusRunner(ZeusRunner):
         # vel_pars['r_unit'] = self.pars['r_unit']
         # vel_pars['v_unit'] = self.pars['v_unit']
 
-        # self.MAP_vmap = VelocityMap2D('default', vel_pars)
-        self.MAP_vmap = likelihood._setup_imap(theta_pars, self.pars)
+        # self.MAP_vmap = VelocityMap('default', vel_pars)
+        self.MAP_vmap = likelihood._setup_vmap(theta_pars, self.pars)
 
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
-        self.MAP_imap = likelihood._setup_imap(theta_pars, self.pars)
+        self.MAP_imap = likelihood._setup_imap(
+            theta_pars, self.pars, self.datacube
+            )
 
         return
 
     def compare_MAP_to_truth(self, true_vmap, show=True, close=True,
                              outfile=None, size=(8,8)):
         '''
-        true_vmap: VelocityMap2D object
+        true_vmap: VelocityMap object
             True velocity map
         '''
 
@@ -484,7 +486,8 @@ class KLensZeusRunner(ZeusRunner):
 
         # compute intensity map from MAP
         # TODO: Eventually this should be called like vmap
-        intensity = imap.render(thet)
+        theta_pars = likelihood.theta2pars(self.MAP_medians)
+        intensity = imap.render(theta_pars, self.pars)
 
         Nspec = datacube.Nspec
 

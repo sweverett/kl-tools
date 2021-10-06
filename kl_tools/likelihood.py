@@ -13,7 +13,7 @@ import utils
 import priors
 import intensity
 from parameters import PARS_ORDER, theta2pars, pars2theta
-from velocity import VelocityMap2D
+from velocity import VelocityMap
 from cube import DataCube
 
 import pudb
@@ -47,7 +47,7 @@ class DCLogLikelihood(object):
     def __call__(self, datacube, vmap):
         '''
         datacube: A DataCube object, truncated to desired bounds
-        vmap: A VelocityMap2D object
+        vmap: A VelocityMap object
         '''
 
         # Can remove loop eventually
@@ -120,7 +120,7 @@ def log_likelihood(theta, datacube, pars):
     # create 2D velocity & intensity maps given sampled transformation
     # parameters
     vmap = _setup_vmap(theta_pars, pars)
-    imap = _setup_imap(theta_pars, pars)
+    imap = _setup_imap(theta_pars, pars, datacube)
 
     # evaluate maps at pixel centers in obs plane
     if 'use_numba' in pars:
@@ -158,7 +158,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     #             slice
     lambdas: List of lambda tuples that define slice edges
     vmap: An (Nx,Ny) array of normalized (by c) velocity values in the
-            obs plane returned by a call from a VelocityMap2D object
+            obs plane returned by a call from a VelocityMap object
     imap: An (Nx,Ny) array of intensity values in the obs plane
             returned by a call from a IntensityMap object
     sed: A 2D numpy array with axis=0 being the lambda values of
@@ -266,17 +266,17 @@ def _setup_vmap(theta_pars, pars, model_name='default'):
         else:
             raise AttributeError(f'pars must have a value for {name}!')
 
-    return VelocityMap2D(model_name, vmodel)
+    return VelocityMap(model_name, vmodel)
 
-def _setup_imap(theta_pars, pars, model_name='default'):
+def _setup_imap(theta_pars, pars, datacube):
 
     imap_pars = pars['intensity'].copy()
     imap_type = imap_pars['type']
     del imap_pars['type']
-    imap_pars['nx'] = pars['Nx']
-    imap_pars['ny'] = pars['Ny']
+    # imap_pars['nx'] = pars['Nx']
+    # imap_pars['ny'] = pars['Ny']
 
-    return intensity.build_intensity_map(imap_type, imap_pars)
+    return intensity.build_intensity_map(imap_type, datacube, imap_pars)
 
 def _setup_sed(pars):
     '''
@@ -335,8 +335,6 @@ def setup_likelihood_test(true_pars, pars, shape, lambdas):
     zp = pars['bandpass_zp']
 
     bandpasses = []
-    # dl = lambdas[1] - lambdas[0]
-    # for l1, l2 in zip(lambdas, lambdas+dl):
     for l1, l2 in lambdas:
         bandpasses.append(gs.Bandpass(
             throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
@@ -359,36 +357,16 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
 
     Nx, Ny, Nspec = shape[0], shape[1], shape[2]
 
-    # make true obs image at Halpha
-    # flux = pars['true_flux']
-    # hlr = pars['true_hlr'] # without pixscale set, this is in pixels
-
     imap_pars = {
-        'nx': Nx,
-        'ny': Ny,
         'flux': pars['true_flux'],
         'hlr': pars['true_hlr']
     }
 
-    imap = intensity.build_intensity_map('inclined_exp', imap_pars)
+    # a slight abuse of API call here, passing a dummy datacube to
+    # instantiate an inclined exponential as truth
+    dc = DataCube(shape=shape, bandpasses=bandpasses)
+    imap = intensity.build_intensity_map('inclined_exp', dc, imap_pars)
     true_im = imap.render(true_pars, pars)
-
-    # inc = Angle(np.arcsin(true_pars['sini']), radians)
-
-    # true = gs.InclinedExponential(
-    #     inc, flux=flux, half_light_radius=hlr
-    #     )
-
-    # rot_angle = Angle(true_pars['theta_int'], radians)
-    # true = true.rotate(rot_angle)
-    # true = true.shear(g1=true_pars['g1'], g2=true_pars['g2'])
-
-    # # use psf set in pars
-    # if 'psf' in pars:
-    #     psf = pars['psf']
-    #     true = gs.Convolve([true, psf])
-
-    # true_im = true.drawImage(nx=Nx, ny=Ny)
 
     vel_pars = {}
     for name in PARS_ORDER.keys():
@@ -396,7 +374,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     vel_pars['v_unit'] = pars['v_unit']
     vel_pars['r_unit'] = pars['r_unit']
 
-    vmap = VelocityMap2D('default', vel_pars)
+    vmap = VelocityMap('default', vel_pars)
 
     X, Y = utils.build_map_grid(Nx, Ny)
     Vnorm = vmap('obs', X, Y, normalized=True)

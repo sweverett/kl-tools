@@ -2,6 +2,7 @@ import types
 import numpy as np
 import os
 from multiprocessing import Pool
+# from schwimmbad import MPIPool
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -178,7 +179,11 @@ class ZeusRunner(object):
 
         if ncores > 1:
             os.environ['OMP_NUM_THREADS'] = '1'
-            with Pool(ncores) as pool:
+            with MPIPool() as pool:
+                if not pool.is_master():
+                    pool.wait()
+                    sys.exit(0)
+            # with Pool(ncores) as pool:
                 sampler = self._initialize_sampler(pool=pool)
                 sampler.run_mcmc(start, nsteps)
 
@@ -291,7 +296,7 @@ class ZeusRunner(object):
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
                     show=True, close=True, outfile=None, size=(14,14),
-                    title=None):
+                    title=None, use_derived=True):
         '''
         reference: list
             Reference values to plot on chains, such as true or MAP values
@@ -303,6 +308,8 @@ class ZeusRunner(object):
         crange: list
             A list of tuples or floats that define the parameter ranges or
             percentile fraction that is shown. Same as corner range arg
+        use_derived: bool
+            Turn on to plot derived parameters as well
         '''
 
         if self.has_run is not True:
@@ -319,20 +326,44 @@ class ZeusRunner(object):
 
         chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
 
+        if use_derived is True:
+            # add derived quantity sini*vcirc
+            new_shape = (chain.shape[0], chain.shape[1]+1)
+            new_chain = np.zeros((new_shape))
+            new_chain[:,0:-1] = chain
+            i1, i2 = PARS_ORDER['sini'], PARS_ORDER['vcirc']
+            new_chain[:,-1] = chain[:,i1] * chain[:,i2]
+            chain = new_chain
+
         if reference is not None:
             if len(reference) != self.ndim:
                 raise ValueError('Length of reference list must be same as Ndim!')
+
+            if use_derived is True:
+                ref = reference[i1]*reference[i2]
+                if isinstance(reference, list):
+                    reference.append(ref)
+                elif isinstance(reference, np.ndarray):
+                    arr = np.zeros(len(reference)+1)
+                    arr[0:-1] = reference
+                    arr[-1] = ref
+                    reference = arr
 
             names = self.ndim*['']
             for name, indx in PARS_ORDER.items():
                 names[indx] = name
 
+            if use_derived is True:
+                names.append('sini*vcirc')
+
         else:
             names = None
 
         if crange is not None:
-            if len(crange) != self.ndim:
-                raise ValueError('Length of crange list must be same as Ndim!')
+            if use_derived is True:
+                crange.append(crange[-1])
+            if len(crange) != len(names):
+                raise ValueError('Length of crange list must be same as names!')
 
         p = corner(
             chain, labels=names, truths=reference, range=crange
@@ -606,7 +637,6 @@ class KLensEmceeRunner(KLensZeusRunner):
             return self.sampler
         else:
             return
-
 
 def main(args):
 

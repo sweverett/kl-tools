@@ -11,6 +11,7 @@ from galsim.angle import Angle, radians
 import utils
 import basis
 import likelihood
+from transformation import TransformableImage
 
 import pudb
 
@@ -58,7 +59,6 @@ class IntensityMap(object):
 
         return
 
-    @abstractmethod
     def render(self, theta_pars, pars, redo=False):
         '''
         theta_pars: dict
@@ -86,6 +86,11 @@ class IntensityMap(object):
 
     @abstractmethod
     def _render(self, theta_pars, pars):
+        '''
+        Each subclass should define how to render
+
+        Most will need theta and pars, but not all
+        '''
         pass
 
     def plot(self, show=True, close=True, outfile=None, size=(7,7)):
@@ -214,7 +219,8 @@ class BasisIntensityMap(IntensityMap):
     TODO: Need a better name!
     '''
 
-    def __init__(self, datacube, basis_type='default', basis_kwargs=None):
+    def __init__(self, datacube, basis_type='default', basis_kwargs=None,
+                 fit_now=True):
         '''
         basis_type: str
             Name of basis type to use
@@ -222,28 +228,11 @@ class BasisIntensityMap(IntensityMap):
             A truncated datacube whose stacked slices will be fit to
         basis_kwargs: dict
             Dictionary of kwargs needed to construct basis
+        fit_now: bool
+            Turn on to fit the basis to the datacube now. This should be
+            turned off for subclasses that require the fitting to be done
+            later, such as when the image transforms are defined
         '''
-
-        # # Must pass nx, ny somewhere
-        # for name, n in {'nx':nx, 'ny':ny}.items():
-        #     if n is None:
-        #         if (basis_kwargs is None) or (name not in basis_kwargs):
-        #             raise ValueError(f'{name} must be passed either ' +\
-        #                              'explicitly or in basis_kwargs!')
-        #         else:
-        #             val = basis_kwargs[name]
-        #     else:
-        #         if name in basis_kwargs:
-        #             raise Exception(f'Can only pass {name} in one way!')
-        #         basis_kwargs[name] = n
-        #         val = n
-
-        #     if not isinstance(val, int):
-        #         raise TypeError(f'{name} must be an int!')
-
-        # # now guaranteed to be in basis_kwargs
-        # nx = basis_kwargs['nx']
-        # ny = basis_kwargs['ny']
 
         nx, ny = datacube.Nx, datacube.Ny
         super(BasisIntensityMap, self).__init__('basis', nx, ny)
@@ -252,7 +241,10 @@ class BasisIntensityMap(IntensityMap):
             basis_type, self.nx, self.ny, basis_kwargs=basis_kwargs
             )
 
-        self._fit_to_datacube(datacube)
+        if fit_now is True:
+            self._fit_to_datacube(datacube)
+        else:
+            self.image = None
 
         return
 
@@ -264,20 +256,89 @@ class BasisIntensityMap(IntensityMap):
     def get_basis(self):
         return self.fitter.basis
 
-    def render(self, theta_pars, pars):
+    def render(self, theta_pars=None, pars=None):
+        '''
+        These args exist to allow for a uniform API for
+        intensity maps
+        '''
+
+        super(BasisIntensityMap, self).render(theta_pars, pars)
+
+        return
+
+    def _render(self, theta_pars, pars):
         return self.image
 
-    # def _render(self, theta_pars, pars):
-    #     pass
+class TransformedBasis(BasisIntensityMap, TransformableImage):
+    '''
+    This class fits basis functions to the stacked datacube as in
+    BasisIntensityMap, but instead uses the chosen basis tranformed
+    into the obs plane from the disk plane
+    '''
+
+    def __init__(self, datacube, basis_type='default', basis_kwargs=None):
+        '''
+        Setup the basis, but can't setup the transforms until we have
+        access to the sampled transform parameters
+        '''
+
+        super(TransformedBasis, self).__init__(
+            datacube,
+            basis_type=basis_type,
+            basis_kwargs=basis_kwargs,
+            fit_now=False
+            )
+
+        # we can't render the image until the transformation params are
+        # defined, so we have to store the datacube for this subclass
+        self.datacube = datacube
+
+        # will be set once the transforms are defined
+        self.transform_pars = None
+        self._planes = None
+        self.obs2source = None
+        self.source2gal = None
+        self.gal2disk = None
+
+        return
+
+    def render(self, theta_pars, pars):
+
+        # Now we can initialize the transforms
+        super(TransformableImage, self).__init__(theta_pars)
+
+        super(TransformedBasis, self).render(theta_pars, pars)
+
+        return
+
+    def _render(self, theta_pars, pars):
+        # now we can finally fit the transformed basis funcs
+        # to the stored datacube
+        self._fit_to_datacube()
+
+        super(TransformedBasis, self)._render()
+
+        return
+
+    def _fit_to_datacube(self):
+        self.image = self.fitter.fit(self.datacube)
+
+        return
+
+    # def _setup_data_im(self, datacube):
+    #     self.data_image = np.sum(datacube._data, axis=2)
+
+    #     return
 
 def get_intensity_types():
     return INTENSITY_TYPES
 
 # NOTE: This is where you must register a new model
 INTENSITY_TYPES = {
-    'default': BasisIntensityMap,
+    'default': TransformedBasis,
     'basis': BasisIntensityMap,
     'inclined_exp': InclinedExponential,
+    'transformed_basis': TransformedBasis,
     }
 
 def build_intensity_map(name, datacube, kwargs):
@@ -403,8 +464,6 @@ class IntensityMapFitter(object):
               around the relevant emission line region, though not
               necessarily with the continuum emission subtracted
 
-        datacube: cube.DataCube
-            The datacube to find the MLE intensity map of
         cov: np.ndarray
             The covariance matrix of the datacube images.
             NOTE: If the covariance matrix is of the form sigma*I for a
@@ -416,8 +475,6 @@ class IntensityMapFitter(object):
         if (datacube.Nx, datacube.Ny) != (nx, ny):
             raise ValueError('DataCube must have same dimensions ' +\
                              'as intensity map!')
-
-        # X, Y = utils.build_map_grid(nx, ny)
 
         # We will fit to the sum of all slices
         data = np.sum(datacube._data, axis=2).reshape(nx*ny)
@@ -584,10 +641,37 @@ def main(args):
     imap = BasisIntensityMap(
         datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax}
         )
+    imap.render()
 
     outfile = os.path.join(outdir, 'shapelet-imap-render.png')
     print(f'Saving render for shapelet basis to {outfile}')
     imap.plot(outfile=outfile, show=show)
+
+    print('Initializing a TransformedBasis with shapelets')
+    basis_kwargs = {'Nmax':nmax}
+    imap = TransformedBasis(
+        datacube, basis_type='shapelets', basis_kwargs=basis_kwargs
+        )
+
+    print('Initializing a TransformedBasis with the builder')
+    imap_pars = {
+        'basis_kwargs': basis_kwargs
+    }
+    imap = build_intensity_map('transformed_basis', datacube, imap_pars)
+
+    true_pars = {
+        'g1': 0.05,
+        'g2': -0.025,
+        'theta_int': np.pi / 3,
+        'sini': 0.8,
+        'v0': 10.,
+        'vcirc': 200,
+        'rscale': 5,
+    }
+    pars = None
+    print('Rendering transformed shapelet fit')
+    pudb.set_trace()
+    imap.render(true_pars, pars)
 
     return 0
 

@@ -247,6 +247,8 @@ def _multiply(transform, x, y):
     returns: (x', y')
     '''
 
+    # TODO: We can generalize this by just reshaping an arbitrary ndarray
+    #       into a 2xNx*Ny*.... array
     # Can't just do a matrix multiplication because we can't assume
     # structure of pos; e.g. it might be a meshgrid array
 
@@ -482,5 +484,4 @@ def _disk2gal(pars, x, y):
     # transform = np.linalg.inv(gal2disk)
 
     return _multiply(transform, x, y)
-
 

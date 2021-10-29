@@ -324,7 +324,6 @@ def _transform_source2obs(pars):
     g1, g2 = pars['g1'], pars['g2']
 
     norm = 1. / (1. - (g1**2 + g2**2))
-    # norm = 1.
     transform =  norm * np.array([
         [1.+g1, g2],
         [g2, 1.-g1]

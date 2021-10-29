@@ -114,9 +114,6 @@ def log_likelihood(theta, datacube, pars):
     # unpack sampled zeus params
     theta_pars = theta2pars(theta)
 
-    # add to the rest of pars
-    # pars = {**theta_pars, **pars}
-
     Nx = datacube.Nx
     Ny = datacube.Ny
     Nspec = datacube.Nspec
@@ -146,9 +143,7 @@ def log_likelihood(theta, datacube, pars):
     sed = pars['sed']
     sed_array = np.array([sed.x, sed.y])
 
-    Npix = Nx * Ny
-
-    # NOTE: This doesn't work with numba
+    # NOTE: This doesn't currently work with numba
     inv_cov = _setup_inv_cov_matrix(Npix, pars)
 
     # if we are computing the marginalized posterior over intensity
@@ -333,12 +328,10 @@ def _setup_sed(pars):
 
     return sed
 
-def _setup_inv_cov_matrix(Npix, pars):
+def _setup_inv_cov_matrix(pars):
     '''
     Build covariance matrix for slice images
 
-    Npix: int
-        number of pixels
     pars: dict
         dictionary containing parameters needed to build cov matrix
 
@@ -346,11 +339,18 @@ def _setup_inv_cov_matrix(Npix, pars):
             generalized to a list of cov matrices
     '''
 
+    Nx, Ny = pars['Nx'], pars['Ny']
+    Npix = Nx*Ny
+
     # TODO: For now, treating pixel covariance as diagonal
     #       and uniform for a given slice
     sigma = pars['cov_sigma']
 
-    # cov = sigma**2 * np.identity(Npix)
+    # full matrix, but very inefficient for a diagonal
+    # cov matrix
+    # inv_cov = (1./sigma)**2 * np.identity(Npix)
+
+    # uses scipy sparse matrices
     inv_cov = (1./sigma)**2 * identity(Npix)
 
     return inv_cov
@@ -388,6 +388,9 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
         'flux': pars['true_flux'],
         'hlr': pars['true_hlr']
     }
+
+    if 'psf' in pars:
+        imap_pars['psf'] = pars['psf']
 
     # a slight abuse of API call here, passing a dummy datacube to
     # instantiate an inclined exponential as truth

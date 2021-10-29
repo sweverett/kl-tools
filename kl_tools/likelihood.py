@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from scipy.interpolate import interp1d
+import scipy
 from scipy.sparse import identity
 from astropy.units import Unit
 from argparse import ArgumentParser
@@ -62,20 +63,28 @@ def log_posterior(theta, data, pars={}):
     Natural log of the posterior dist. Target function for zeus
     to sample over
 
-    theta: Parameters sampled by zeus. Order defined in PARS_ORDER
-    data: DataCube object, truncated to desired lambda bounds
-    [pars]: Dict of any other parameters needed to evaluate
-            likelihood
+    theta: list
+        Parameters sampled by zeus. Order defined in PARS_ORDER
+    data: DataCube
+        Truncated to desired lambda bounds
+    pars: dict
+        Dictionary of any other parameters needed to evaluate
+        the likelihood
     '''
-
 
     logprior = log_prior(theta, pars)
 
     if logprior == -np.inf:
-        return -np.inf
+        return -np.inf, (-np.inf, -np.inf)
 
     else:
-        return logprior + log_likelihood(theta, data, pars)
+        # Determine whether to sample from the regular posterior or
+        # marginalized over intensity basis functions
+        # TODO: Implement here, if desired
+        # return logprior + log_likelihood(theta, data, pars)
+        loglike = log_likelihood(theta, data, pars)
+
+        return logprior + loglike, (logprior, loglike)
 
 def log_prior(theta, pars):
     '''
@@ -131,7 +140,7 @@ def log_likelihood(theta, datacube, pars):
         'obs', X, Y, normalized=True, use_numba=use_numba
         )
 
-    i_array = imap.render(theta_pars, pars)
+    i_array = imap.render(theta_pars, datacube, pars)
 
     # numba can't handle interp tables, so we do it ourselves
     sed = pars['sed']
@@ -139,18 +148,40 @@ def log_likelihood(theta, datacube, pars):
 
     Npix = Nx * Ny
 
-    # sigma = pars['cov_sigma']
-    # cov = _setup_cov_matrix(Npix, sigma)
-
     # NOTE: This doesn't work with numba
-    cov = _setup_cov_matrix(Npix, pars)
+    inv_cov = _setup_inv_cov_matrix(Npix, pars)
 
-    return _log_likelihood(
-        datacube._data, lambdas, v_array, i_array, sed_array, cov
+    # if we are computing the marginalized posterior over intensity
+    # map parameters, then we need to scale this likelihood by a
+    # determinant factor
+    try:
+        if pars['marginalize_intensity'] is True:
+            log_det = _compute_log_det(imap, pars)
+        else:
+            log_det = 1.
+    except (KeyError, AttributeError):
+        # Ignore if not set in pars, or if imap doesn't have this defined
+        log_det = 1.
+
+    return (-0.5 * log_det) + _log_likelihood(
+        datacube._data, lambdas, v_array, i_array, sed_array, inv_cov
         )
 
+def _compute_log_det(imap, pars):
+    # TODO: it would be better to pass inv_cov directly,
+    # but for now we are only using diagonal inv_cov matrices
+    # anyway
+    # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
+    log_det = imap.fitter.compute_marginalization_det(pars=pars, log=True)
+
+    if log_det == 0:
+        print('Warning: determinant is 0. Cannot compute ' +\
+              'marginalized posterior over intensity basis functions')
+
+    return log_det
+
 # @njit
-def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
+def _log_likelihood(datacube, lambdas, vmap, imap, sed, inv_cov):
     '''
     datacube: The (Nx,Ny,Nspec) data array of a DataCube object,
                 truncated to desired lambda bounds
@@ -164,7 +195,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     sed: A 2D numpy array with axis=0 being the lambda values of
          a 1D interpolation table, with axis=1 being the corresponding
          SED values
-    cov: A (Nx*Ny, Nx*Ny) covariance matrix for the image pixels
+    inv_cov: A (Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
 
     TODO: Need to check that the sed values are correct for this expression
     '''
@@ -177,8 +208,6 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
     # approx valid for v << c
     zfactor = 1. / (1. + vmap)
 
-    # model = np.empty(datacube.shape)
-
     loglike = 0
 
     # can figure out how to remove this for loop later
@@ -190,7 +219,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, cov):
             )
 
         diff = (datacube[:,:,i] - model).reshape(Nx*Ny)
-        chi2 = diff.T.dot(cov.dot(diff))
+        chi2 = diff.T.dot(inv_cov.dot(diff))
 
         loglike += -0.5*chi2
 
@@ -273,8 +302,6 @@ def _setup_imap(theta_pars, pars, datacube):
     imap_pars = pars['intensity'].copy()
     imap_type = imap_pars['type']
     del imap_pars['type']
-    # imap_pars['nx'] = pars['Nx']
-    # imap_pars['ny'] = pars['Ny']
 
     return intensity.build_intensity_map(imap_type, datacube, imap_pars)
 
@@ -306,7 +333,7 @@ def _setup_sed(pars):
 
     return sed
 
-def _setup_cov_matrix(Npix, pars):
+def _setup_inv_cov_matrix(Npix, pars):
     '''
     Build covariance matrix for slice images
 
@@ -324,9 +351,9 @@ def _setup_cov_matrix(Npix, pars):
     sigma = pars['cov_sigma']
 
     # cov = sigma**2 * np.identity(Npix)
-    cov = sigma**2 * identity(Npix)
+    inv_cov = (1./sigma)**2 * identity(Npix)
 
-    return cov
+    return inv_cov
 
 def setup_likelihood_test(true_pars, pars, shape, lambdas):
 
@@ -366,7 +393,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     # instantiate an inclined exponential as truth
     dc = DataCube(shape=shape, bandpasses=bandpasses)
     imap = intensity.build_intensity_map('inclined_exp', dc, imap_pars)
-    true_im = imap.render(true_pars, pars)
+    true_im = imap.render(true_pars, dc, pars)
 
     vel_pars = {}
     for name in PARS_ORDER.keys():
@@ -444,7 +471,7 @@ def setup_test_pars(nx, ny):
         'sed_end': 660,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 3, # pixel counts; dummy value
+        'cov_sigma': 1, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,

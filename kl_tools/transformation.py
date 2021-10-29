@@ -304,6 +304,12 @@ def _transform_obs2source(pars):
         [1.-g1, -g2],
         [-g2, 1.+g1]
     ])
+    # NOTE: to match TFCube...
+    # norm = 1. / (1. -(g1**2 + g2**2))
+    # transform =  norm * np.array([
+    #     [1.-g1, -g2],
+    #     [-g2, 1.+g1]
+    # ])
 
     return transform
 
@@ -317,12 +323,15 @@ def _transform_source2obs(pars):
 
     g1, g2 = pars['g1'], pars['g2']
 
-    # Lensing transformation
-    norm = 1. / (g1**2 + g2**2 - 1.)
+    norm = 1. / (1. - (g1**2 + g2**2))
+    # norm = 1.
     transform =  norm * np.array([
-        [-g1-1., -g2],
-        [-g2, g1-1.]
+        [1.+g1, g2],
+        [g2, 1.-g1]
     ])
+    # transform = np.linalg.inv(
+    #     _transform_obs2source(pars)
+    #     )
 
     return transform
 
@@ -375,11 +384,13 @@ def _transform_gal2disk(pars):
     '''
 
     sini = pars['sini']
-    i = np.arcsin(sini)
+    # i = np.arcsin(sini)
+    # cosi = np.cos(i)
+    cosi = np.sqrt(1-sini**2)
 
     transform =  np.array([
         [1., 0],
-        [0, 1. / np.cos(i)]
+        [0, 1. / cosi]
     ])
 
     return transform
@@ -392,11 +403,13 @@ def _transform_disk2gal(pars):
     '''
 
     sini = pars['sini']
-    i = np.arcsin(sini)
+    # i = np.arcsin(sini)
+    # cosi = np.cos(i)
+    cosi = np.sqrt(1-sini**2)
 
     transform =  np.array([
         [1., 0],
-        [0, np.cos(i)]
+        [0, cosi]
     ])
 
     return transform

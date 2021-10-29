@@ -25,25 +25,63 @@ def main(args):
     outdir = os.path.join(utils.TEST_DIR, 'test_likelihood_by_param')
     utils.make_dir(outdir)
 
+    # OLD:
+    # true_pars = {
+    #     'g1': 0.05,
+    #     'g2': -0.025,
+    #     'theta_int': np.pi / 3.,
+    #     'sini': 0.8,
+    #     'v0': 10.,
+    #     'vcirc': 200.,
+    #     'rscale': 5,
+    # }
+    # additional args needed for prior / likelihood evaluation
+    # pars = {
+    #     'Nx': 30, # pixels
+    #     'Ny': 30, # pixels
+    #     'true_flux': 5e4, # counts
+    #     'true_hlr': 5, # pixels
+    #     'v_unit': Unit('km / s'),
+    #     'r_unit': Unit('pixel'),
+    #     'line_std': .17, # emission line SED std; nm
+    #     'line_value': 656.28, # emission line SED std; nm
+    #     'line_unit': Unit('nm'),
+    #     'sed_start': 650,
+    #     'sed_end': 660,
+    #     'sed_resolution': 0.025,
+    #     'sed_unit': Unit('nm'),
+    #     'cov_sigma': 1, # pixel counts; dummy value
+    #     'bandpass_throughput': '0.2',
+    #     'bandpass_unit': 'nm',
+    #     'bandpass_zp': 30,
+    #     'use_numba': False,
+    # }
+
     true_pars = {
         'g1': 0.05,
         'g2': -0.025,
-        'theta_int': np.pi / 3.,
+        'theta_int': np.pi / 3,
         'sini': 0.8,
         'v0': 10.,
-        'vcirc': 200.,
+        'vcirc': 200,
         'rscale': 5,
     }
 
     # additional args needed for prior / likelihood evaluation
+    halpha = 656.28 # nm
+    R = 5000.
+    z = 0.3
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
-        'true_flux': 5e4, # counts
+        'true_flux': 1e5, # counts
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),
-        'r_unit': Unit('pixel'),
-        'line_std': .17, # emission line SED std; nm
+        'r_unit': Unit('kpc'),
+        'z': z,
+        'spec_resolution': R,
+        # 'line_std': 0.17,
+        'line_std': halpha * (1.+z) / R, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
         'sed_start': 650,
@@ -51,9 +89,35 @@ def main(args):
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
         'cov_sigma': 1, # pixel counts; dummy value
-        'bandpass_throughput': '0.2',
+        'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
+        # 'priors': {
+        #     'g1': priors.GaussPrior(0., 0.1),#, clip_sigmas=2),
+        #     'g2': priors.GaussPrior(0., 0.1),#, clip_sigmas=2),
+        #     'theta_int': priors.UniformPrior(0., np.pi),
+        #     # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
+        #     'sini': priors.UniformPrior(0., 1.),
+        #     # 'sini': priors.GaussPrior()
+        #     'v0': priors.UniformPrior(0, 20),
+        #     'vcirc': priors.GaussPrior(200, 10, clip_sigmas=2),
+        #     # 'vcirc': priors.UniformPrior(190, 210),
+        #     'rscale': priors.UniformPrior(0, 10),
+        # },
+        'intensity': {
+            # For this test, use truth info
+            # 'type': 'inclined_exp',
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
+            'type': 'basis',
+            'basis_type': 'shapelets',
+            'basis_kwargs': {
+                'Nmax': 10,
+                'plane': 'disk'
+                # 'plane': 'obs'
+                }
+        },
+        # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
     }
 
@@ -118,16 +182,19 @@ def main(args):
     else:
         plt.close()
 
+
+    # These are centered at truth
     test_pars = {
         'g1': (-0.2, 0.2, .005),
         'g2': (-0.2, 0.2, .005),
         'theta_int': (0., np.pi, .05),
-        'sini': (0., 1., .01),
+        'sini': (0., 0.99, .01),
         'v0': (0, 20, .05),
         'vcirc': (100, 300, 1),
         'rscale': (0, 10, .05),
     }
 
+    # NOTE: Just for testing, can remove later
     size = (14,5)
     # sqrt = int(np.ceil(np.sqrt(len(true_pars))))
     nrows = 2
@@ -139,6 +206,7 @@ def main(args):
     # TODO: Can add a multiprocessing pool here if needed
     k = 1
     for par, par_range in test_pars.items():
+        print(f'Starting loop over {par}: {par_range}')
         theta_pars = true_pars.copy()
         theta_true = pars2theta(theta_pars)
 
@@ -149,7 +217,8 @@ def main(args):
         left, right, dx = par_range
         assert right > left
         # N = int((right - left) / dx)
-        N = 1000
+        # N = 1000
+        N = 200
         loglike = np.zeros(N)
         par_val = np.zeros(N)
 

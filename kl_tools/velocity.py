@@ -180,6 +180,26 @@ class VelocityMap(TransformableImage):
         return func(pars, x, y, speed=speed)
 
     @classmethod
+    def _eval_in_obs_plane(cls, pars, x, y, **kwargs):
+        '''
+        pars: dict
+            Holds the model & transformation parameters
+        x,y: np.ndarray
+            The position coordintates in the obs plane
+
+        kwargs holds any additional params that might be needed
+        in subclass evaluations, such as using speed instead of
+        velocity
+        '''
+
+        # evaluate vmap in obs plane without any systematic offset
+        obs_vmap = super(VelocityMap, cls)._eval_in_obs_plane(
+            pars, x, y, **kwargs)
+
+        # now add systematic velocity
+        return pars['v0'] + obs_vmap
+
+    @classmethod
     def _eval_in_gal_plane(cls, pars, x, y, **kwargs):
         '''
         pars: dict
@@ -228,7 +248,7 @@ class VelocityMap(TransformableImage):
 
         atan_r = np.arctan(r  / pars['rscale'])
 
-        v_r = pars['v0'] + (2./ np.pi) * pars['vcirc'] * atan_r
+        v_r = (2./ np.pi) * pars['vcirc'] * atan_r
 
         return v_r
 
@@ -389,7 +409,7 @@ class VelocityMap(TransformableImage):
         return
 
     def plot_map_transforms(self, size=(9,8), outfile=None, show=True, close=True,
-                            speed=False, center=True):
+                            speed=False, center=True, rmax=None):
 
         pars = self.model.pars
 
@@ -397,7 +417,9 @@ class VelocityMap(TransformableImage):
         vunit = pars['v_unit']
         rscale = pars['rscale']
 
-        rmax = 5. * rscale
+        if rmax is None:
+            rmax = 5. * rscale
+
         Nr = 100
 
         Nx = 2*Nr + 1
@@ -479,21 +501,47 @@ def main(args):
 
     model_name = 'centered'
     model_pars = {
-        'v0': 0, # km/s
-        'vcirc': 200, # km/s
-        # 'r0': 0, # kpc
-        'rscale': 3, #kpc
-        # 'rscale': 128./5, # pixels
+        'g1': 0.05,
+        'g2': -0.025,
+        'theta_int': np.pi / 3,
         'sini': 0.8,
-        'theta_int': np.pi/3, # rad
-        # 'r_unit': units.kpc,
+        'v0': 10.,
+        'vcirc': 200,
+        'rscale': 5,
         'r_unit': units.Unit('pixel'),
         'v_unit': units.km / units.s,
-        'g1': 0.1,
-        'g2': 0.05,
-        # 'g1': 0,
-        # 'g2': 0
     }
+
+    # These are centered at an alt solution,
+    # using disk basis Nmax=10 (cov_sigma=1)
+    # model_pars = {
+        # 'g1': 0.1703,
+        # 'g2': -0.2234,
+        # 'theta_int': 1.0537,
+        # 'sini': 0.9205,
+        # 'v0': 9.0550,
+        # 'vcirc': 170.6623,
+        # 'rscale': 6.0641,
+    #     'r_unit': units.Unit('pixel'),
+    #     'v_unit': units.km / units.s,
+    #     }
+
+    # These are centered at an alt solution,
+    # using correct intensity map (cov_sig=0.5)
+    # model_pars = {
+    #     'g1': -0.0249,
+    #     'g2': 0.1070,
+    #     'theta_int': 1.0423,
+    #     'sini': 0.5770,
+    #     'v0': 13.7093,
+    #     'vcirc': 275.8384,
+    #     'rscale': 4.2344,
+    #     'r_unit': units.Unit('pixel'),
+    #     'v_unit': units.km / units.s,
+    #     }
+
+    rmax = 30
+    # rmax = None
 
     print('Creating VelocityMap from params')
     vmap = VelocityMap(model_name, model_pars)
@@ -501,13 +549,16 @@ def main(args):
     print('Making speed map transform plots')
     outfile = os.path.join(outdir, f'speedmap-transorms.png')
     vmap.plot_map_transforms(
-        outfile=outfile, show=show, speed=True, center=center
+        outfile=outfile, show=show, speed=True, center=center,
+        rmax=rmax
         )
 
     print('Making velocity map transform plots')
     outfile = os.path.join(outdir, f'vmap-transorms.png')
     vmap.plot_map_transforms(
-        outfile=outfile, show=show, speed=False, center=center)
+        outfile=outfile, show=show, speed=False, center=center,
+        rmax=rmax
+        )
 
     # print('Making alt speed map transform plots')
     # outfile = os.path.join(outdir, f'alt-speedmap-transorms.png')
@@ -517,22 +568,23 @@ def main(args):
         print(f'Making plot of velocity field in {plane} plane')
         outfile = os.path.join(outdir, f'vmap-{plane}.png')
         vmap.plot(
-            plane, outfile=outfile, show=False, center=center
+            plane, outfile=outfile, show=False, center=center,
+            rmax=rmax
             )
 
     print('Making combined velocity field plot')
-    plot_kwargs = {}
+    plot_kwargs = {'rmax':rmax}
     outfile = os.path.join(outdir, 'vmap-all.png')
     vmap.plot_all_planes(
-        plot_kwargs=plot_kwargs, show=show, outfile=outfile, center=center
+        plot_kwargs=plot_kwargs, show=show, outfile=outfile, center=center,
         )
 
     print('Making combined velocity field plot normalized by c')
-    plot_kwargs = {}
+    plot_kwargs = {'rmax':rmax}
     outfile = os.path.join(outdir, 'vmap-all-normed.png')
     vmap.plot_all_planes(
         plot_kwargs=plot_kwargs, show=show, outfile=outfile,
-                         normalized=True, center=center
+                         normalized=True, center=center,
         )
 
     return 0

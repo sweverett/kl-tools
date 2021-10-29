@@ -144,7 +144,7 @@ def log_likelihood(theta, datacube, pars):
     sed_array = np.array([sed.x, sed.y])
 
     # NOTE: This doesn't currently work with numba
-    inv_cov = _setup_inv_cov_matrix(Npix, pars)
+    inv_cov = _setup_inv_cov_matrix(pars)
 
     # if we are computing the marginalized posterior over intensity
     # map parameters, then we need to scale this likelihood by a

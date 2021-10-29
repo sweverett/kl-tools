@@ -14,6 +14,7 @@ from scipy.special import factorial
 
 import utils
 import likelihood
+from transformation import transform_coords
 
 import pudb
 
@@ -24,12 +25,17 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
+# TODO: In retrospect, it probably makes more sense to have theta_pars
+#       passed at construction time, so a basis is always defined only
+#       for a specific sample, as they are being constructed for each
+#       sample anyway
+
 class Basis(object):
     '''
     Base Basis class
     '''
 
-    def __init__(self, name, N, nx, ny):
+    def __init__(self, name, N, nx, ny, plane):
         '''
         name: str
             Name of basis
@@ -39,12 +45,26 @@ class Basis(object):
             Size of image on x-axis
         ny: int
             Size of image on y-axis
+        plane: str
+            The image plane where the basis is defined;
+            e.g. disk, obs, etc.
         '''
+
+        pars = {'N':N, 'nx':nx, 'ny':ny}
+        for key, val in pars.items():
+            if not isinstance(val, int):
+                raise TypeError('{key} must be an int!')
+
+        pars = {'name':name, 'plane':plane}
+        for key, val in pars.items():
+            if not isinstance(val, str):
+                raise TypeError('{key} must be an int!')
 
         self.name = name
         self.N = N
         self.im_nx = nx
         self.im_ny = ny
+        self.plane = plane
 
         self._initialize()
 
@@ -64,10 +84,12 @@ class Basis(object):
 
         return self._get_basis_func(n)
 
-    def render_im(self, coefficients):
+    def render_im(self, theta_pars, coefficients):
         '''
-        Render image given basis coefficients
+        Render image given transformation parameters andbasis coefficients
 
+        theta_pars: dict
+            A dict that holds the sampled transformation parameters
         coefficients: list, np.array
             A list or array of basis coefficients
         '''
@@ -77,7 +99,11 @@ class Basis(object):
                              f'does not equal {self.N}!')
 
         nx, ny = self.im_nx, self.im_ny
-        X, Y = utils.build_map_grid(nx, ny)
+        Xobs, Yobs = utils.build_map_grid(nx, ny)
+
+        X, Y = transform_coords(
+            Xobs, Yobs, 'obs', self.plane, theta_pars
+            )
 
         im = np.zeros((nx, ny))
 
@@ -93,12 +119,15 @@ class Basis(object):
         pass
 
 class ShapeletBasis(Basis):
-    def __init__(self, nx, ny, beta=None, Nmax=None):
+    def __init__(self, nx, ny, plane, beta=None, Nmax=None):
         '''
         nx: int
             Size of the image x-axis
         ny: int
             Size of the image y-axis
+        plane: str
+            The image plane where the basis is defined;
+            e.g. disk, obs, etc.
         beta: float
             Scale factor used to define basis functions. If
             None, then set automatically given (nx, ny)
@@ -134,7 +163,7 @@ class ShapeletBasis(Basis):
         # Compute number of independent basis vectors given Nmax
         N = (self.Nmax+1) * (self.Nmax+2) // 2
 
-        super(ShapeletBasis, self).__init__('shapelet', N, nx, ny)
+        super(ShapeletBasis, self).__init__('shapelet', N, nx, ny, plane)
 
         self._setup_nxny_grid()
 

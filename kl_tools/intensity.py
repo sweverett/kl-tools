@@ -11,7 +11,8 @@ from galsim.angle import Angle, radians
 import utils
 import basis
 import likelihood
-from transformation import TransformableImage
+import parameters
+from transformation import transform_coords, TransformableImage
 
 import pudb
 
@@ -30,10 +31,6 @@ parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
 class IntensityMap(object):
-    '''
-    If needed, could have this be the return class of
-    IntensityMapFitter.fit()
-    '''
 
     def __init__(self, name, nx, ny):
         '''
@@ -59,7 +56,7 @@ class IntensityMap(object):
 
         return
 
-    def render(self, theta_pars, pars, redo=False):
+    def render(self, theta_pars, datacube, pars, redo=False):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
@@ -81,11 +78,10 @@ class IntensityMap(object):
             if redo is False:
                 return self.image
 
-        else:
-            return self._render(theta_pars, pars)
+        return self._render(theta_pars, datacube, pars)
 
     @abstractmethod
-    def _render(self, theta_pars, pars):
+    def _render(self, theta_pars, datacube, pars):
         '''
         Each subclass should define how to render
 
@@ -157,17 +153,16 @@ class InclinedExponential(IntensityMap):
 
         return
 
-    def _render(self, theta_pars, pars):
+    def _render(self, theta_pars, datacube, pars):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
+        datacube: DataCube
+            Truncated data cube of emission line
         pars: dict
             A dictionary of any additional parameters needed
             to render the intensity map
-        redo: bool
-            Set to remake rendered image regardless of whether
-            it is already internally stored
 
         return: np.ndarray
             The rendered intensity map
@@ -219,8 +214,7 @@ class BasisIntensityMap(IntensityMap):
     TODO: Need a better name!
     '''
 
-    def __init__(self, datacube, basis_type='default', basis_kwargs=None,
-                 fit_now=True):
+    def __init__(self, datacube, basis_type='default', basis_kwargs=None):
         '''
         basis_type: str
             Name of basis type to use
@@ -228,117 +222,62 @@ class BasisIntensityMap(IntensityMap):
             A truncated datacube whose stacked slices will be fit to
         basis_kwargs: dict
             Dictionary of kwargs needed to construct basis
-        fit_now: bool
-            Turn on to fit the basis to the datacube now. This should be
-            turned off for subclasses that require the fitting to be done
-            later, such as when the image transforms are defined
         '''
 
         nx, ny = datacube.Nx, datacube.Ny
         super(BasisIntensityMap, self).__init__('basis', nx, ny)
+        self.basis_kwargs = basis_kwargs
 
-        self.fitter = IntensityMapFitter(
-            basis_type, self.nx, self.ny, basis_kwargs=basis_kwargs
-            )
+        self._setup_fitter(basis_type, nx, ny, basis_kwargs=basis_kwargs)
 
-        if fit_now is True:
-            self._fit_to_datacube(datacube)
-        else:
-            self.image = None
+        # if fit_now is True:
+        #     self._setup_fitter(
+        #         basis_type, nx, ny, basis_kwargs=basis_kwargs
+        #         )
+
+        #     self._fit_to_datacube(datacube)
+        #     self.datacube = None # Not needed in this case
+        # else:
+        # Not all subclasses can fit to the datacube at instantiation time,
+        # so we wait to initialize fitter until rendering
+        self.image = None
 
         return
 
-    def _fit_to_datacube(self, datacube):
-        self.image = self.fitter.fit(datacube)
+    def _setup_fitter(self, basis_type, nx, ny, basis_kwargs=None):
+        self.fitter = IntensityMapFitter(
+            basis_type, nx, ny, basis_kwargs=basis_kwargs
+            )
+
+        return
+
+    def _fit_to_datacube(self, theta_pars, datacube, pars):
+        self.image = self.fitter.fit(theta_pars, datacube, pars)
 
         return
 
     def get_basis(self):
         return self.fitter.basis
 
-    def render(self, theta_pars=None, pars=None):
-        '''
-        These args exist to allow for a uniform API for
-        intensity maps
-        '''
-
-        super(BasisIntensityMap, self).render(theta_pars, pars)
-
-        return
-
-    def _render(self, theta_pars, pars):
-        return self.image
-
-class TransformedBasis(BasisIntensityMap, TransformableImage):
-    '''
-    This class fits basis functions to the stacked datacube as in
-    BasisIntensityMap, but instead uses the chosen basis tranformed
-    into the obs plane from the disk plane
-    '''
-
-    def __init__(self, datacube, basis_type='default', basis_kwargs=None):
-        '''
-        Setup the basis, but can't setup the transforms until we have
-        access to the sampled transform parameters
-        '''
-
-        super(TransformedBasis, self).__init__(
-            datacube,
-            basis_type=basis_type,
-            basis_kwargs=basis_kwargs,
-            fit_now=False
+    def render(self, theta_pars, datacube, pars, redo=False):
+        return super(BasisIntensityMap, self).render(
+            theta_pars, datacube, pars, redo=redo
             )
 
-        # we can't render the image until the transformation params are
-        # defined, so we have to store the datacube for this subclass
-        self.datacube = datacube
+    def _render(self, theta_pars, datacube, pars):
 
-        # will be set once the transforms are defined
-        self.transform_pars = None
-        self._planes = None
-        self.obs2source = None
-        self.source2gal = None
-        self.gal2disk = None
+        self._fit_to_datacube(theta_pars, datacube, pars)
 
-        return
-
-    def render(self, theta_pars, pars):
-
-        # Now we can initialize the transforms
-        super(TransformableImage, self).__init__(theta_pars)
-
-        super(TransformedBasis, self).render(theta_pars, pars)
-
-        return
-
-    def _render(self, theta_pars, pars):
-        # now we can finally fit the transformed basis funcs
-        # to the stored datacube
-        self._fit_to_datacube()
-
-        super(TransformedBasis, self)._render()
-
-        return
-
-    def _fit_to_datacube(self):
-        self.image = self.fitter.fit(self.datacube)
-
-        return
-
-    # def _setup_data_im(self, datacube):
-    #     self.data_image = np.sum(datacube._data, axis=2)
-
-    #     return
+        return self.image
 
 def get_intensity_types():
     return INTENSITY_TYPES
 
 # NOTE: This is where you must register a new model
 INTENSITY_TYPES = {
-    'default': TransformedBasis,
+    'default': BasisIntensityMap,
     'basis': BasisIntensityMap,
     'inclined_exp': InclinedExponential,
-    'transformed_basis': TransformedBasis,
     }
 
 def build_intensity_map(name, datacube, kwargs):
@@ -393,6 +332,13 @@ class IntensityMapFitter(object):
 
         self._initialize_basis(basis_kwargs)
 
+        # will be set once transformation params and cov
+        # are passed
+        self.design_mat = None
+        self.pseudo_inv = None
+        self.marginalize_det = None
+        self.marginalize_det_log = None
+
         return
 
     def _initialize_basis(self, basis_kwargs):
@@ -403,59 +349,150 @@ class IntensityMapFitter(object):
             basis_kwargs = {
                 'nx': self.nx,
                 'ny': self.ny,
+                'plane': 'disk'
                 }
 
         self.basis = basis.build_basis(self.basis_type, basis_kwargs)
         self.Nbasis = self.basis.N
         self.mle_coefficients = np.zeros(self.Nbasis)
 
-        self._initialize_pseudo_inv()
-
         return
 
-    # TODO: Add @njit when ready
-    def _initialize_pseudo_inv(self):
+    def _initialize_design_matrix(self, theta_pars):
         '''
-        Setup Moore-Penrose pseudo inverse given basis
+        Setup the design matrix, whose cols are the (possibly transformed)
+        basis functions at the obs pixel locations
 
-        data: np.ndarray
-            The sum of datacube slices corresponding to the emission
-            line. This is what we will fit the intensity map to
-        basis: list
-            A list of functions that evaluate the ith basis function
-            at the given location(s)
+        theta_pars: dict
+            A dictionary of the sampled parameters, including
+            transformation parameters
         '''
-
 
         Ndata = self.nx * self.ny
         Nbasis = self.Nbasis
 
-        # build image grid vectors
-        # X, Y = utils.build_map_grid(nx, ny)
-        X, Y = self.grid
+        # the plane where the basis is defined
+        basis_plane = self.basis.plane
+
+        # build image grid vectors in obs plane
+        Xobs, Yobs = self.grid
+
+        # find corresponding gird positions in the basis plane
+        X, Y = transform_coords(
+            Xobs, Yobs, 'obs', basis_plane, theta_pars
+            )
+
         x = X.reshape(Ndata)
         y = Y.reshape(Ndata)
 
         # the design matrix for a given basis and datacube
-        M = np.zeros((Ndata, Nbasis))
+        self.design_mat = np.zeros((Ndata, Nbasis))
         for n in range(Nbasis):
             func, func_args = self.basis.get_basis_func(n)
             args = [x, y, *func_args]
-            M[:,n] = func(*args)
-
-        # now compute the pseudo-inverse:
-        self.pseudo_inv = np.linalg.pinv(M)
-
-        # for n, b in enumerate(basis):
-        #     X[:, n] = b(data_vec)
-
-        # for n in range(Ndata):
-        #     for m in range(Ndata):
-        #         self.pseudo_inv[n,m] = self.basis
+            self.design_mat[:,n] = func(*args)
 
         return
 
-    def fit(self, datacube, cov=None):
+    # TODO: Add @njit when ready
+    def _initialize_pseudo_inv(self, theta_pars, max_fail=5, redo=True):
+        '''
+        Setup Moore-Penrose pseudo inverse given basis
+
+        theta_pars: dict
+            A dictionary of the sampled parameters, including
+            transformation parameters
+        max_fail: bool
+            Maximum number of times it will try to re-compute the
+            pseudo inverse if the SVD fails
+        redo: bool
+            Set to redo computation even if attribute already exists
+        '''
+
+        if (redo is True) or (self.design_mat is None):
+            self._initialize_design_matrix(theta_pars)
+
+        # now compute the pseudo-inverse:
+        fail = 0
+        while True:
+            try:
+                self.pseudo_inv = np.linalg.pinv(self.design_mat)
+                break
+            except np.linalg.LinAlgError as e:
+                print('Warning: pseudo-inverse calculation failed')
+                if fail > max_fail:
+                    print('Trying again')
+                else:
+                    raise Exception('Pseudo-inverse failed after ' +\
+                                    f'{max_fail+1} attempts\n' + str(e))
+
+        return
+
+    def compute_marginalization_det(self, inv_cov=None, pars=None, redo=True,
+                                    log=False):
+        '''
+        Compute the determinant factor needed to scale the marginalized
+        posterior over intensity map basis function coefficients
+
+        inv_cov: np.array
+            The datacube inv_covariance matrix
+            NOTE: For now, we assume it is constant across slices
+        pars: dict
+            A dictionary holding any additional parameters needed during
+            likelihood evaluation
+        redo: bool
+            Set to recompute the determinant if already stored in memory
+        log: bool
+            Set to compute the log of the determinant instead
+        '''
+
+        if inv_cov is None:
+            if pars is None:
+                raise Exception('Must pass either an inv_cov matrix or pars dict!')
+            else:
+                # TODO: A bit hacky, but we are just using diagonal cov matrices
+                # right now anyway
+                sigma = pars['cov_sigma']
+        else:
+            # Won't use a constant sigma, instead will use full inv_cov matrix
+            sigma = None
+
+        if (redo is True) or (self.marginalize_det is None):
+            phi = self.design_mat
+
+            if inv_cov is None:
+                M = (1./sigma**2) * phi.T.dot(phi)
+            else:
+                M = phi.T.dot(inv_cov.dot(M))
+
+            if log is False:
+                det = np.linalg.det(M)
+            else:
+                # We don't care about the sign in this case
+                sign, det = np.linalg.slogdet(M)
+
+        self.marginalize_det = det
+        self.marginalize_det_log = log
+
+        return det
+
+    def _initialize_fit(theta_pars, pars):
+        '''
+        Setup needed quantities for finding MLE combination of basis
+        funcs, along with marginalization factor from the determinant
+
+        theta_pars: dict
+            A dictionary of the sampled parameters, including
+            transformation parameters
+        '''
+
+        # pseudo_inv calc will also initialize design matrix
+        self._initialize_pseudo_inv(theta_pars, redo=True)
+        # self._initialize_marginalization_det(theta_pars, pars)
+
+        return
+
+    def fit(self, theta_pars, datacube, pars, cov=None):
         '''
         Fit MLE of the intensity map for a given set of datacube
         slices
@@ -464,17 +501,28 @@ class IntensityMapFitter(object):
               around the relevant emission line region, though not
               necessarily with the continuum emission subtracted
 
+        theta: dict
+            A dictionary of sampled parameters
+        datacube: DataCube
+            The truncated datacube around an emission line
+        pars: dict
+            A dictionary holding any additional parameters needed during
+            likelihood evaluation
         cov: np.ndarray
             The covariance matrix of the datacube images.
             NOTE: If the covariance matrix is of the form sigma*I for a
                   constant sigma, it does not contribute to the MLE. Thus
                   you should only pass cov if it is non-trivial
+            TODO: This should be handled by pars in future
         '''
 
         nx, ny = self.nx, self.ny
         if (datacube.Nx, datacube.Ny) != (nx, ny):
             raise ValueError('DataCube must have same dimensions ' +\
                              'as intensity map!')
+
+        # Initialize pseudo-inverse given the transformation parameters
+        self._initialize_pseudo_inv(theta_pars)
 
         # We will fit to the sum of all slices
         data = np.sum(datacube._data, axis=2).reshape(nx*ny)
@@ -486,7 +534,7 @@ class IntensityMapFitter(object):
         self.mle_coefficients = mle_coeff
 
         # Now create MLE intensity map
-        mle_im = self.basis.render_im(mle_coeff)
+        mle_im = self.basis.render_im(theta_pars, mle_coeff)
 
         assert mle_im.shape == (nx, ny)
         self.mle_im = mle_im
@@ -560,6 +608,31 @@ class IntensityMapFitter(object):
 
         return
 
+class TransformedIntensityMapFitter(object):
+    '''
+    This class does the same thing as IntensityMapFitter,
+    but with basis functions transformed according to
+    currently sampled parameters
+    '''
+
+    def __init__(self, basis_type, nx, ny, basis_kwargs=None):
+        '''
+        transform_pars: dict
+            A dictionary that holds at least the params needed
+            to define the image transformations; g1, g2, theta_int,
+            and sini
+        '''
+
+        super(TransformedIntensityMapFitter, self).__init__(
+            basis_type, nx, ny, basis_kwargs=basis_kwargs
+            )
+
+        if not isinstance(transform_pars, dict):
+            raise TypeError('transform_pars must be a dict!')
+        self.transform_pars = transform_pars
+
+        return
+
 def main(args):
     '''
     For now, just used for testing the classes
@@ -571,10 +644,16 @@ def main(args):
     utils.make_dir(outdir)
 
     print('Creating IntensityMapFitter w/ shapelet basis')
-    nmax = 10
+    nmax = 12
     nx, ny = 30,30
-    basis_kwargs = {'Nmax': nmax}
+    basis_kwargs = {'Nmax': nmax, 'plane':'obs'}
     fitter = IntensityMapFitter(
+        'shapelets', nx, ny, basis_kwargs=basis_kwargs
+        )
+
+    print('Creating IntensityMapFitter w/ transformed shapelet basis')
+    basis_kwargs = {'Nmax': nmax, 'plane':'disk'}
+    fitter_transform = IntensityMapFitter(
         'shapelets', nx, ny, basis_kwargs=basis_kwargs
         )
 
@@ -582,11 +661,12 @@ def main(args):
     true_pars, pars = likelihood.setup_test_pars(nx, ny)
 
     # add some knot features
-    knot_frac = 0.5 # not really correct, but close enough for tests
-    pars['psf'] = gs.Gaussian(fwhm=3) # pixels w/o pix_scale defined
+    knot_frac = 0.05 # not really correct, but close enough for tests
+    pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
     pars['knots'] = {
-        'npoints': 25,
-        'half_light_radius': pars['true_hlr'],
+        # 'npoints': 25,
+        'npoints': 15,
+        'half_light_radius': 1.*pars['true_hlr'],
         'flux': knot_frac * pars['true_flux'],
     }
 
@@ -627,9 +707,12 @@ def main(args):
     else:
         plt.close()
 
+    #---------------------------------------------------------
+    # Fits
+
     print('Fitting simulated datacube with shapelet basis')
     start = time.time()
-    mle_im = fitter.fit(datacube)
+    mle_im = fitter.fit(true_pars, datacube, pars=pars)
     t = time.time() - start
     print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} basis funcs')
 
@@ -637,41 +720,79 @@ def main(args):
     print(f'Plotting MLE fit compared to stacked data to {outfile}')
     fitter.plot_mle_fit(datacube, outfile=outfile, show=show)
 
-    print('Initializing a BasisIntensityMap for shapelets')
+    print('Fitting simulated datacube with transformed shapelet basis')
+    start = time.time()
+    mle_im_transform = fitter_transform.fit(true_pars, datacube, pars=pars)
+    t = time.time() - start
+    print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} transformed basis funcs')
+
+    outfile = os.path.join(outdir, 'compare-transform-mle--to-data.png')
+    print(f'Plotting transform MLE fit compared to stacked data to {outfile}')
+    fitter_transform.plot_mle_fit(datacube, outfile=outfile, show=show)
+
+    # Now compare the fits
+    outfile = os.path.join(outdir, 'compare-disk-vs-obs-mle-to-data.png')
+    print(f'Comparing MLE fits to data for basis in obs vs. disk')
+    data = np.sum(datacube._data, axis=2)
+    im = fitter.mle_im
+    im_transform = fitter_transform.mle_im
+
+    X, Y = utils.build_map_grid(nx, ny)
+
+    images = [data, im, im_transform,
+              im-im_transform, im-data, im_transform-data]
+    titles = ['Data', 'Obs basis', 'Disk basis',
+              'Obs-Disk', 'Obs-data', 'Disk-data']
+
+    diff_max = np.max([np.max(im-data), np.max(im_transform-data)])
+    diff_min = np.max([np.min(im-data), np.min(im_transform-data)])
+
+    fig, axes = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True,
+                             figsize=(12,7))
+    for i in range(6):
+        ax = axes[i//3, i%3]
+        if (i//3 == 1) and (i%3 > 0):
+            vmin, vmax = diff_min, diff_max
+        else:
+            vmin, vmax = None, None
+        mesh = ax.pcolormesh(X, Y, images[i], vmin=vmin, vmax=vmax)
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        plt.colorbar(mesh, cax=cax)
+        ax.set_title(titles[i])
+    nbasis = fitter.basis.N
+    fig.suptitle(f'Nmax={nmax}; {nbasis} basis functions')#, y=1.05)
+    plt.tight_layout()
+
+    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    #---------------------------------------------------------
+    # Intensity map constructors and renders
+
+    print('Initializing a BasisIntensityMap for shapelets in obs plane')
     imap = BasisIntensityMap(
-        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax}
+        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax, 'plane':'obs'}
         )
-    imap.render()
+    imap.render(true_pars, datacube, pars)
 
     outfile = os.path.join(outdir, 'shapelet-imap-render.png')
     print(f'Saving render for shapelet basis to {outfile}')
     imap.plot(outfile=outfile, show=show)
 
-    print('Initializing a TransformedBasis with shapelets')
-    basis_kwargs = {'Nmax':nmax}
-    imap = TransformedBasis(
-        datacube, basis_type='shapelets', basis_kwargs=basis_kwargs
+    print('Initializing a BasisIntensityMap for shapelets in disk plane')
+    imap_transform = BasisIntensityMap(
+        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax, 'plane':'disk'}
         )
+    imap_transform.render(true_pars, datacube, pars)
 
-    print('Initializing a TransformedBasis with the builder')
-    imap_pars = {
-        'basis_kwargs': basis_kwargs
-    }
-    imap = build_intensity_map('transformed_basis', datacube, imap_pars)
-
-    true_pars = {
-        'g1': 0.05,
-        'g2': -0.025,
-        'theta_int': np.pi / 3,
-        'sini': 0.8,
-        'v0': 10.,
-        'vcirc': 200,
-        'rscale': 5,
-    }
-    pars = None
-    print('Rendering transformed shapelet fit')
-    pudb.set_trace()
-    imap.render(true_pars, pars)
+    outfile = os.path.join(outdir, 'shapelet-imap-transform-render.png')
+    print(f'Saving render for shapelet basis to {outfile}')
+    imap_transform.plot(outfile=outfile, show=show)
 
     return 0
 

@@ -1,8 +1,10 @@
+from abc import abstractmethod
 import types
 import numpy as np
 import os
 from multiprocessing import Pool
-# from schwimmbad import MPIPool
+import schwimmbad
+# from schwimmbad import SerialPool, MultiPool, MPIPool
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -26,11 +28,11 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
-class ZeusRunner(object):
+class MCMCRunner(object):
     '''
-    Class to run a MCMC chain with zeus
+    Class to run a MCMC chain with emcee or zeus
 
-    Currently a very light wrapper around zeus, but in principle
+    Currently a very light wrapper around emzee/zeus, but in principle
     might want to do something fancier in the future
     '''
 
@@ -65,8 +67,6 @@ class ZeusRunner(object):
         self.args = args
         self.kwargs = kwargs
 
-        self._initialize_walkers()
-
         self.has_run = False
         self.has_MAP = False
 
@@ -78,6 +78,10 @@ class ZeusRunner(object):
         self.MAP_sigmas = None
 
         return
+
+    @abstractmethod
+    def _initialize_sampler(self, pool=None):
+        pass
 
     def _initialize_walkers(self, scale=0.1):
         ''''
@@ -152,23 +156,21 @@ class ZeusRunner(object):
 
         return outliers, Noutliers
 
-    def _initialize_sampler(self, pool=None):
-        sampler = zeus.EnsembleSampler(
-            self.nwalkers, self.ndim, self.pfunc,
-            args=self.args, kwargs=self.kwargs, pool=pool
-            )
-
-        return sampler
-
-    def run(self, nsteps, ncores=1, start=None, return_sampler=False,
+    def run(self, nsteps, pool, start=None, return_sampler=False,
             vb=True):
         '''
-        nsteps: Number of MCMC steps / iterations
-        ncores: Number of CPU cores to use
-        start:  Can provide starting walker positions if you don't
-                want to use the default initialization
-        return_sampler: Set to True if you want the sampler returned
-        vb:     Will print out zeus summary if True
+        nsteps: int
+            Number of MCMC steps / iterations
+        pool: Pool
+            A pool object returned from schwimmbad. Can be SerialPool,
+            MultiPool, or MPIPool
+        start: list
+            Can provide starting walker positions if you don't
+            want to use the default initialization
+        return_sampler: bool
+            Set to True if you want the sampler returned
+        vb: bool
+            Will print out zeus summary if True
 
         returns: zeus.EnsembleSampler object that contains the chains
         '''
@@ -177,24 +179,34 @@ class ZeusRunner(object):
             self._initialize_walkers()
             start = self.start
 
-        if ncores > 1:
-            os.environ['OMP_NUM_THREADS'] = '1'
-            with MPIPool() as pool:
+        if vb is True:
+            progress = True
+        else:
+            progress = False
+
+        if not isinstance(pool, schwimmbad.SerialPool):
+            omp = int(os.environ['OMP_NUM_THREADS'])
+            if omp != 1:
+                print('WARNING: ENV variable OMP_NUM_THREADS is ' +\
+                      f'set to {omp}. If not set to 1, this will ' +\
+                      'degrade perfomance for parallel processing.')
+
+        with pool:
+            pt = type(pool)
+            print(f'Pool: {pool}')
+
+            if isinstance(pool, schwimmbad.MPIPool):
                 if not pool.is_master():
                     pool.wait()
                     sys.exit(0)
-            # with Pool(ncores) as pool:
-                sampler = self._initialize_sampler(pool=pool)
-                sampler.run_mcmc(start, nsteps)
 
-        else:
-            sampler = self._initialize_sampler()
-            sampler.run_mcmc(start, nsteps)
+            sampler = self._initialize_sampler(pool=pool)
+
+            sampler.run_mcmc(
+                start, nsteps, progress=progress
+                )
 
         self.sampler = sampler
-
-        if vb is True:
-            print(self.sampler.summary)
 
         self.has_run = True
 
@@ -392,6 +404,16 @@ class ZeusRunner(object):
 
         return
 
+class ZeusRunner(MCMCRunner):
+
+    def _initialize_sampler(self, pool=None):
+        sampler = zeus.EnsembleSampler(
+            self.nwalkers, self.ndim, self.pfunc,
+            args=self.args, kwargs=self.kwargs, pool=pool
+            )
+
+        return sampler
+
 class KLensZeusRunner(ZeusRunner):
     '''
     Main difference is that we assume args=[datacube] and
@@ -518,7 +540,7 @@ class KLensZeusRunner(ZeusRunner):
         # compute intensity map from MAP
         # TODO: Eventually this should be called like vmap
         theta_pars = likelihood.theta2pars(self.MAP_medians)
-        intensity = imap.render(theta_pars, self.pars)
+        intensity = imap.render(theta_pars, datacube, self.pars)
 
         Nspec = datacube.Nspec
 
@@ -594,49 +616,6 @@ class KLensEmceeRunner(KLensZeusRunner):
             )
 
         return sampler
-
-    def run(self, nsteps, ncores=1, start=None, return_sampler=False,
-            vb=True):
-        '''
-        nsteps: Number of MCMC steps / iterations
-        ncores: Number of CPU cores to use
-        start:  Can provide starting walker positions if you don't
-                want to use the default initialization
-        return_sampler: Set to True if you want the sampler returned
-        vb:     Will print out zeus summary if True
-
-        returns: zeus.EnsembleSampler object that contains the chains
-        '''
-
-        if start is None:
-            self._initialize_walkers()
-            start = self.start
-
-        if vb is True:
-            progress = True
-        else:
-            progress = False
-
-        if ncores > 1:
-            os.environ['OMP_NUM_THREADS'] = '1'
-            with Pool(ncores) as pool:
-                sampler = self._initialize_sampler(pool=pool)
-                sampler.run_mcmc(
-                    start, nsteps, progress=progress
-                    )
-
-        else:
-            sampler = self._initialize_sampler()
-            sampler.run_mcmc(start, nsteps, progress=progress)
-
-        self.sampler = sampler
-
-        self.has_run = True
-
-        if return_sampler is True:
-            return self.sampler
-        else:
-            return
 
 def main(args):
 

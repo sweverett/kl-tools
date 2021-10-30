@@ -88,7 +88,7 @@ def main(args):
     shape = (Nx, Ny, Nspec)
 
     print('Setting up test datacube and true Halpha image')
-    datacube, sed, vmap, true_im = setup_likelihood_test(
+    datacube, sed, true_vmap, true_im = setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
 
@@ -99,9 +99,9 @@ def main(args):
     print(f'Saving test datacube to {outfile}')
     datacube.write(outfile)
 
-    outfile = os.path.join(outdir, 'vmap.png')
+    outfile = os.path.join(outdir, 'true_vmap.png')
     print(f'Saving true vamp in obs plane to {outfile}')
-    plt.imshow(vmap, origin='lower')
+    plt.imshow(true_vmap, origin='lower')
     plt.colorbar(label='v')
     plt.title('True velocity map in obs plane')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
@@ -169,7 +169,7 @@ def main(args):
 
     print('Setting up alternative vmap solution')
     u = {'v_unit': pars['v_unit'], 'r_unit':pars['r_unit']}
-    vmap_pars = {**alt_pars, **u}
+    vmap_pars = {**true_pars, **u}
     vmap_alt_pars = {**alt_pars, **u}
     VMap = velocity.VelocityMap('default', vmap_pars)
     VMap_alt = velocity.VelocityMap('default', vmap_alt_pars)
@@ -177,8 +177,9 @@ def main(args):
 
     outfile = os.path.join(outdir, 'compare-vmaps.png')
     print(f'Saving velocity map comparison to {outfile}')
+    vmap = VMap('obs', X, Y)
     vmap_alt = VMap_alt('obs', X, Y)
-    maps = [vmap, vmap_alt, vmap_alt-vmap, 100.*(vmap_alt-vmap)/vmap]
+    maps = [true_vmap, vmap_alt, vmap_alt-true_vmap, 100.*(vmap_alt-true_vmap)/true_vmap]
     tg1, tg2 = true_pars['g1'], true_pars['g2']
     ag1, ag2 = alt_pars['g1'], alt_pars['g2']
     titles = ['Alt Solution', 'True',
@@ -287,7 +288,7 @@ def main(args):
         cax = divider.append_axes('right', size='5%', pad=0.05)
         plt.colorbar(ishow, cax=cax)
         ax.set_title(f'red chi2={true_chi2:.1f}')
-        l1, l2 = lambdas[indx]
+        # l1, l2 = lambdas[indx]
         if i == 0:
             ax.set_ylabel('True model resid')
         # plot alt model slices

@@ -205,6 +205,50 @@ class InclinedExponential(IntensityMap):
 
         return self.image
 
+    def plot_fit(self, datacube, show=True, close=True, outfile=None,
+                 size=(9,9), vmin=None, vmax=None):
+        '''
+        datacube: DataCube
+            Datacube that MLE fit was done on
+        '''
+
+        data = np.sum(datacube._data, axis=2)
+
+        if self.image is None:
+            raise Exception('Must fit with render() first!')
+        fit = self.image
+
+        fig, axes = plt.subplots(
+            nrows=2, ncols=2, sharex=True, sharey=True, figsize=size
+            )
+
+        image = [data, fit, data-fit, 100.*(data-fit)/fit]
+        titles = ['Data', 'Fit', 'Residual', '% Residual']
+
+        for i in range(len(image)):
+            ax = axes[i//2, i%2]
+            im = ax.imshow(
+                image[i], origin='lower', vmin=vmin, vmax=vmax
+                )
+            ax.set_title(titles[i])
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes('right', size='5%', pad=0.05)
+            plt.colorbar(im, cax=cax)
+
+        plt.suptitle(f'Fit comparison for flux={self.flux}; hlr={self.hlr}')
+        plt.tight_layout()
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight', dpi=300)
+
+        if show is True:
+            plt.show()
+
+        if close is True:
+            plt.close()
+
+        return
+
 class BasisIntensityMap(IntensityMap):
     '''
     This is a catch-all class for Intensity Maps made by
@@ -660,17 +704,16 @@ def main(args):
     print('Setting up test datacube and true Halpha image')
     true_pars, pars = likelihood.setup_test_pars(nx, ny)
 
-    # add some knot features
-    knot_frac = 0.05 # not really correct, but close enough for tests
-    pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
-    pars['knots'] = {
-        # 'npoints': 25,
-        'npoints': 15,
-        'half_light_radius': 1.*pars['true_hlr'],
-        'flux': knot_frac * pars['true_flux'],
-    }
+    # Change the pars a bit
+    # true_pars['g1'] = 0.
+    # true_pars['g2'] = 0.
+    # true_pars['theta_int'] = 0.
+    # true_pars['sini'] = 0.5
+    pars['cov_sigma'] = 0.05
 
-    li, le, dl = 655.8, 656.8, 0.1
+    # li, le, dl = 655.8, 656.8, 0.1
+    li, le, dl = 655.4, 657.1, 0.1
+    # li, le, dl = 655, 657.5, 0.1
     lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
 
     Nspec = len(lambdas)
@@ -678,8 +721,6 @@ def main(args):
     datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
-
-    print('test')
 
     outfile = os.path.join(outdir, 'datacube.fits')
     print(f'Saving test datacube to {outfile}')
@@ -708,7 +749,61 @@ def main(args):
         plt.close()
 
     #---------------------------------------------------------
-    # Fits
+    # Fits to inclined exp
+
+    # pudb.set_trace()
+    imap = InclinedExponential(
+        datacube, flux=pars['true_flux'], hlr=pars['true_hlr']
+        )
+
+    outfile = os.path.join(outdir, 'compare-inc-exp-to-data.png')
+    print(f'Plotting inclined exp fit compared to stacked data to {outfile}')
+    imap.render(true_pars, datacube, pars)
+    imap.plot_fit(datacube, outfile=outfile, show=show)
+
+    #---------------------------------------------------------
+    # Fits to incined exp + knots
+
+
+    # add some knot features
+    knot_frac = 0.05 # not really correct, but close enough for tests
+    pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
+    pars['knots'] = {
+        # 'npoints': 25,
+        'npoints': 15,
+        'half_light_radius': 1.*pars['true_hlr'],
+        'flux': knot_frac * pars['true_flux'],
+    }
+
+    datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
+        true_pars, pars, shape, lambdas
+        )
+
+    outfile = os.path.join(outdir, 'datacube-knots.fits')
+    print(f'Saving test datacube to {outfile}')
+    datacube.write(outfile)
+
+    outfile = os.path.join(outdir, 'datacube-knots-slices.png')
+    print(f'Saving example datacube slice images to {outfile}')
+    # if Nspec < 10:
+    sqrt = int(np.ceil(np.sqrt(Nspec)))
+    slice_indices = range(Nspec)
+
+    k = 1
+    for i in slice_indices:
+        plt.subplot(sqrt, sqrt, k)
+        plt.imshow(datacube.slices[i]._data, origin='lower')
+        plt.colorbar()
+        l, r = lambdas[i]
+        plt.title(f'lambda=({l:.1f}, {r:.1f})')
+        k += 1
+    plt.gcf().set_size_inches(12,12)
+    plt.tight_layout()
+    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
 
     print('Fitting simulated datacube with shapelet basis')
     start = time.time()

@@ -55,7 +55,7 @@ def main(args):
         'sed_end': 660,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 0.5, # pixel counts; dummy value
+        'cov_sigma': 1.0, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
@@ -164,6 +164,7 @@ def main(args):
     # NOTE: Just for testing, can remove later
     # These are centered at an alt solution,
     # using disk basis Nmax=10 (cov_sig=1)
+    # OLD code
     # alt_pars = {
     #     'g1': 0.1703,
     #     'g2': -0.2234,
@@ -176,14 +177,27 @@ def main(args):
 
     # These are centered at an alt solution,
     # using correct intensity map (cov_sig=0.5)
+    # OLD code
+    # alt_pars = {
+    #     'g1': -0.0249,
+    #     'g2': 0.1070,
+    #     'theta_int': 1.0423,
+    #     'sini': 0.5770,
+    #     'v0': 13.7093,
+    #     'vcirc': 275.8384,
+    #     'rscale': 4.2344,
+    #     }
+
+    # These are centered at an alt solution,
+    # using correct intensity map (cov_sig=1)
     alt_pars = {
-        'g1': -0.0249,
-        'g2': 0.1070,
-        'theta_int': 1.0423,
-        'sini': 0.5770,
-        'v0': 13.7093,
-        'vcirc': 275.8384,
-        'rscale': 4.2344,
+        'g1': -0.0255,
+        'g2': 0.1082,
+        'theta_int': 1.0437,
+        'sini': 0.5724,
+        'v0': 10.0144,
+        'vcirc': 278.4138,
+        'rscale': 4.2491,
         }
 
     size = (14,5)

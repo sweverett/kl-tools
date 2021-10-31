@@ -233,7 +233,7 @@ class VelocityMap(TransformableImage):
     @classmethod
     def _eval_in_disk_plane(cls, pars, x, y, **kwargs):
         '''
-        Evaluates model at posiiton array in the disk plane, where
+        Evaluates model at positon array in the disk plane, where
         pos=(x,y) is defined relative to galaxy center
 
         pars is a dict with model parameters
@@ -512,36 +512,7 @@ def main(args):
         'v_unit': units.km / units.s,
     }
 
-    # These are centered at an alt solution,
-    # using disk basis Nmax=10 (cov_sigma=1)
-    # model_pars = {
-        # 'g1': 0.1703,
-        # 'g2': -0.2234,
-        # 'theta_int': 1.0537,
-        # 'sini': 0.9205,
-        # 'v0': 9.0550,
-        # 'vcirc': 170.6623,
-        # 'rscale': 6.0641,
-    #     'r_unit': units.Unit('pixel'),
-    #     'v_unit': units.km / units.s,
-    #     }
-
-    # These are centered at an alt solution,
-    # using correct intensity map (cov_sig=0.5)
-    # model_pars = {
-    #     'g1': -0.0249,
-    #     'g2': 0.1070,
-    #     'theta_int': 1.0423,
-    #     'sini': 0.5770,
-    #     'v0': 13.7093,
-    #     'vcirc': 275.8384,
-    #     'rscale': 4.2344,
-    #     'r_unit': units.Unit('pixel'),
-    #     'v_unit': units.km / units.s,
-    #     }
-
     rmax = 30
-    # rmax = None
 
     print('Creating VelocityMap from params')
     vmap = VelocityMap(model_name, model_pars)

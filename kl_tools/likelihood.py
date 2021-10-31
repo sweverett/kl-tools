@@ -389,9 +389,6 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
         'hlr': pars['true_hlr']
     }
 
-    if 'psf' in pars:
-        imap_pars['psf'] = pars['psf']
-
     # a slight abuse of API call here, passing a dummy datacube to
     # instantiate an inclined exponential as truth
     dc = DataCube(shape=shape, bandpasses=bandpasses)
@@ -431,6 +428,9 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
 
         data[:,:,i] = obs_im.array
 
+    # TODO: testing!
+    # stack = np.sum(data, axis=2)
+    # pudb.set_trace()
     datacube = DataCube(data=data, bandpasses=bandpasses)
 
     return datacube, V, true_im

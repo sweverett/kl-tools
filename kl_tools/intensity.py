@@ -751,7 +751,6 @@ def main(args):
     #---------------------------------------------------------
     # Fits to inclined exp
 
-    # pudb.set_trace()
     imap = InclinedExponential(
         datacube, flux=pars['true_flux'], hlr=pars['true_hlr']
         )

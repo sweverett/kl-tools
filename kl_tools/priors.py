@@ -68,12 +68,14 @@ class UniformPrior(Prior):
                 return np.log(val)
 
 class GaussPrior(Prior):
-    def __init__(self, mu, sigma, clip_sigmas=None):
+    def __init__(self, mu, sigma, clip_sigmas=None, zero_boundary=None):
         '''
         mu: mean of dist
         sigma: std of dist
         clip_sigmas: if set, reject samples beyond this many sigmas
                      from mu
+        zero_boundary: str; ('positive', 'negative')
+            Use to reject any samples above or below zero
         '''
 
         for p in [mu, sigma]:
@@ -86,11 +88,19 @@ class GaussPrior(Prior):
             if clip_sigmas <= 0:
                 raise ValueError('clip_sigmas must be positive!')
 
+        if zero_boundary is not None:
+            if not isinstance(zero_boundary, str):
+                raise TypeError('zero_boundary must be a str!')
+            vals = ['positive', 'negative']
+            if zero_boundary not in vals:
+                raise ValueError(f'zero_boundary must be one of {vals}!')
+
         self.mu = mu
         self.sigma = sigma
 
         self.norm = 1. / (sigma * np.sqrt(2.*np.pi))
         self.clip_sigmas = clip_sigmas
+        self.zero_boundary = zero_boundary
 
         self.peak = mu
         self.cen = mu
@@ -106,6 +116,15 @@ class GaussPrior(Prior):
             if (abs(x - self.mu) / self.sigma) > self.clip_sigmas:
                 # sample clipped; ignore
                 return -np.inf
+
+        zb = self.zero_boundary
+        if zb is not None:
+            if zb == 'positive':
+                if x < 0:
+                    return -np.inf
+            if zb == 'negative':
+                if x > 0:
+                    return -np.inf
 
         base = -0.5 * (x - self.mu)**2 / self.sigma**2
 

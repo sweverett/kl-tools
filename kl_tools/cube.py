@@ -20,6 +20,43 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
+def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
+                            throughput=1., zp=30., unit='nm'):
+    '''
+    Setup list of bandpasses needed to instantiate a DataCube
+    given the simple case of constant spectral resolution, throughput,
+    and image zeropoints for all slices
+
+    Useful for quick setup of tests and simulated datavectors
+
+    lambda_blue: float
+        Blue-end of datacube wavelength range
+    lambda_red: float
+        Rd-end of datacube wavelength range
+    dlambda: float
+        Constant wavelength range per slice
+    throughput: float
+        Throughput of filter of data slices
+    unit: str
+        The wavelength unit
+    zeropoint: float
+        Image zeropoint for all data slices
+    '''
+
+    li, lf = lambda_blue, lambda_red
+    lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
+
+    bandpasses = []
+    for l1, l2 in lambdas:
+        bandpasses.append(gs.Bandpass(
+            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+            ))
+    bandpasses = [gs.Bandpass(
+        throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+        ) for l1,l2 in lambdas]
+
+    return bandpasses
+
 class DataCube(object):
 #     '''
 #     Base class for an abstract data cube.
@@ -32,13 +69,16 @@ class DataCube(object):
         Initialize either a filled DataCube from an existing numpy
         array or an empty one from a given shape
 
-        data: A numpy array containing all image slice data.
-               For now, assumed to be the shape format given below.
-        shape: A 3-tuple in the format of (Nspec, Nx, Ny)
-               where (Nx, Ny) are the shapes of the image slices
-               and Nspec is the Number of spectral slices.
-        bandpasses: A list of galsim.Bandpass objects containing
-               throughput function, lambda window, etc.
+        data: np.array
+            A numpy array containing all image slice data.
+            For now, assumed to be the shape format given below.
+        shape: tuple
+            A 3-tuple in the format of (Nspec, Nx, Ny)
+            where (Nx, Ny) are the shapes of the image slices
+            and Nspec is the Number of spectral slices.
+        bandpasses: list
+            A list of galsim.Bandpass objects containing
+            throughput function, lambda window, etc.
         '''
 
         if data is None:
@@ -403,6 +443,12 @@ def main(args):
         bandpasses.append(galsim.Bandpass(
             throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
             ))
+
+    print('Testing bandpass helper func')
+    bandpasses_alt = setup_simple_bandpasses(
+        li, le, dl, throughput=throughput, unit=unit, zp=zp
+        )
+    assert bandpasses == bandpasses_alt
 
     Nspec = len(bandpasses)
 

@@ -201,7 +201,8 @@ class InclinedExponential(IntensityMap):
             psf = pars['psf']
             gal = gs.Convolve([gal, psf])
 
-        self.image = gal.drawImage(nx=self.nx, ny=self.ny).array
+        pixscale = pars['pix_scale']
+        self.image = gal.drawImage(nx=self.nx, ny=self.ny, scale=pixscale).array
 
         return self.image
 

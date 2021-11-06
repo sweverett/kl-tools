@@ -98,7 +98,7 @@ def main(args, pool):
         'sed_end': 657.5,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': .1, # pixel counts; dummy value
+        'cov_sigma': 3, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
@@ -117,15 +117,15 @@ def main(args, pool):
         },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 1e5, # counts
-            'hlr': 5, # pixels
-            # 'type': 'basis',
-            # 'basis_type': 'shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 14,
-            #     'plane': 'disk'
-            #     }
+            # 'type': 'inclined_exp',
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
+            'type': 'basis',
+            'basis_type': 'shapelets',
+            'basis_kwargs': {
+                'Nmax': 14,
+                'plane': 'disk'
+                }
         },
         # 'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels

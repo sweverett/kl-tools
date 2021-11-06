@@ -45,6 +45,7 @@ def main(args):
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
+        'pix_scale': 1, # arcsec / pix
         'true_flux': 1e5, # counts
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),

@@ -27,7 +27,8 @@ def main(args):
     true_pars = {
         'g1': 0.05,
         'g2': -0.025,
-        'theta_int': np.pi / 3,
+        # 'theta_int': np.pi / 3,
+        'theta_int': 0.,
         'sini': 0.8,
         'v0': 10.,
         'vcirc': 200,
@@ -41,6 +42,7 @@ def main(args):
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
+        'pix_scale': 1, # arcsec / pix
         'true_flux': 1e5, # counts
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),
@@ -190,14 +192,27 @@ def main(args):
 
     # These are centered at an alt solution,
     # using correct intensity map (cov_sig=1)
+    # alt_pars = {
+    #     'g1': -0.0255,
+    #     'g2': 0.1082,
+    #     'theta_int': 1.0437,
+    #     'sini': 0.5724,
+    #     'v0': 10.0144,
+    #     'vcirc': 278.4138,
+    #     'rscale': 4.2491,
+    #     }
+
+    # These are centered at an alt soltuion for theta_int=0,
+    # using correct intensty map (cov_sig=1)
+    # true_pars['theta_int'] = 0
     alt_pars = {
-        'g1': -0.0255,
-        'g2': 0.1082,
-        'theta_int': 1.0437,
-        'sini': 0.5724,
-        'v0': 10.0144,
-        'vcirc': 278.4138,
-        'rscale': 4.2491,
+        'g1': -0.0230,
+        'g2': -0.0249,
+        'theta_int': 0.0019,
+        'sini': 0.8560,
+        'v0': 10.0169,
+        'vcirc': 187.6312,
+        'rscale': 5.4146,
         }
 
     size = (14,5)

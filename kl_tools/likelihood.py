@@ -106,9 +106,18 @@ def log_likelihood(theta, datacube, pars):
     Do setup and type / sanity checking here
     before calling _loglikelihood
 
-    theta: Parameters sampled by zeus. Order defined in PARS_ORDER
-    datacube: DataCube object, truncated to desired lambda bounds
-    pars: Dict of any other parameters needed to evaluate likelihood
+    theta: list
+        Sampled parameters. Order defined in PARS_ORDER
+    datacube: DataCube
+        Truncated to desired lambda bounds
+    pars: dict
+        Dictionary of any other parameters needed to evaluate likelihood
+
+    TODO: Would be nice to swap datacube for the following:
+    datavector: DataCube, numpy.array, etc.
+        Arbitrary data vector. Likely a datacube truncated
+        to relevant emission line slices
+
     '''
 
     # unpack sampled zeus params
@@ -180,8 +189,6 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, inv_cov):
     '''
     datacube: The (Nx,Ny,Nspec) data array of a DataCube object,
                 truncated to desired lambda bounds
-    # lambdas: Wavelength values at the center of each datacube
-    #             slice
     lambdas: List of lambda tuples that define slice edges
     vmap: An (Nx,Ny) array of normalized (by c) velocity values in the
             obs plane returned by a call from a VelocityMap object
@@ -421,16 +428,13 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
             lambdas[i], sed_array, zfactor, true_im
             )
 
-        obs_im = gs.Image(obs_array)
+        obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
 
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
         obs_im.addNoise(noise)
 
         data[:,:,i] = obs_im.array
 
-    # TODO: testing!
-    # stack = np.sum(data, axis=2)
-    # pudb.set_trace()
     datacube = DataCube(data=data, bandpasses=bandpasses)
 
     return datacube, V, true_im

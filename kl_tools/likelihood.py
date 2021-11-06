@@ -428,7 +428,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
             lambdas[i], sed_array, zfactor, true_im
             )
 
-        obs_im = gs.Image(obs_array)
+        obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
 
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
         obs_im.addNoise(noise)

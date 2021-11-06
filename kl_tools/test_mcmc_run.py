@@ -20,6 +20,7 @@ import zeus
 import utils
 from mcmc import KLensZeusRunner, KLensEmceeRunner
 import priors
+import cube
 import likelihood
 from parameters import PARS_ORDER
 from likelihood import log_posterior
@@ -63,11 +64,12 @@ def main(args, pool):
     utils.make_dir(outdir)
 
     true_pars = {
-        # 'g1': 0.05,
-        # 'g2': -0.025,
-        'g1': 0.0,
-        'g2': 0.0,
+        'g1': 0.05,
+        'g2': -0.025,
+        # 'g1': 0.0,
+        # 'g2': 0.0,
         'theta_int': np.pi / 3,
+        # 'theta_int': 0.,
         'sini': 0.8,
         'v0': 10.,
         'vcirc': 200,
@@ -81,6 +83,7 @@ def main(args, pool):
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
+        'pix_scale': 1., # arcsec / pixel
         'true_flux': 1e5, # counts
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),
@@ -91,22 +94,24 @@ def main(args, pool):
         'line_std': halpha * (1.+z) / R, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
-        'sed_start': 650,
-        'sed_end': 660,
+        'sed_start': 655,
+        'sed_end': 657.5,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 3, # pixel counts; dummy value
+        'cov_sigma': .1, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1),#, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.1),#, clip_sigmas=2),
+            'g1': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
+            # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
-            'sini': priors.UniformPrior(-1., 1.),
+            'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 10),# clip_sigmas=2),
+            'vcirc': priors.GaussPrior(200, 10, zero_boundary='positive'),# clip_sigmas=2),
+            # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
         },
@@ -118,7 +123,7 @@ def main(args, pool):
             # 'type': 'basis',
             # 'basis_type': 'shapelets',
             # 'basis_kwargs': {
-            #     'Nmax': 12,
+            #     'Nmax': 14,
             #     'plane': 'disk'
             #     }
         },
@@ -128,7 +133,16 @@ def main(args, pool):
     }
 
     li, le, dl = 655.8, 656.8, 0.1
+    # li, le, dl = 655.6, 657, 0.1
+    # li, le, dl = 655.4, 657.1, 0.1
     lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
+
+    bandpasses = cube.setup_simple_bandpasses(
+        li, le, dl,
+        throughput=pars['bandpass_throughput'],
+        zp=pars['bandpass_zp'],
+        unit=pars['bandpass_unit']
+        )
 
     Nx, Ny = 30, 30
     Nspec = len(lambdas)
@@ -138,7 +152,11 @@ def main(args, pool):
         true_pars, pars, shape, lambdas
         )
 
+    # Update pars w/ SED, bandapsses, etc. as can no longer assume
+    # this will be available in the datavector
     pars['sed'] = sed
+    pars['lambdas'] = lambdas
+    pars['bandpasses'] = bandpasses
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')
@@ -222,7 +240,12 @@ def main(args, pool):
 
     if (sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
         # The sampler isn't pickleable for some reason in this scenario
-        pass
+        # Save whole chain
+        outfile = os.path.join(outdir, 'test-mcmc-chain.pkl')
+        chain = runner.sampler.get_chain(flat=True)
+        print('pickling chain to {outfile}')
+        with open(outfile, 'wb') as f:
+            pickle.dump(chain, f)
     else:
         outfile = os.path.join(outdir, 'test-mcmc-sampler.pkl')
         print(f'Pickling sampler to {outfile}')

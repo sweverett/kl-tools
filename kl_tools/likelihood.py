@@ -120,7 +120,7 @@ def log_likelihood(theta, datacube, pars):
 
     '''
 
-    # unpack sampled zeus params
+    # unpack sampled params
     theta_pars = theta2pars(theta)
 
     Nx = datacube.Nx
@@ -135,7 +135,7 @@ def log_likelihood(theta, datacube, pars):
     # create 2D velocity & intensity maps given sampled transformation
     # parameters
     vmap = _setup_vmap(theta_pars, pars)
-    imap = _setup_imap(theta_pars, pars, datacube)
+    imap = _setup_imap(theta_pars, datacube, pars)
 
     # evaluate maps at pixel centers in obs plane
     if 'use_numba' in pars:
@@ -299,7 +299,7 @@ def _setup_vmap(theta_pars, pars, model_name='default'):
 
     return VelocityMap(model_name, vmodel)
 
-def _setup_imap(theta_pars, pars, datacube):
+def _setup_imap(theta_pars, datacube, pars):
 
     imap_pars = pars['intensity'].copy()
     imap_type = imap_pars['type']
@@ -402,6 +402,30 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     imap = intensity.build_intensity_map('inclined_exp', dc, imap_pars)
     true_im = imap.render(true_pars, dc, pars)
 
+    # TODO: TESTING!!!
+    #This alows us to draw the test datacube from shapelets instead
+    if pars['intensity']['type'] == 'basis':
+        try:
+            use_basis = pars['intensity']['use_basis_as_truth']
+
+            if use_basis is True:
+                print('WARNING: Using basis for true image as test')
+                ps = pars['pix_scale']
+                dc = DataCube(
+                    shape=(Nx,Ny,1), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
+                    )
+
+                basis_type = pars['intensity']['basis_type']
+                kwargs = pars['intensity']['basis_kwargs']
+                shapelet_imap = intensity.BasisIntensityMap(
+                    dc, basis_type, basis_kwargs=kwargs)
+
+                # Now make new truth image from shapelet MLE fit
+                true_im = shapelet_imap.render(true_pars, dc, pars)
+
+        except KeyError:
+            pass
+
     vel_pars = {}
     for name in PARS_ORDER.keys():
         vel_pars[name] = true_pars[name]
@@ -435,7 +459,10 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
 
         data[:,:,i] = obs_im.array
 
-    datacube = DataCube(data=data, bandpasses=bandpasses)
+    pix_scale = pars['pix_scale']
+    datacube = DataCube(
+        data=data, bandpasses=bandpasses, pix_scale=pix_scale
+        )
 
     return datacube, V, true_im
 
@@ -482,7 +509,8 @@ def setup_test_pars(nx, ny):
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
-        'use_numba': False
+        'use_numba': False,
+        'pix_scale': 1.,
         }
     pars['Nx'] = nx
     pars['Ny'] = ny

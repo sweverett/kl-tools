@@ -307,8 +307,9 @@ class MCMCRunner(object):
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
-                    show=True, close=True, outfile=None, size=(14,14),
-                    title=None, use_derived=True):
+                    show=True, close=True, outfile=None, size=(16,16),
+                    show_titles=True, title=None, use_derived=True,
+                    title_fmt='.3f'):
         '''
         reference: list
             Reference values to plot on chains, such as true or MAP values
@@ -378,7 +379,8 @@ class MCMCRunner(object):
                 raise ValueError('Length of crange list must be same as names!')
 
         p = corner(
-            chain, labels=names, truths=reference, range=crange
+            chain, labels=names, truths=reference, range=crange,
+            show_titles=show_titles, title_fmt=title_fmt
         )
 
         title_suffix = f'Burn in = {discard}'
@@ -459,7 +461,7 @@ class KLensZeusRunner(ZeusRunner):
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
         self.MAP_imap = likelihood._setup_imap(
-            theta_pars, self.pars, self.datacube
+            theta_pars, self.datacube, self.pars
             )
 
         return

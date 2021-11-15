@@ -150,7 +150,7 @@ class Basis(object):
 
         return self._get_basis_func(n)
 
-    def render_im(self, theta_pars, coefficients):
+    def render_im(self, theta_pars, coefficients, im_shape=None):
         '''
         Render image given transformation parameters andbasis coefficients
 
@@ -158,13 +158,22 @@ class Basis(object):
             A dict that holds the sampled transformation parameters
         coefficients: list, np.array
             A list or array of basis coefficients
+        im_shape: tuple
+            A (nx,ny) tuple for image bounds. If none, use the bounds
+            during fitting
         '''
 
         if len(coefficients) != self.N:
             raise ValueError('The len of the passed coefficients ' +\
                              f'does not equal {self.N}!')
 
-        nx, ny = self.im_nx, self.im_ny
+        if im_shape is None:
+            nx, ny = self.im_nx, self.im_ny
+        else:
+            if len(im_shape) != 2:
+                raise ValueError('im_shape must be a 2-tuple!')
+            nx, ny = im_shape[0], im_shape[1]
+
         Xobs, Yobs = utils.build_map_grid(nx, ny)
 
         X, Y = transform_coords(

@@ -64,7 +64,8 @@ class DataCube(object):
 #     at various wavelength slices
 #     '''
 
-    def __init__(self, data=None, shape=None, bandpasses=None):
+    def __init__(self, data=None, shape=None, bandpasses=None, pix_scale=None,
+                 pars=None):
         '''
         Initialize either a filled DataCube from an existing numpy
         array or an empty one from a given shape
@@ -79,6 +80,10 @@ class DataCube(object):
         bandpasses: list
             A list of galsim.Bandpass objects containing
             throughput function, lambda window, etc.
+        pix_scale: float
+            the pixel scale of the datacube slices
+        pars: dict
+            A dictionary that holds any additional metadata
         '''
 
         if data is None:
@@ -95,25 +100,39 @@ class DataCube(object):
             self._data = np.zeros(self.shape)
 
         else:
-            assert len(data.shape) == 3
-
             if bandpasses is None:
                 raise ValueError('Must pass bandpasses if data is not None!')
 
-            self._data = data
+            if len(data.shape) != 3:
+                # Handle the case of 1 slice
+                assert len(data.shape) == 2
+                data = data.reshape(data.shape[0], data.shape[1], 1)
+
             self.shape = data.shape
 
-            if data.shape[2] != len(bandpasses):
-                raise ValueError('The length of the bandpasses must ' + \
-                                 'equal the length of the third data dimension!')
             self.Nx = self.shape[0]
             self.Ny = self.shape[1]
             self.Nspec = self.shape[2]
+
+            self._data = data
+
+            if self.shape[2] != len(bandpasses):
+                raise ValueError('The length of the bandpasses must ' + \
+                                 'equal the length of the third data dimension!')
 
         # a bit awkward, but this allows flexible setup for other params
         if bandpasses is None:
             raise ValueError('Must pass a list of bandpasses!')
         self.bandpasses = bandpasses
+
+        d = {'pix_scale': (pix_scale, (int, float)), 'pars': (pars, dict)}
+        for name, (val, t) in d.items():
+            if val is not None:
+                if not isinstance(val, t):
+                    raise TypeError(f'{name} must be a dict!')
+
+        self.pix_scale = pix_scale
+        self.pars = pars
 
         # Not necessarily needed, but could help ease of access
         self.lambda_unit = self.bandpasses[0].wave_type
@@ -151,6 +170,9 @@ class DataCube(object):
 
         return
 
+    def stack(self):
+        return np.sum(self._data, axis=2)
+
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
         radius: aperture radius in pixels
@@ -170,8 +192,6 @@ class DataCube(object):
                 if dist < radius:
                     aper_spec += self._get_pixel_spectrum(x,y)
                     mask[x,y] = True
-
-        # aper_spec = np.sum(self._data[mask, :])
 
         if plot_mask is True:
             plt.imshow(mask, origin='lower')

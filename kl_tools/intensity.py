@@ -213,7 +213,7 @@ class InclinedExponential(IntensityMap):
             Datacube that MLE fit was done on
         '''
 
-        data = np.sum(datacube._data, axis=2)
+        data = datacube.stack()
 
         if self.image is None:
             raise Exception('Must fit with render() first!')
@@ -271,20 +271,31 @@ class BasisIntensityMap(IntensityMap):
 
         nx, ny = datacube.Nx, datacube.Ny
         super(BasisIntensityMap, self).__init__('basis', nx, ny)
+
+        if 'pix_scale' not in basis_kwargs:
+            if datacube.pix_scale is None:
+                raise Exception('Either datacube or basis_kwargs ' +
+                                'must have pix_scale!')
+            basis_kwargs['pix_scale'] = datacube.pix_scale
+
+        # often useful to have a correct basis function scale given
+        # stacked datacube image
+        # if basis_type == 'shapelets':
+        # TODO: Testing!!
+        if False:
+            pixscale = basis_kwargs['pix_scale']
+            am = gs.hsm.FindAdaptiveMom(
+                gs.Image(datacube.stack(), scale=pixscale)
+                )
+            self.am_sigma = am.moments_sigma
+            basis_kwargs['beta'] = self.am_sigma
+        else:
+            self.am_sigma = None
+
         self.basis_kwargs = basis_kwargs
 
         self._setup_fitter(basis_type, nx, ny, basis_kwargs=basis_kwargs)
 
-        # if fit_now is True:
-        #     self._setup_fitter(
-        #         basis_type, nx, ny, basis_kwargs=basis_kwargs
-        #         )
-
-        #     self._fit_to_datacube(datacube)
-        #     self.datacube = None # Not needed in this case
-        # else:
-        # Not all subclasses can fit to the datacube at instantiation time,
-        # so we wait to initialize fitter until rendering
         self.image = None
 
         return
@@ -431,7 +442,11 @@ class IntensityMapFitter(object):
         y = Y.reshape(Ndata)
 
         # the design matrix for a given basis and datacube
-        self.design_mat = np.zeros((Ndata, Nbasis))
+        if self.basis.is_complex is True:
+            self.design_mat = np.zeros((Ndata, Nbasis), dtype=np.complex128)
+        else:
+            self.design_mat = np.zeros((Ndata, Nbasis))
+
         for n in range(Nbasis):
             func, func_args = self.basis.get_basis_func(n)
             args = [x, y, *func_args]
@@ -440,7 +455,7 @@ class IntensityMapFitter(object):
         return
 
     # TODO: Add @njit when ready
-    def _initialize_pseudo_inv(self, theta_pars, max_fail=5, redo=True):
+    def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):
         '''
         Setup Moore-Penrose pseudo inverse given basis
 
@@ -508,7 +523,7 @@ class IntensityMapFitter(object):
             if inv_cov is None:
                 M = (1./sigma**2) * phi.T.dot(phi)
             else:
-                M = phi.T.dot(inv_cov.dot(M))
+                M = phi.T.dot(inv_cov.dot(phi))
 
             if log is False:
                 det = np.linalg.det(M)
@@ -570,7 +585,7 @@ class IntensityMapFitter(object):
         self._initialize_pseudo_inv(theta_pars)
 
         # We will fit to the sum of all slices
-        data = np.sum(datacube._data, axis=2).reshape(nx*ny)
+        data = datacube.stack().reshape(nx*ny)
 
         # Find MLE basis coefficients
         mle_coeff = self._fit_mle_coeff(data, cov=cov)
@@ -615,7 +630,7 @@ class IntensityMapFitter(object):
         '''
 
         # fit was done on stacked datacube
-        data = np.sum(datacube._data, axis=2)
+        data = datacube.stack()
         mle = self.mle_im
 
         fig, axes = plt.subplots(
@@ -691,7 +706,8 @@ def main(args):
     print('Creating IntensityMapFitter w/ shapelet basis')
     nmax = 12
     nx, ny = 30,30
-    basis_kwargs = {'Nmax': nmax, 'plane':'obs'}
+    pix_scale = 0.1 # arcsec / pixel
+    basis_kwargs = {'Nmax': nmax, 'pix_scale': pix_scale, 'plane':'obs'}
     fitter = IntensityMapFitter(
         'shapelets', nx, ny, basis_kwargs=basis_kwargs
         )
@@ -764,7 +780,6 @@ def main(args):
     #---------------------------------------------------------
     # Fits to incined exp + knots
 
-
     # add some knot features
     knot_frac = 0.05 # not really correct, but close enough for tests
     pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
@@ -828,7 +843,7 @@ def main(args):
     # Now compare the fits
     outfile = os.path.join(outdir, 'compare-disk-vs-obs-mle-to-data.png')
     print(f'Comparing MLE fits to data for basis in obs vs. disk')
-    data = np.sum(datacube._data, axis=2)
+    data = datacube.stack()
     im = fitter.mle_im
     im_transform = fitter_transform.mle_im
 
@@ -871,7 +886,9 @@ def main(args):
 
     print('Initializing a BasisIntensityMap for shapelets in obs plane')
     imap = BasisIntensityMap(
-        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax, 'plane':'obs'}
+        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax,
+                                                        'pix_scale':pix_scale,
+                                                        'plane':'obs'}
         )
     imap.render(true_pars, datacube, pars)
 
@@ -881,7 +898,9 @@ def main(args):
 
     print('Initializing a BasisIntensityMap for shapelets in disk plane')
     imap_transform = BasisIntensityMap(
-        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax, 'plane':'disk'}
+        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax,
+                                                        'pix_scale':pix_scale,
+                                                        'plane':'disk'}
         )
     imap_transform.render(true_pars, datacube, pars)
 

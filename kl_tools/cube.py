@@ -58,11 +58,11 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
     return bandpasses
 
 class DataCube(object):
-#     '''
-#     Base class for an abstract data cube.
-#     Contains astronomical images of a source
-#     at various wavelength slices
-#     '''
+    '''
+    Base class for an abstract data cube.
+    Contains astronomical images of a source
+    at various wavelength slices
+    '''
 
     def __init__(self, data=None, shape=None, bandpasses=None, pix_scale=None,
                  pars=None):
@@ -91,9 +91,9 @@ class DataCube(object):
                 raise ValueError('Must instantiate a DataCube with either ' + \
                                  'a data array or a shape tuple!')
 
-            self.Nx = shape[0]
-            self.Ny = shape[1]
-            self.Nspec = shape[2]
+            self.Nspec = shape[0]
+            self.Nx = shape[1]
+            self.Ny = shape[2]
             self.shape = shape
 
             self._check_shape_params()
@@ -106,17 +106,17 @@ class DataCube(object):
             if len(data.shape) != 3:
                 # Handle the case of 1 slice
                 assert len(data.shape) == 2
-                data = data.reshape(data.shape[0], data.shape[1], 1)
+                data = data.reshape(1, data.shape[0], data.shape[1])
 
             self.shape = data.shape
 
-            self.Nx = self.shape[0]
-            self.Ny = self.shape[1]
-            self.Nspec = self.shape[2]
+            self.Nspec = self.shape[0]
+            self.Nx = self.shape[1]
+            self.Ny = self.shape[2]
 
             self._data = data
 
-            if self.shape[2] != len(bandpasses):
+            if self.shape[0] != len(bandpasses):
                 raise ValueError('The length of the bandpasses must ' + \
                                  'equal the length of the third data dimension!')
 
@@ -151,7 +151,7 @@ class DataCube(object):
         return
 
     def _check_shape_params(self):
-        Nzip = zip(['Nx', 'Ny', 'Nspec'], [self.Nx, self.Ny, self.Nspec])
+        Nzip = zip(['Nspec', 'Nx', 'Ny'], [self.Nspec, self.Nx, self.Ny])
         for name, val in Nzip:
             if val < 1:
                 raise ValueError(f'{name} must be greater than 0!')
@@ -166,12 +166,12 @@ class DataCube(object):
 
         for i in range(self.Nspec):
             bp = self.bandpasses[i]
-            self.slices.append(Slice(self._data[:,:,i], bp))
+            self.slices.append(Slice(self._data[i,:,:], bp))
 
         return
 
     def stack(self):
-        return np.sum(self._data, axis=2)
+        return np.sum(self._data, axis=0)
 
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
@@ -259,7 +259,7 @@ class DataCube(object):
         all slices
         '''
 
-        return self._data[i,j,:]
+        return self._data[:,i,j]
 
     def truncate(self, blue_cut, red_cut, trunc_type='edge'):
         '''
@@ -292,7 +292,7 @@ class DataCube(object):
 
         # could either update attributes or return new DataCube
         # for now, just return a new one
-        trunc_data = self._data[:,:,cut]
+        trunc_data = self._data[cut,:,:]
 
         # Have to do it this way as lists cannot be indexed by np arrays
         # trunc_bandpasses = self.bandpasses[cut]
@@ -368,10 +368,10 @@ class FitsDataCube(DataCube):
         fits_cube = galsim.fits.readCube(cubefile)
         Nimages = len(fits_cube)
         im_shape = fits_cube[0].array.shape
-        data = np.zeros((im_shape[0], im_shape[1], Nimages))
+        data = np.zeros((Nimages, im_shape[0], im_shape[1],))
 
         for i, im in enumerate(fits_cube):
-            data[:,:,i] = im.array
+            data[i,:,:] = im.array
 
         if isinstance(bandpasses, str):
             bandpass_file = bandpasses
@@ -478,7 +478,7 @@ def main(args):
 
     print('Building Slice object')
     n = 50 # slice num
-    s = Slice(data[:,:,n], bandpasses[n])
+    s = Slice(data[n,:,:], bandpasses[n])
 
     print('Testing slice plots')
     s.plot(show=False)

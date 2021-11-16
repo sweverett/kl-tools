@@ -65,18 +65,17 @@ def main(args, pool):
     mpi = args.mpi
     vb = args.v
 
-    ndim, nwalkers = 5, 10
+    ndims, nwalkers = 5, 10
 
     # instantiate likelihood w/ inverse variance set
     # during constructor
-    ivar = 1. / np.random.rand(ndim)
+    ivar = 1. / np.random.rand(ndims)
     like = TestLikelihood(ivar)
 
-    p0 = np.random.randn(nwalkers, ndim)
+    p0 = np.random.randn(nwalkers, ndims)
 
-    # sampler = emcee.EnsembleSampler(nwalkers, ndim, like.log_likelihood, args=[ivar])
     print('Running simple test...')
-    runner = emcee.EnsembleSampler(nwalkers, ndim, like.simple_log_likelihood)
+    runner = emcee.EnsembleSampler(nwalkers, ndims, like.simple_log_likelihood)
     runner.run_mcmc(p0, nsteps, progress=vb)
 
     # Now a more complicated example ...
@@ -85,22 +84,20 @@ def main(args, pool):
 
     if sampler == 'zeus':
         print('Setting up KLensZeusRunner')
-        ndims = 1
         nwalkers = 2*ndims
         runner = KLensZeusRunner(
             nwalkers, ndims, like.log_posterior, datavector, pars
-            )
+        )
 
-    elif sampler == 'emcee':
+    if sampler == 'emcee':
         print('Setting up KLensEmceeRunner')
-        ndims = 1
         nwalkers = 2*ndims
 
         runner = KLensEmceeRunner(
             nwalkers, ndims, like.log_posterior, datavector, pars
-            )
+        )
 
-    print('Running test with mcmc classes...')
+    print(f'Running class test with {sampler}...')
     runner.run(nsteps, pool)
 
     return 0

@@ -74,6 +74,7 @@ def main(args):
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
+        'pix_scale': 1., # arcsec/pix
         'true_flux': 1e5, # counts
         'true_hlr': 5, # pixels
         'v_unit': Unit('km / s'),
@@ -112,7 +113,7 @@ def main(args):
             'type': 'basis',
             'basis_type': 'shapelets',
             'basis_kwargs': {
-                'Nmax': 10,
+                'Nmax': 12,
                 'plane': 'disk'
                 # 'plane': 'obs'
                 }
@@ -126,7 +127,7 @@ def main(args):
 
     Nx, Ny = pars['Nx'], pars['Ny']
     Nspec = len(lambdas)
-    shape = (Nx, Ny, Nspec)
+    shape = (Nspec, Nx, Ny)
 
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = setup_likelihood_test(

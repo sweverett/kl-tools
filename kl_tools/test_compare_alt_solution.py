@@ -60,22 +60,22 @@ def main(args):
         'sed_end': 660,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 1.0, # pixel counts; dummy value
+        'cov_sigma': 3.0, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 1e5, # counts
-            'hlr': 5, # pixels
-            # 'type': 'basis',
-            # 'basis_type': 'shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 10,
-            #     'plane': 'disk'
-            #     # 'plane': 'obs'
-            #     }
+            # 'type': 'inclined_exp',
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
+            'type': 'basis',
+            'basis_type': 'shapelets',
+            'basis_kwargs': {
+                'Nmax': 15,
+                'plane': 'disk'
+                # 'plane': 'obs'
+                }
         },
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
@@ -86,7 +86,7 @@ def main(args):
 
     Nx, Ny = pars['Nx'], pars['Ny']
     Nspec = len(lambdas)
-    shape = (Nx, Ny, Nspec)
+    shape = (Nspec, Nx, Ny)
 
     print('Setting up test datacube and true Halpha image')
     datacube, sed, true_vmap, true_im = setup_likelihood_test(
@@ -171,15 +171,27 @@ def main(args):
 
     # These are centered at an alt solution,
     # using correct intensity map (cov_sig=1)
+    # alt_pars = {
+    #     'g1': -0.0255,
+    #     'g2': 0.1082,
+    #     'theta_int': 1.0437,
+    #     'sini': 0.5724,
+    #     'v0': 10.0144,
+    #     'vcirc': 278.4138,
+    #     'rscale': 4.2491,
+    #     }
+
+    # These are centered at an alt solution,
+    # using basis funcs (cov_sig=3)
     alt_pars = {
-        'g1': -0.0255,
-        'g2': 0.1082,
-        'theta_int': 1.0437,
-        'sini': 0.5724,
-        'v0': 10.0144,
-        'vcirc': 278.4138,
-        'rscale': 4.2491,
-        }
+        'g1': 0.4781,
+        'g2': -0.7357,
+        'theta_int': 1.0699,
+        'sini': 0.9991,
+        'v0': 10.0008,
+        'vcirc': 161.1112,
+        'rscale': 8.9986,
+    }
 
     print('Setting up alternative vmap solution')
     u = {'v_unit': pars['v_unit'], 'r_unit':pars['r_unit']}

@@ -405,7 +405,8 @@ class IntensityMapFitter(object):
             basis_kwargs = {
                 'nx': self.nx,
                 'ny': self.ny,
-                'plane': 'disk'
+                'plane': 'disk',
+                'pix_scale': self.pix_scale
                 }
 
         self.basis = basis.build_basis(self.basis_type, basis_kwargs)
@@ -713,13 +714,17 @@ def main(args):
         )
 
     print('Creating IntensityMapFitter w/ transformed shapelet basis')
-    basis_kwargs = {'Nmax': nmax, 'plane':'disk'}
+    basis_kwargs = {'Nmax': nmax, 'plane':'disk', 'pix_scale':1}
     fitter_transform = IntensityMapFitter(
         'shapelets', nx, ny, basis_kwargs=basis_kwargs
         )
 
     print('Setting up test datacube and true Halpha image')
     true_pars, pars = likelihood.setup_test_pars(nx, ny)
+
+    pars['intensity'] = {
+        'type': 'inclined_exp'
+    }
 
     # Change the pars a bit
     # true_pars['g1'] = 0.
@@ -734,7 +739,7 @@ def main(args):
     lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
 
     Nspec = len(lambdas)
-    shape = (nx, ny, Nspec)
+    shape = (Nspec, nx, ny)
     datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )

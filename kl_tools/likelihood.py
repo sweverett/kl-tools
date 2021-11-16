@@ -202,9 +202,9 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, inv_cov):
     TODO: Need to check that the sed values are correct for this expression
     '''
 
-    Nx = datacube.shape[0]
-    Ny = datacube.shape[1]
-    Nslices = datacube.shape[2]
+    Nslices = datacube.shape[0]
+    Nx = datacube.shape[1]
+    Ny = datacube.shape[2]
 
     # vmap is ~z in this case, as it has been normalized by c
     # approx valid for v << c
@@ -220,7 +220,7 @@ def _log_likelihood(datacube, lambdas, vmap, imap, sed, inv_cov):
             lambdas[i], sed, zfactor, imap
             )
 
-        diff = (datacube[:,:,i] - model).reshape(Nx*Ny)
+        diff = (datacube[i,:,:] - model).reshape(Nx*Ny)
         chi2 = diff.T.dot(inv_cov.dot(diff))
 
         loglike += -0.5*chi2
@@ -374,7 +374,7 @@ def setup_likelihood_test(true_pars, pars, shape, lambdas):
             throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
             ))
 
-    assert shape[2] == len(bandpasses)
+    assert shape[0] == len(bandpasses)
 
     sed = _setup_sed(pars)
 
@@ -389,7 +389,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     TODO: Restructure to allow for more general truth input
     '''
 
-    Nx, Ny, Nspec = shape[0], shape[1], shape[2]
+    Nspec, Nx, Ny = shape[0], shape[1], shape[2]
 
     imap_pars = {
         'flux': pars['true_flux'],
@@ -412,7 +412,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
                 print('WARNING: Using basis for true image as test')
                 ps = pars['pix_scale']
                 dc = DataCube(
-                    shape=(Nx,Ny,1), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
+                    shape=(1,Nx,Ny), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
                     )
 
                 basis_type = pars['intensity']['basis_type']
@@ -457,7 +457,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
         noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
         obs_im.addNoise(noise)
 
-        data[:,:,i] = obs_im.array
+        data[i,:,:] = obs_im.array
 
     pix_scale = pars['pix_scale']
     datacube = DataCube(
@@ -529,15 +529,16 @@ def main(args):
         'g2': 0.2,
         'sini': 0.75,
         'theta_int': np.pi / 3,
-        'v0': 250,
-        'vcirc': 25,
-        'rscale': 20,
+        'v0': 10,
+        'vcirc': 200,
+        'rscale': 5,
     }
 
     # additional args needed for prior / likelihood evaluation
     pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
+        'pix_scale': 1., # arcsec / pix
         'true_flux': 1e4, # counts
         'true_hlr': 3, # pixels
         'v_unit': Unit('km / s'),
@@ -545,9 +546,9 @@ def main(args):
         'line_std': 2, # emission line SED std; nm
         'line_value': 656.28, # emission line SED std; nm
         'line_unit': Unit('nm'),
-        'sed_start': 600,
-        'sed_end': 700,
-        'sed_resolution': 0.5,
+        'sed_start': 655,
+        'sed_end': 657.5,
+        'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
         'cov_sigma': 1., # pixel counts; dummy value
         'bandpass_throughput': '0.2',
@@ -558,9 +559,12 @@ def main(args):
             'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
             'theta_int': priors.UniformPrior(0., np.pi),
             'sini': priors.UniformPrior(0., 1.),
-            'v0': priors.UniformPrior(1400, 1600),
-            'vcirc': priors.UniformPrior(175, 225),
+            'v0': priors.UniformPrior(0, 20),
+            'vcirc': priors.GaussPrior(200, 20),
             'rscale': priors.UniformPrior(0, 10),
+        },
+        'intensity': {
+            'type': 'inclined_exp'
         },
         'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
     }
@@ -570,12 +574,14 @@ def main(args):
 
     Nx, Ny = pars['Nx'], pars['Ny']
     Nspec = len(lambdas)
-    shape = (Nx, Ny, Nspec)
+    shape = (Nspec, Nx, Ny)
 
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = setup_likelihood_test(
         true_pars, pars, shape, lambdas
         )
+
+    pars['sed'] = sed
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')
@@ -619,7 +625,7 @@ def main(args):
     theta = pars2theta(true_pars)
 
     print('Computing log posterior for correct theta')
-    ptrue = log_posterior(theta, datacube, pars)
+    ptrue = log_posterior(theta, datacube, pars)[0]
     chi2_true = -2.*ptrue / (Nx*Ny*Nspec - len(theta))
     print(f'Posterior value = {ptrue:.2f}')
 
@@ -633,7 +639,7 @@ def main(args):
         scale = radius * np.array(theta)
         new_theta = theta + scale * np.random.rand(len(theta))
         new_thetas.append(new_theta)
-        p.append(log_posterior(new_theta, datacube, pars))
+        p.append(log_posterior(new_theta, datacube, pars)[0])
         chi2.append(-2.*p[i] / (Nx*Ny*Nspec - len(new_theta)))
     if N <= 10:
         print(f'Posterior values:\n{p}')

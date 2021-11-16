@@ -98,7 +98,7 @@ def main(args, pool):
         'sed_end': 657.5,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 3, # pixel counts; dummy value
+        'cov_sigma': 3., # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
@@ -110,7 +110,7 @@ def main(args, pool):
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
             'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 10, zero_boundary='positive'),# clip_sigmas=2),
+            'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
@@ -121,13 +121,19 @@ def main(args, pool):
             # 'flux': 1e5, # counts
             # 'hlr': 5, # pixels
             'type': 'basis',
-            'basis_type': 'shapelets',
+            # 'basis_type': 'shapelets',
+            'basis_type': 'sersiclets',
+            # 'basis_type': 'exp_shapelets',
             'basis_kwargs': {
-                'Nmax': 14,
-                'plane': 'disk'
+                'Nmax': 7,
+                # 'plane': 'disk',
+                'plane': 'obs',
+                'beta': 0.35,
+                'index': 1,
+                'b': 1,
                 }
         },
-        # 'marginalize_intensity': True,
+        'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
     }
@@ -146,7 +152,7 @@ def main(args, pool):
 
     Nx, Ny = 30, 30
     Nspec = len(lambdas)
-    shape = (Nx, Ny, Nspec)
+    shape = (Nspec, Nx, Ny)
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
         true_pars, pars, shape, lambdas
@@ -243,7 +249,7 @@ def main(args, pool):
         # Save whole chain
         outfile = os.path.join(outdir, 'test-mcmc-chain.pkl')
         chain = runner.sampler.get_chain(flat=True)
-        print('pickling chain to {outfile}')
+        print(f'pickling chain to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(chain, f)
     else:

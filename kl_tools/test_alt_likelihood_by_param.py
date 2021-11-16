@@ -27,8 +27,8 @@ def main(args):
     true_pars = {
         'g1': 0.05,
         'g2': -0.025,
-        # 'theta_int': np.pi / 3,
-        'theta_int': 0.,
+        'theta_int': np.pi / 3,
+        # 'theta_int': 0.,
         'sini': 0.8,
         'v0': 10.,
         'vcirc': 200,
@@ -57,7 +57,7 @@ def main(args):
         'sed_end': 660,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 1.0, # pixel counts; dummy value
+        'cov_sigma': 3.0, # pixel counts; dummy value
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
@@ -75,16 +75,16 @@ def main(args):
         # },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 1e5, # counts
-            'hlr': 5, # pixels
-            # 'type': 'basis',
-            # 'basis_type': 'shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 15,
+            # 'type': 'inclined_exp',
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
+            'type': 'basis',
+            'basis_type': 'shapelets',
+            'basis_kwargs': {
+                'Nmax': 15,
                 # 'plane': 'disk'
-                # 'plane': 'obs'
-                # }
+                'plane': 'obs'
+                }
         },
         # 'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
@@ -96,7 +96,7 @@ def main(args):
 
     Nx, Ny = pars['Nx'], pars['Ny']
     Nspec = len(lambdas)
-    shape = (Nx, Ny, Nspec)
+    shape = (Nspec, Nx, Ny)
 
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = setup_likelihood_test(
@@ -154,10 +154,10 @@ def main(args):
 
 
     test_pars = {
-        'g1': (-0.4, 0.4, .005),
-        'g2': (-0.4, 0.4, .005),
+        'g1': (-0.8, 0.8, .005),
+        'g2': (-0.8, 0.8, .005),
         'theta_int': (0., np.pi, .05),
-        'sini': (0., 0.99, .01),
+        'sini': (0., 0.99999, .01),
         'v0': (0, 20, .05),
         'vcirc': (100, 300, 1),
         'rscale': (0, 10, .05),
@@ -205,15 +205,37 @@ def main(args):
     # These are centered at an alt soltuion for theta_int=0,
     # using correct intensty map (cov_sig=1)
     # true_pars['theta_int'] = 0
+    # alt_pars = {
+    #     'g1': -0.0230,
+    #     'g2': -0.0249,
+    #     'theta_int': 0.0019,
+    #     'sini': 0.8560,
+    #     'v0': 10.0169,
+    #     'vcirc': 187.6312,
+    #     'rscale': 5.4146,
+    #     }
+
+    # These are centered at an alt solution,
+    # using basis funcs (cov_sig=3)
     alt_pars = {
-        'g1': -0.0230,
-        'g2': -0.0249,
-        'theta_int': 0.0019,
-        'sini': 0.8560,
-        'v0': 10.0169,
-        'vcirc': 187.6312,
-        'rscale': 5.4146,
-        }
+        'g1': 0.4781,
+        'g2': -0.7357,
+        'theta_int': 1.0699,
+        'sini': 0.9991,
+        'v0': 10.0008,
+        'vcirc': 161.1112,
+        'rscale': 8.9986,
+    }
+        # if fit_now is True:
+        #     self._setup_fitter(
+        #         basis_type, nx, ny, basis_kwargs=basis_kwargs
+        #         )
+
+        #     self._fit_to_datacube(datacube)
+        #     self.datacube = None # Not needed in this case
+        # else:
+        # Not all subclasses can fit to the datacube at instantiation time,
+        # so we wait to initialize fitter until rendering
 
     size = (14,5)
     # sqrt = int(np.ceil(np.sqrt(len(true_pars))))

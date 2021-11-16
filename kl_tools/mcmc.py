@@ -53,9 +53,8 @@ class MCMCRunner(object):
             if not isinstance(val, int):
                 raise TypeError(f'{name} must be an int!')
 
-        # Does not work for builtin functions, but that is fine here
-        if not isinstance(pfunc, types.FunctionType):
-            raise TypeError(f'{pfunc} is not a function!')
+        if not callable(pfunc):
+            raise TypeError(f'{pfunc} is not callable!')
 
         if args is not None:
             if not isinstance(args, list):

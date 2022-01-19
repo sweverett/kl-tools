@@ -10,6 +10,7 @@ import galsim as gs
 
 # from . import utils
 import utils
+from datavector import DataVector
 
 import pudb
 
@@ -57,7 +58,7 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
 
     return bandpasses
 
-class DataCube(object):
+class DataCube(DataVector):
     '''
     Base class for an abstract data cube.
     Contains astronomical images of a source

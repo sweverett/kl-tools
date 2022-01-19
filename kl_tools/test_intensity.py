@@ -58,7 +58,7 @@ def main():
 
     Nx, Ny = pars['Nx'], pars['Ny']
     Nspec = len(lambdas)
-    shape = (Nx, Ny, Nspec)
+    shape = (Nspec, Nx, Ny)
 
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = setup_likelihood_test(

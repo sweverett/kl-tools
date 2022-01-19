@@ -12,6 +12,9 @@ from schwimmbad import MPIPool
 from argparse import ArgumentParser
 
 from mcmc import KLensZeusRunner, KLensEmceeRunner
+import likelihood
+from likelihood import log_posterior as real_log_posterior
+from parameters import PARS_ORDER
 
 import pudb
 
@@ -22,6 +25,8 @@ parser.add_argument('-nsteps', type=int, default=10,
 parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
+parser.add_argument('--use_real', action='store_true',
+                    help='Set to use real posterior func')
 parser.add_argument('--v', action='store_true',
                     help='Turn on to display MCMC progress')
 
@@ -58,11 +63,15 @@ class TestLikelihood(object):
     def sum_chi2(self, theta):
         return np.sum(self.ivar * theta**2)
 
+    def real_log_posterior(self, theta, data, pars):
+        return real_log_posterior(theta, data, pars)
+
 def main(args, pool):
     nsteps = args.nsteps
     sampler = args.sampler
     ncores = args.ncores
     mpi = args.mpi
+    use_real = args.use_real
     vb = args.v
 
     ndims, nwalkers = 5, 10
@@ -79,14 +88,37 @@ def main(args, pool):
     runner.run_mcmc(p0, nsteps, progress=vb)
 
     # Now a more complicated example ...
-    datavector = None
-    pars = {}
+
+    if use_real is False:
+        func = like.log_posterior
+        datavector = None
+        pars = {}
+    else:
+        func = like.real_log_posterior
+
+        li, le, dl = 654, 657, 1
+        lambdas = [(l, l+dl) for l in range(li, le, dl)]
+
+        Nx, Ny = 30, 30
+        Nspec = len(lambdas)
+        shape = (Nspec, Nx, Ny)
+
+        true_pars, pars = likelihood.setup_test_pars(Nx, Ny)
+
+        print('Setting up test datacube and true Halpha image')
+        datavector, sed, vmap, true_im = likelihood.setup_likelihood_test(
+            true_pars, pars, shape, lambdas
+            )
+
+        pars['sed'] = sed
+
+        ndims = len(PARS_ORDER)
 
     if sampler == 'zeus':
         print('Setting up KLensZeusRunner')
         nwalkers = 2*ndims
         runner = KLensZeusRunner(
-            nwalkers, ndims, like.log_posterior, datavector, pars
+            nwalkers, ndims, func, datavector, pars
         )
 
     if sampler == 'emcee':
@@ -94,11 +126,11 @@ def main(args, pool):
         nwalkers = 2*ndims
 
         runner = KLensEmceeRunner(
-            nwalkers, ndims, like.log_posterior, datavector, pars
+            nwalkers, ndims, func, datavector, pars
         )
 
     print(f'Running class test with {sampler}...')
-    runner.run(nsteps, pool)
+    runner.run(nsteps, pool, vb=vb)
 
     return 0
 

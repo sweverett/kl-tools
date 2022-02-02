@@ -51,12 +51,12 @@ def check_type(var, name, desired_type):
     is of the desired type
     '''
 
-    if not isinstance(var, desired_type)
+    if not isinstance(var, desired_type):
         raise TypeError(f'{name} must be a {desired_type}!')
 
     return
 
-def check_types(var_dict)
+def check_types(var_dict):
     '''
     Check that the passed variables match the desired type.
     Convenience wrapper around check_type() for multiple variables

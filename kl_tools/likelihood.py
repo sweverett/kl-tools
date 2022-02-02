@@ -17,7 +17,7 @@ import intensity
 from parameters import PARS_ORDER, theta2pars, pars2theta, Pars
 # import parameters
 from velocity import VelocityMap
-from cube import DataCube
+from cube import DataVector, DataCube
 
 import pudb
 
@@ -35,14 +35,7 @@ class LogBase(object):
     sampled parameters
     '''
 
-class LogPosterior(LogBase):
-    '''
-    Class to evaluate the log posterior of a datacube
-    with the log prior and log likelihood constructed given
-    the passed sampled & meta parameters
-    '''
-
-    def __init__(self, parameters, datavector)
+    def __init__(self, parameters, datavector):
         '''
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
@@ -53,20 +46,14 @@ class LogPosterior(LogBase):
         '''
 
         utils.check_type(parameters, 'pars', Pars)
-
-        # cannot check datavector type explicitly, as could be
-        # a variety of things
-        if datavector is None:
-            raise TypeError('Must pass a real datavector!')
+        utils.check_type(datavector, 'datavector', DataVector)
 
         self.parameters = parameters
-
-        self.log_prior = LogPrior(parameters)
-        self.log_likelihood = LogLikelihood(datavector, parameters)
+        self.datavector = datavector
 
         return
 
-    @property(self):
+    @property
     def meta(self):
         '''
         While this is the default name for the meta parameters, we still
@@ -95,6 +82,37 @@ class LogPosterior(LogBase):
 
     def theta2pars(self, theta):
         return self.sampled.theta2pars(theta)
+
+    @abstractmethod
+    def __call__(self):
+        '''
+        Must be implemented in actual classes
+        '''
+        pass
+
+class LogPosterior(LogBase):
+    '''
+    Class to evaluate the log posterior of a datacube
+    with the log prior and log likelihood constructed given
+    the passed sampled & meta parameters
+    '''
+
+    def __init__(self, parameters, datavector):
+        '''
+        parameters: Pars
+            Pars instance that holds all parameters needed for MCMC
+            run, including SampledPars and MetaPars
+        datavector: DataCube, etc.
+            Arbitrary data vector that subclasses from DataVector.
+            If DataCube, truncated to desired lambda bounds
+        '''
+
+        super(LogPosterior, self).__init__(parameters, datavector)
+
+        self.log_prior = LogPrior(parameters)
+        self.log_likelihood = LogLikelihood(parameters, datavector)
+
+        return
 
     def blob(self, prior, likelihood):
         '''
@@ -158,18 +176,18 @@ class LogPrior(object):
             indx = self.pars_order[name]
             logprior += prior(theta[indx], log=True)
 
-    return logprior
+        return logprior
 
-class LogLikelihood(object):
+class LogLikelihood(LogBase):
 
-    def __init__(self, data, parameters):
+    def __init__(self, parameters, datavector):
         '''
-        data: DataCube, etc.
-            Arbitrary data vector. If DataCube, truncated
-            to desired lambda bounds
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
             run, including SampledPars and MetaPars
+        datavector: DataCube, etc.
+            Arbitrary data vector that subclasses from DataVector.
+            If DataCube, truncated to desired lambda bounds
         '''
 
         self.parameters = parameters
@@ -207,35 +225,71 @@ class LogLikelihood(object):
 
         return
 
-    @property(self):
-    def meta(self):
+    def __call__(self, theta, datavector):
         '''
-        While this is the default name for the meta parameters, we still
-        allow for "pars" instead to be consistent with the older version
+        Do setup and type / sanity checking here
+        before calling the abstract method _loglikelihood,
+        which will have a different implementation for each class
+
+        theta: list
+            Sampled parameters. Order defined in self.pars_order
+        datavector: DataCube, etc.
+            Arbitrary data vector that subclasses from DataVector.
+            If DataCube, truncated to desired lambda bounds
         '''
-        return self.parameters.meta
 
-    @property
-    def pars(self):
+        # unpack sampled params
+        theta_pars = self.theta2pars(theta)
+
+        model_datacube = self._setup_model_datacube(theta_pars, data)
+
+        # numba can't handle interp tables, so we do it ourselves
+        sed_array = self._setup_sed()
+
+        # NOTE: This doesn't currently work with numba
+        inv_cov = self._setup_inv_cov_matrix()
+
+        # if we are computing the marginalized posterior over intensity
+        # map parameters, then we need to scale this likelihood by a
+        # determinant factor
+        if self.marginalize_intensity is True:
+            log_det = self._compute_log_det(imap)
+        else:
+            log_det = 1.
+
+        return (-0.5 * log_det) + _log_likelihood(
+            datacube._data, lambdas, v_array, i_array, sed_array, inv_cov
+            )
+
+    def _compute_log_det(self, imap):
+        # TODO: it would be better to pass inv_cov directly,
+        # but for now we are only using diagonal inv_cov matrices
+        # anyway
+        # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
+        log_det = imap.fitter.compute_marginalization_det(pars=self.pars, log=True)
+
+        if log_det == 0:
+            print('Warning: determinant is 0. Cannot compute ' +\
+                'marginalized posterior over intensity basis functions')
+
+        return log_det
+
+    @abstractmethod
+    def _log_likelihood(theta, datavector, pars={}):
         '''
-        To be consistent with the older version of the code, we allow for
-        the metaparameters simply as "pars" after instantiation
+        Natural log of the likelihood. Target function for chosen
+        sampler
+
+        theta: list
+            Sampled parameters, order defined by pars_order
+        datavector: DataCube, etc.
+            Arbitrary data vector that subclasses from DataVector.
+            If DataCube, truncated to desired lambda bounds
+        pars: dict
+            Dictionary of any other parameters needed to evaluate
+            the likelihood
         '''
-        return self.parameters.meta
-
-    @property
-    def sampled(self):
-        return self.parameters.sampled
-
-    @property
-    def pars_order(self):
-        return self.parameters.sampled.pars_order
-
-    def pars2theta(self, pars):
-        return self.sampled.pars2theta(pars)
-
-    def theta2pars(self, theta):
-        return self.sampled.theta2pars(theta)
+        pass
 
     def _setup_model_datacube(theta_pars, datavector):
         '''
@@ -360,42 +414,6 @@ class LogLikelihood(object):
 
         return model
 
-    def __call__(self, theta, datavector):
-        '''
-        Do setup and type / sanity checking here
-        before calling the abstract method _loglikelihood,
-        which will have a different implementation for each class
-
-        theta: list
-            Sampled parameters. Order defined in self.pars_order
-        datavector: DataCube, etc.
-            Arbitrary data vector that subclasses from DataVector.
-            If DataCube, truncated to desired lambda bounds
-        '''
-
-        # unpack sampled params
-        theta_pars = self.theta2pars(theta)
-
-        model_datacube = self._setup_model_datacube(theta_pars, data)
-
-        # numba can't handle interp tables, so we do it ourselves
-        sed_array = self._setup_sed()
-
-        # NOTE: This doesn't currently work with numba
-        inv_cov = self._setup_inv_cov_matrix()
-
-        # if we are computing the marginalized posterior over intensity
-        # map parameters, then we need to scale this likelihood by a
-        # determinant factor
-        if self.marginalize_intensity is True:
-            log_det = self._compute_log_det(imap)
-        else:
-            log_det = 1.
-
-        return (-0.5 * log_det) + _log_likelihood(
-            datacube._data, lambdas, v_array, i_array, sed_array, inv_cov
-            )
-
     def _setup_sed(self):
         '''
         numba can't handle most interpolators, so create
@@ -433,35 +451,6 @@ class LogLikelihood(object):
 
         return inv_cov
 
-    def _compute_log_det(self, imap):
-        # TODO: it would be better to pass inv_cov directly,
-        # but for now we are only using diagonal inv_cov matrices
-        # anyway
-        # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
-        log_det = imap.fitter.compute_marginalization_det(pars=self.pars, log=True)
-
-        if log_det == 0:
-            print('Warning: determinant is 0. Cannot compute ' +\
-                'marginalized posterior over intensity basis functions')
-
-        return log_det
-
-    @abstractmethod
-    def _log_likelihood(theta, datavector, pars={}):
-        '''
-        Natural log of the likelihood. Target function for chosen
-        sampler
-
-        theta: list
-            Sampled parameters, order defined by pars_order
-        datavector: DataCube, etc.
-            Arbitrary data vector that subclasses from DataVector.
-            If DataCube, truncated to desired lambda bounds
-        pars: dict
-            Dictionary of any other parameters needed to evaluate
-            the likelihood
-        '''
-        pass
 
 def log_posterior(theta, data, pars={}):
     '''

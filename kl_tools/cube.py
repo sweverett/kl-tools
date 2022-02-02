@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import numpy as np
 from astropy.io import fits
 import galsim
@@ -10,7 +11,6 @@ import galsim as gs
 
 # from . import utils
 import utils
-from datavector import DataVector
 
 import pudb
 
@@ -21,42 +21,19 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
-def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
-                            throughput=1., zp=30., unit='nm'):
+class DataVector(object):
     '''
-    Setup list of bandpasses needed to instantiate a DataCube
-    given the simple case of constant spectral resolution, throughput,
-    and image zeropoints for all slices
-
-    Useful for quick setup of tests and simulated datavectors
-
-    lambda_blue: float
-        Blue-end of datacube wavelength range
-    lambda_red: float
-        Rd-end of datacube wavelength range
-    dlambda: float
-        Constant wavelength range per slice
-    throughput: float
-        Throughput of filter of data slices
-    unit: str
-        The wavelength unit
-    zeropoint: float
-        Image zeropoint for all data slices
+    Light wrapper around things like cube.DataCube to allow for
+    uniform interface for things like the intensity map rendering
     '''
 
-    li, lf = lambda_blue, lambda_red
-    lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
-
-    bandpasses = []
-    for l1, l2 in lambdas:
-        bandpasses.append(gs.Bandpass(
-            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-            ))
-    bandpasses = [gs.Bandpass(
-        throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-        ) for l1,l2 in lambdas]
-
-    return bandpasses
+    @abstractmethod
+    def stack(self):
+        '''
+        Each datavector must have a method that defines how to stack it
+        into a single (Nx,Ny) image for basis function fitting
+        '''
+        pass
 
 class DataCube(DataVector):
     '''
@@ -442,6 +419,71 @@ class Slice(object):
             plt.close()
 
         return
+
+def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
+                            throughput=1., zp=30., unit='nm'):
+    '''
+    Setup list of bandpasses needed to instantiate a DataCube
+    given the simple case of constant spectral resolution, throughput,
+    and image zeropoints for all slices
+
+    Useful for quick setup of tests and simulated datavectors
+
+    lambda_blue: float
+        Blue-end of datacube wavelength range
+    lambda_red: float
+        Rd-end of datacube wavelength range
+    dlambda: float
+        Constant wavelength range per slice
+    throughput: float
+        Throughput of filter of data slices
+    unit: str
+        The wavelength unit
+    zeropoint: float
+        Image zeropoint for all data slices
+    '''
+
+    li, lf = lambda_blue, lambda_red
+    lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
+
+    bandpasses = []
+    for l1, l2 in lambdas:
+        bandpasses.append(gs.Bandpass(
+            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+            ))
+    bandpasses = [gs.Bandpass(
+        throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+        ) for l1,l2 in lambdas]
+
+    return bandpasses
+
+def get_datavector_types():
+    return DATAVECTOR_TYPES
+
+# NOTE: This is where you must register a new model
+DATAVECTOR_TYPES = {
+    'default': DataCube,
+    'datacube': DataCube,
+    }
+
+def build_datavector(name, kwargs):
+    '''
+    name: str
+        Name of datavector
+    kwargs: dict
+        Keyword args to pass to datavector constructor
+    '''
+
+    name = name.lower()
+
+    if name in DATAVECTOR_TYPES.keys():
+        # User-defined input construction
+        datavector = DATAVECTOR_TYPES[name](**kwargs)
+    else:
+        raise ValueError(f'{name} is not a registered datavector!')
+
+    return datavector
+
 
 # Used for testing
 def main(args):

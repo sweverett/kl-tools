@@ -17,6 +17,7 @@ TODO: To make this future-proof, what we should do is make a function that
       *returns* PARS_ORDER given a velocity model name. This way it is accessible
       throughout, but allows things to be a bit more flexible
 '''
+
 class Pars(object):
     '''
     Holds all of the parameters for a needed MCMC run, both
@@ -146,10 +147,10 @@ class MetaPars(dict):
         return self.pars[key]
 
     def __setitem__(self, key, val):
-        return self.pars[key] = val
+        self.pars[key] = val
 
     def __delitem__(self, key):
-        return del self.pars[key]
+        del self.pars[key]
 
 # order of sampled mcmc parameters
 # NOTE: This won't be accessible if we use numba

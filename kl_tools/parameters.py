@@ -49,6 +49,12 @@ class Pars(object):
 
         return
 
+    def pars2theta(self, pars):
+        return self.sampled.pars2theta(pars)
+
+    def theta2pars(self, theta):
+        return self.sampled.theta2pars(theta)
+
 class SampledPars(object):
     '''
     Sets the structure for arbitrary sampled parameters, which
@@ -107,7 +113,13 @@ class SampledPars(object):
 
         return theta
 
-class MetaPars(dict):
+    def __repr__(self):
+        return str(self.pars_order)
+
+    def __len__(self):
+        return len(self.pars_order.keys())
+
+class MetaPars(object):
     '''
     Class that defines structure for the general parameters
     used in MCMC sampling for a given experiment, modeling
@@ -148,9 +160,26 @@ class MetaPars(dict):
 
     def __setitem__(self, key, val):
         self.pars[key] = val
+        return
 
     def __delitem__(self, key):
         del self.pars[key]
+        return
+
+    def __iter__(self):
+        return iter(self.pars)
+
+    def __repr__(self):
+        return str(self.pars)
+
+    def keys(self):
+        return self.pars.keys()
+
+    def items(self):
+        return self.pars.items()
+
+    def values(self):
+        return self.pars.values()
 
 # order of sampled mcmc parameters
 # NOTE: This won't be accessible if we use numba

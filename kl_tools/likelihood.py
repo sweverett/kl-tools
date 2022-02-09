@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import numpy as np
 import os
+from time import time
 from scipy.interpolate import interp1d
 import scipy
 from scipy.sparse import identity
@@ -14,12 +15,15 @@ from numba import njit
 import utils
 import priors
 import intensity
-from parameters import PARS_ORDER, theta2pars, pars2theta, Pars
+from parameters import Pars
 # import parameters
 from velocity import VelocityMap
 from cube import DataVector, DataCube
 
 import pudb
+
+# TODO: Make LogLikelihood a base class w/ abstract call,
+# and make current implementation for IFU
 
 parser = ArgumentParser()
 
@@ -112,6 +116,8 @@ class LogPosterior(LogBase):
         self.log_prior = LogPrior(parameters)
         self.log_likelihood = LogLikelihood(parameters, datavector)
 
+        self.ndims = len(parameters.sampled)
+
         return
 
     def blob(self, prior, likelihood):
@@ -124,7 +130,7 @@ class LogPosterior(LogBase):
 
         return (prior, likelihood)
 
-    def __call__(self, theta, data):
+    def __call__(self, theta, data, pars):
         '''
         Natural log of the posterior dist. Target function for chosen
         sampler
@@ -146,23 +152,22 @@ class LogPosterior(LogBase):
 
         return logprior + loglike, self.blob(logprior, loglike)
 
-class LogPrior(object):
-    def __init__(parameters):
+class LogPrior(LogBase):
+    def __init__(self, parameters):
         '''
         pars: Pars
             A parameters.Pars object, containing both
             sampled & meta parameters
         '''
 
+        # Can't use parent constructor as the prior doesn't
+        # have access to the datavector
+        utils.check_type(parameters, 'pars', Pars)
         self.parameters = parameters
 
         self.priors = parameters.meta['priors']
 
         return
-
-    @property
-    def pars_order(self):
-        return self.parameters.sampled.pars_order
 
     def __call__(self, theta):
         '''
@@ -170,10 +175,12 @@ class LogPrior(object):
             Sampled MCMC parameters
         '''
 
+        pars_order = self.parameters.sampled.pars_order
+
         logprior = 0
 
         for name, prior in self.priors.items():
-            indx = self.pars_order[name]
+            indx = pars_order[name]
             logprior += prior(theta[indx], log=True)
 
         return logprior
@@ -190,10 +197,10 @@ class LogLikelihood(LogBase):
             If DataCube, truncated to desired lambda bounds
         '''
 
-        self.parameters = parameters
+        super(LogLikelihood, self).__init__(parameters, datavector)
 
         # Sometimes we want to marginalize over parts of the posterior explicitly
-        self._setup_marginalization(parameters.meta)
+        self._setup_marginalization(self.meta)
 
         return
 
@@ -201,7 +208,7 @@ class LogLikelihood(LogBase):
         '''
         Check to see if we need to sample from a marginalized posterior
 
-        pars: dict
+        pars: MetaPars
             Dictionary full of run parameters
         '''
 
@@ -241,10 +248,12 @@ class LogLikelihood(LogBase):
         # unpack sampled params
         theta_pars = self.theta2pars(theta)
 
-        model_datacube = self._setup_model_datacube(theta_pars, data)
+        model_datacube, v_array, i_array = self._setup_model_datacube(
+            theta_pars, datavector
+            )
 
         # numba can't handle interp tables, so we do it ourselves
-        sed_array = self._setup_sed()
+        sed_array = self._setup_sed(self.meta)
 
         # NOTE: This doesn't currently work with numba
         inv_cov = self._setup_inv_cov_matrix()
@@ -257,8 +266,8 @@ class LogLikelihood(LogBase):
         else:
             log_det = 1.
 
-        return (-0.5 * log_det) + _log_likelihood(
-            datacube._data, lambdas, v_array, i_array, sed_array, inv_cov
+        return (-0.5 * log_det) + self._log_likelihood(
+            datavector, model_datacube, inv_cov
             )
 
     def _compute_log_det(self, imap):
@@ -274,24 +283,56 @@ class LogLikelihood(LogBase):
 
         return log_det
 
-    @abstractmethod
-    def _log_likelihood(theta, datavector, pars={}):
-        '''
-        Natural log of the likelihood. Target function for chosen
-        sampler
+    # @abstractmethod
+    # def _log_likelihood(theta, datavector, pars={}):
+    #     '''
+    #     Natural log of the likelihood. Target function for chosen
+    #     sampler
 
-        theta: list
-            Sampled parameters, order defined by pars_order
+    #     theta: list
+    #         Sampled parameters, order defined by pars_order
+    #     datavector: DataCube, etc.
+    #         Arbitrary data vector that subclasses from DataVector.
+    #         If DataCube, truncated to desired lambda bounds
+    #     pars: dict
+    #         Dictionary of any other parameters needed to evaluate
+    #         the likelihood
+    #     '''
+    #     pass
+
+    @classmethod
+    def _log_likelihood(cls, datavector, model, inv_cov):
+        '''
         datavector: DataCube, etc.
-            Arbitrary data vector that subclasses from DataVector.
-            If DataCube, truncated to desired lambda bounds
-        pars: dict
-            Dictionary of any other parameters needed to evaluate
-            the likelihood
+            The datavector that is compared against the model
+        model: DataCube, etc.
+            The model datacube object, truncated to desired lambda bounds
+        inv_cov: np.ndarray, sp.sparse.spmatrix
+            A (Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
         '''
-        pass
 
-    def _setup_model_datacube(theta_pars, datavector):
+        Nspec = datavector.Nspec
+        Nx, Ny = datavector.Nx, datavector.Ny
+
+        loglike = 0
+
+        # can figure out how to remove this for loop later
+        # will be fast enough with numba anyway
+        for i in range(Nspec):
+
+            diff = (datavector.slice(i) - model.slice(i)).reshape(Nx*Ny)
+            chi2 = diff.T.dot(inv_cov.dot(diff))
+
+            loglike += -0.5*chi2
+
+        # Actually slower due to extra matrix evals...
+        # diff_2 = (datavector.data - model.data).reshape(Nspec, Nx*Ny)
+        # chi2_2 = diff_2.dot(inv_cov.dot(diff_2.T))
+        # loglike2 = -0.5*chi2_2.trace()
+
+        return loglike
+
+    def _setup_model_datacube(self, theta_pars, datavector):
         '''
         theta_pars: dict
             Dictionary of sampled pars
@@ -300,6 +341,7 @@ class LogLikelihood(LogBase):
             If DataCube, truncated to desired lambda bounds
         '''
 
+        # Datavector may not be a datacube itself
         Nx, Ny = self.pars['Nx'], self.pars['Ny']
         Nspec = self.pars['Nspec']
 
@@ -310,8 +352,8 @@ class LogLikelihood(LogBase):
 
         # create 2D velocity & intensity maps given sampled transformation
         # parameters
-        vmap = _setup_vmap(theta_pars, self.pars)
-        imap = _setup_imap(theta_pars, datavector, self.pars)
+        vmap = self._setup_vmap(theta_pars, self.meta)
+        imap = self._setup_imap(theta_pars, datavector, self.meta)
 
         # evaluate maps at pixel centers in obs plane
         if 'use_numba' in self.pars:
@@ -323,9 +365,9 @@ class LogLikelihood(LogBase):
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
 
-        i_array = imap.render(theta_pars, datavector, self.pars)
+        i_array = imap.render(theta_pars, datavector, self.meta)
 
-        sed_array = self._setup_sed()
+        sed_array = self._setup_sed(self.meta)
 
         # create datacube
         shape = (Nspec, Nx, Ny)
@@ -334,7 +376,47 @@ class LogLikelihood(LogBase):
             shape, lambdas, v_array, i_array
             )
 
-        return model_datacube
+        return model_datacube, v_array, i_array
+
+    @classmethod
+    def _setup_vmap(cls, theta_pars, pars, model_name='default'):
+        '''
+        theta_pars: dict
+        A dict of the sampled mcmc params for both the velocity
+        map and the tranformation matrices
+        pars: dict
+        A dict of anything else needed to compute the posterior
+        model_name: str
+        The model name to use when constructing the velocity map
+        '''
+
+        vmodel = theta_pars
+
+        for name in ['r_unit', 'v_unit']:
+            if name in pars:
+                vmodel[name] = Unit(pars[name])
+            else:
+                raise AttributeError(f'pars must have a value for {name}!')
+
+        return VelocityMap(model_name, vmodel)
+
+    @classmethod
+    def _setup_imap(cls, theta_pars, datacube, pars):
+        '''
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        pars: dict
+            A dict of anything else needed to compute the posterior
+        model_name: str
+            The model name to use when constructing the velocity map
+        '''
+
+        imap_pars = pars['intensity'].copy()
+        imap_type = imap_pars['type']
+        del imap_pars['type']
+
+        return intensity.build_intensity_map(imap_type, datacube, imap_pars)
 
     def _construct_model_datacube(self, shape, lambdas, v_array, i_array):
         '''
@@ -356,12 +438,12 @@ class LogLikelihood(LogBase):
 
         data = np.zeros(shape)
 
-        sed_array = self._setup_sed()
+        sed_array = self._setup_sed(self.meta)
 
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)
 
-            obs_array = _compute_slice_model(
+            obs_array = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array
             )
 
@@ -372,14 +454,16 @@ class LogLikelihood(LogBase):
 
             data[i,:,:] = obs_array
 
-        pix_scale = self.pars['pix_scale']
+        pix_scale = self.meta['pix_scale']
+        bandpasses = self.meta['bandpasses']
         model_datacube = DataCube(
             data=data, bandpasses=bandpasses, pix_scale=pix_scale
         )
 
         return model_datacube
 
-    def _compute_slice_model(self, lambdas, sed, zfactor, imap):
+    @classmethod
+    def _compute_slice_model(cls, lambdas, sed, zfactor, imap):
         '''
         Compute datacube slice given lambda range, sed, redshift factor
         per pixel, and the intemsity map
@@ -404,8 +488,8 @@ class LogLikelihood(LogBase):
         # Get mean SED vlaue in slice range
         # NOTE: We do it this way as numba won't allow
         #       interp1d objects
-        sed_b = _interp1d(sed, lblue*zfactor)
-        sed_r = _interp1d(sed, lred*zfactor)
+        sed_b = cls._interp1d(sed, lblue*zfactor)
+        sed_r = cls._interp1d(sed, lred*zfactor)
 
         # Numba won't let us use np.mean w/ axis=0
         mean_sed = (sed_b + sed_r) / 2.
@@ -414,15 +498,36 @@ class LogLikelihood(LogBase):
 
         return model
 
-    def _setup_sed(self):
+    @classmethod
+    def _setup_sed(cls, meta):
         '''
         numba can't handle most interpolators, so create
         a numpy one
         '''
 
-        sed = pars['sed']
+        sed = meta['sed']
 
         return np.array([sed.x, sed.y])
+
+    @classmethod
+    def _interp1d(cls, table, values, kind='linear'):
+        '''
+        Interpolate table(value)
+
+        table: np.ndarray
+            A 2D numpy array with axis=0 being the x-values and
+            axis=1 being the function evaluated at x
+        values: np.array
+            The values to interpolate the table on
+        '''
+
+        if kind == 'linear':
+            # just use numpy linear interpolation, as it works with numba
+            interp = np.interp(values, table[0], table[1])
+        else:
+            raise ValueError('Non-linear interpolations not yet implemented!')
+
+        return interp
 
     def _setup_inv_cov_matrix(self):
         '''
@@ -451,257 +556,7 @@ class LogLikelihood(LogBase):
 
         return inv_cov
 
-
-def log_posterior(theta, data, pars={}):
-    '''
-    Natural log of the posterior dist. Target function for zeus
-    to sample over
-    theta: list
-        Parameters sampled by zeus. Order defined in PARS_ORDER
-    data: DataCube
-        Truncated to desired lambda bounds
-    pars: dict
-        Dictionary of any other parameters needed to evaluate
-        the likelihood
-    '''
-
-    logprior = log_prior(theta, pars)
-
-    if logprior == -np.inf:
-        return -np.inf, (-np.inf, -np.inf)
-
-    else:
-        # Determine whether to sample from the regular posterior or
-        # marginalized over intensity basis functions
-        # TODO: Implement here, if desired
-        # return logprior + log_likelihood(theta, data, pars)
-        loglike = log_likelihood(theta, data, pars)
-
-        return logprior + loglike, (logprior, loglike)
-
-def log_prior(theta, pars):
-    '''
-    theta: Parameters sampled by zeus. Order defined in PARS_ORDER
-    '''
-
-    theta_priors = pars['priors']
-
-    logprior = 0
-
-    for name, prior in theta_priors.items():
-        indx = PARS_ORDER[name]
-        logprior += prior(theta[indx], log=True)
-
-    return logprior
-
-
-def log_likelihood(theta, datacube, pars):
-    '''
-    Do setup and type / sanity checking here
-    before calling _loglikelihood
-
-    theta: list
-        Sampled parameters. Order defined in PARS_ORDER
-    datacube: DataCube
-        Truncated to desired lambda bounds
-    pars: dict
-        Dictionary of any other parameters needed to evaluate likelihood
-
-    TODO: Would be nice to swap datacube for the following:
-    datavector: DataCube, numpy.array, etc.
-        Arbitrary data vector. Likely a datacube truncated
-        to relevant emission line slices
-
-    '''
-
-    # unpack sampled params
-    theta_pars = theta2pars(theta)
-
-    Nx = datacube.Nx
-    Ny = datacube.Ny
-    Nspec = datacube.Nspec
-
-    lambdas = np.array(datacube.lambdas)
-
-    # create grid of pixel centers in image coords
-    X, Y = utils.build_map_grid(Nx, Ny)
-
-    # create 2D velocity & intensity maps given sampled transformation
-    # parameters
-    vmap = _setup_vmap(theta_pars, pars)
-    imap = _setup_imap(theta_pars, datacube, pars)
-
-    # evaluate maps at pixel centers in obs plane
-    if 'use_numba' in pars:
-        use_numba = pars['use_numba']
-    else:
-        use_numba = False
-    v_array = vmap(
-        'obs', X, Y, normalized=True, use_numba=use_numba
-        )
-
-    i_array = imap.render(theta_pars, datacube, pars)
-
-    # numba can't handle interp tables, so we do it ourselves
-    sed = pars['sed']
-    sed_array = np.array([sed.x, sed.y])
-
-    # NOTE: This doesn't currently work with numba
-    inv_cov = _setup_inv_cov_matrix(pars)
-
-    # if we are computing the marginalized posterior over intensity
-    # map parameters, then we need to scale this likelihood by a
-    # determinant factor
-    try:
-        if pars['marginalize_intensity'] is True:
-            log_det = _compute_log_det(imap, pars)
-        else:
-            log_det = 1.
-    except (KeyError, AttributeError):
-        # Ignore if not set in pars, or if imap doesn't have this defined
-        log_det = 1.
-
-    return (-0.5 * log_det) + _log_likelihood(
-        datacube._data, lambdas, v_array, i_array, sed_array, inv_cov
-        )
-
-def _compute_log_det(imap, pars):
-    # TODO: it would be better to pass inv_cov directly,
-    # but for now we are only using diagonal inv_cov matrices
-    # anyway
-    # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
-    log_det = imap.fitter.compute_marginalization_det(pars=pars, log=True)
-
-    if log_det == 0:
-        print('Warning: determinant is 0. Cannot compute ' +\
-              'marginalized posterior over intensity basis functions')
-
-    return log_det
-
-# @njit
-def _log_likelihood(datacube, lambdas, vmap, imap, sed, inv_cov):
-    '''
-    datacube: The (Nx,Ny,Nspec) data array of a DataCube object,
-                truncated to desired lambda bounds
-    lambdas: List of lambda tuples that define slice edges
-    vmap: An (Nx,Ny) array of normalized (by c) velocity values in the
-            obs plane returned by a call from a VelocityMap object
-    imap: An (Nx,Ny) array of intensity values in the obs plane
-            returned by a call from a IntensityMap object
-    sed: A 2D numpy array with axis=0 being the lambda values of
-         a 1D interpolation table, with axis=1 being the corresponding
-         SED values
-    inv_cov: A (Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
-
-    TODO: Need to check that the sed values are correct for this expression
-    '''
-
-    Nslices = datacube.shape[0]
-    Nx = datacube.shape[1]
-    Ny = datacube.shape[2]
-
-    # vmap is ~z in this case, as it has been normalized by c
-    # approx valid for v << c
-    zfactor = 1. / (1. + vmap)
-
-    loglike = 0
-
-    # can figure out how to remove this for loop later
-    # will be fast enough with numba anyway
-    for i in range(Nslices):
-
-        model = _compute_slice_model(
-            lambdas[i], sed, zfactor, imap
-            )
-
-        diff = (datacube[i,:,:] - model).reshape(Nx*Ny)
-        chi2 = diff.T.dot(inv_cov.dot(diff))
-
-        loglike += -0.5*chi2
-
-    return loglike
-
-# @njit
-def _compute_slice_model(lambdas, sed, zfactor, imap):
-    '''
-    lambdas: tuple
-        The wavelength tuple (lambda_blue, lambda_red) for a
-        given slice
-    sed: np.ndarray
-        A 2D numpy array with axis=0 being the lambda values of
-        a 1D interpolation table, with axis=1 being the corresponding
-        SED values
-    zfactor: np.ndarray
-        A 2D numpy array corresponding to the (normalized by c) velocity
-        map at each pixel
-    imap: np.ndarray
-        A 2D numpy array corresponding to the source intensity map
-        at the emission line
-    '''
-
-    lblue, lred = lambdas[0], lambdas[1]
-
-    # Get mean SED vlaue in slice range
-    # NOTE: We do it this way as numba won't allow
-    #       interp1d objects
-    sed_b = _interp1d(sed, lblue*zfactor)
-    sed_r = _interp1d(sed, lred*zfactor)
-
-    # Numba won't let us use np.mean w/ axis=0
-    mean_sed = (sed_b + sed_r) / 2.
-    int_sed = (lred - lblue) * mean_sed
-    model = imap * int_sed
-
-    return model
-
-# @njit
-def _interp1d(table, values, kind='linear'):
-    '''
-    Interpolate table(value)
-
-    table: A 2D numpy array with axis=0 being the x-values and
-           axis=1 being the function evaluated at x
-    values: The values to interpolate the table on
-    '''
-
-    if kind == 'linear':
-        # just use numpy linear interpolation, as it works with numba
-        interp = np.interp(values, table[0], table[1])
-    else:
-        raise ValueError('Non-linear interpolations not yet implemented!')
-
-    return interp
-
-def _setup_vmap(theta_pars, pars, model_name='default'):
-    '''
-    theta_pars: dict
-        A dict of the sampled mcmc params for both the velocity
-        map and the tranformation matrices
-    pars: dict
-        A dict of anything else needed to compute the posterior
-    model_name: str
-        The model name to use when constructing the velocity map
-    '''
-
-    vmodel = theta_pars
-
-    for name in ['r_unit', 'v_unit']:
-        if name in pars:
-            vmodel[name] = Unit(pars[name])
-        else:
-            raise AttributeError(f'pars must have a value for {name}!')
-
-    return VelocityMap(model_name, vmodel)
-
-def _setup_imap(theta_pars, datacube, pars):
-
-    imap_pars = pars['intensity'].copy()
-    imap_type = imap_pars['type']
-    del imap_pars['type']
-
-    return intensity.build_intensity_map(imap_type, datacube, imap_pars)
-
-def _setup_sed(pars):
+def _setup_test_sed(pars):
     '''
     Build interpolation table for normalized emission line SED
 
@@ -729,33 +584,6 @@ def _setup_sed(pars):
 
     return sed
 
-def _setup_inv_cov_matrix(pars):
-    '''
-    Build covariance matrix for slice images
-
-    pars: dict
-        dictionary containing parameters needed to build cov matrix
-
-    # TODO: For now, a single cov matrix for each slice. However, this could be
-            generalized to a list of cov matrices
-    '''
-
-    Nx, Ny = pars['Nx'], pars['Ny']
-    Npix = Nx*Ny
-
-    # TODO: For now, treating pixel covariance as diagonal
-    #       and uniform for a given slice
-    sigma = pars['cov_sigma']
-
-    # full matrix, but very inefficient for a diagonal
-    # cov matrix
-    # inv_cov = (1./sigma)**2 * np.identity(Npix)
-
-    # uses scipy sparse matrices
-    inv_cov = (1./sigma)**2 * identity(Npix)
-
-    return inv_cov
-
 def setup_likelihood_test(true_pars, pars, shape, lambdas):
 
     throughput = pars['bandpass_throughput']
@@ -770,7 +598,7 @@ def setup_likelihood_test(true_pars, pars, shape, lambdas):
 
     assert shape[0] == len(bandpasses)
 
-    sed = _setup_sed(pars)
+    sed = _setup_test_sed(pars)
 
     datacube, vmap, true_im = _setup_test_datacube(
         shape, lambdas, bandpasses, sed, true_pars, pars
@@ -821,7 +649,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
             pass
 
     vel_pars = {}
-    for name in PARS_ORDER.keys():
+    for name in true_pars.keys():
         vel_pars[name] = true_pars[name]
     vel_pars['v_unit'] = pars['v_unit']
     vel_pars['r_unit'] = pars['r_unit']
@@ -842,7 +670,7 @@ def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
     for i in range(Nspec):
         zfactor = 1. / (1 + Vnorm)
 
-        obs_array = _compute_slice_model(
+        obs_array = LogLikelihood._compute_slice_model(
             lambdas[i], sed_array, zfactor, true_im
             )
 

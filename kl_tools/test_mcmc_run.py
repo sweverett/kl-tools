@@ -22,8 +22,8 @@ from mcmc import KLensZeusRunner, KLensEmceeRunner
 import priors
 import cube
 import likelihood
-from parameters import PARS_ORDER
-from likelihood import log_posterior
+from parameters import Pars
+from likelihood import LogPosterior
 from velocity import VelocityMap
 
 import pudb
@@ -80,7 +80,7 @@ def main(args, pool):
     halpha = 656.28 # nm
     R = 5000.
     z = 0.3
-    pars = {
+    meta_pars = {
         'Nx': 30, # pixels
         'Ny': 30, # pixels
         'pix_scale': 1., # arcsec / pixel
@@ -103,8 +103,8 @@ def main(args, pool):
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
         'priors': {
-            'g1': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
+            'g1': priors.GaussPrior(0., 0.3, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.3, clip_sigmas=2),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
@@ -117,23 +117,23 @@ def main(args, pool):
         },
         'intensity': {
             # For this test, use truth info
-            # 'type': 'inclined_exp',
-            # 'flux': 1e5, # counts
-            # 'hlr': 5, # pixels
-            'type': 'basis',
+            'type': 'inclined_exp',
+            'flux': 1e5, # counts
+            'hlr': 5, # pixels
+            # 'type': 'basis',
             # 'basis_type': 'shapelets',
-            'basis_type': 'sersiclets',
+            # 'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                'Nmax': 7,
-                # 'plane': 'disk',
-                'plane': 'obs',
-                'beta': 0.35,
-                'index': 1,
-                'b': 1,
-                }
+            # 'basis_kwargs': {
+            #     'Nmax': 7,
+            #     # 'plane': 'disk',
+            #     'plane': 'obs',
+            #     'beta': 0.35,
+            #     'index': 1,
+            #     'b': 1,
+            #     }
         },
-        'marginalize_intensity': True,
+        # 'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
     }
@@ -145,9 +145,9 @@ def main(args, pool):
 
     bandpasses = cube.setup_simple_bandpasses(
         li, le, dl,
-        throughput=pars['bandpass_throughput'],
-        zp=pars['bandpass_zp'],
-        unit=pars['bandpass_unit']
+        throughput=meta_pars['bandpass_throughput'],
+        zp=meta_pars['bandpass_zp'],
+        unit=meta_pars['bandpass_unit']
         )
 
     Nx, Ny = 30, 30
@@ -155,14 +155,15 @@ def main(args, pool):
     shape = (Nspec, Nx, Ny)
     print('Setting up test datacube and true Halpha image')
     datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
-        true_pars, pars, shape, lambdas
+        true_pars, meta_pars, shape, lambdas
         )
 
-    # Update pars w/ SED, bandapsses, etc. as can no longer assume
+    # Update meta_pars w/ SED, bandapsses, etc. as can no longer assume
     # this will be available in the datavector
-    pars['sed'] = sed
-    pars['lambdas'] = lambdas
-    pars['bandpasses'] = bandpasses
+    meta_pars['sed'] = sed
+    meta_pars['lambdas'] = lambdas
+    meta_pars['bandpasses'] = bandpasses
+    meta_pars['Nspec'] = Nspec
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')
@@ -212,18 +213,30 @@ def main(args, pool):
     else:
         plt.close()
 
+    #-----------------------------------------------------------------
+    # Setup sampled posterior
+
+    sampled_pars = list(true_pars)
+    pars = Pars(sampled_pars, meta_pars)
+    pars_order = pars.sampled.pars_order
+
+    log_posterior = LogPosterior(pars, datacube)
+
+    #-----------------------------------------------------------------
+    # Setup sampler
+
+    ndims = log_posterior.ndims
+    nwalkers = 2*ndims
+
     if sampler == 'zeus':
         print('Setting up KLensZeusRunner')
-        ndims = len(PARS_ORDER)
-        nwalkers = 2*ndims
+
         runner = KLensZeusRunner(
             nwalkers, ndims, log_posterior, datacube, pars
             )
 
     elif sampler == 'emcee':
         print('Setting up KLensEmceeRunner')
-        ndims = len(PARS_ORDER)
-        nwalkers = 2*ndims
 
         runner = KLensEmceeRunner(
             nwalkers, ndims, log_posterior, datacube, pars
@@ -263,8 +276,8 @@ def main(args, pool):
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
 
-    truth = np.zeros(len(PARS_ORDER))
-    for name, indx in PARS_ORDER.items():
+    truth = np.zeros(ndims)
+    for name, indx in pars_order.items():
         truth[indx] = true_pars[name]
     outfile = os.path.join(outdir, 'test-mcmc-truth.pkl')
     print(f'Pickling truth to {outfile}')
@@ -273,7 +286,7 @@ def main(args, pool):
 
     outfile = os.path.join(outdir, 'chains.png')
     print(f'Saving chain plots to {outfile}')
-    reference = likelihood.pars2theta(true_pars)
+    reference = pars.pars2theta(true_pars)
     runner.plot_chains(
         outfile=outfile, reference=reference, show=show
         )
@@ -288,7 +301,7 @@ def main(args, pool):
     runner.compute_MAP()
     map_medians = runner.MAP_medians
     print('(median) MAP values:')
-    for name, indx in PARS_ORDER.items():
+    for name, indx in pars_order.items():
         m = map_medians[indx]
         print(f'{name}: {m:.4f}')
 
@@ -299,8 +312,8 @@ def main(args, pool):
     outfile = os.path.join(outdir, 'compare-vmap-to-map.png')
     print(f'Plotting MAP comparison to velocity map in {outfile}')
     vmap_pars = true_pars
-    vmap_pars['r_unit'] = pars['r_unit']
-    vmap_pars['v_unit'] = pars['v_unit']
+    vmap_pars['r_unit'] = meta_pars['r_unit']
+    vmap_pars['v_unit'] = meta_pars['v_unit']
     vmap_true = VelocityMap('default', vmap_pars)
     runner.compare_MAP_to_truth(vmap_true, outfile=outfile, show=show)
 

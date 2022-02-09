@@ -14,10 +14,8 @@ import emcee
 
 import utils
 import priors
-import likelihood
-from parameters import PARS_ORDER
+from likelihood import LogLikelihood
 from velocity import VelocityMap
-from likelihood import log_posterior
 
 import pudb
 
@@ -98,7 +96,7 @@ class MCMCRunner(object):
             # use peak of priors for initialization
             self.start = np.zeros((self.nwalkers, self.ndim))
 
-            for name, indx in PARS_ORDER.items():
+            for name, indx in self.pars_order.items():
                 prior = self.kwargs['pars']['priors'][name]
                 peak, cen = prior.peak, prior.cen
 
@@ -284,7 +282,7 @@ class MCMCRunner(object):
 
         fig = plt.figure(figsize=size)
         # for n in range(ndim):
-        for name, indx in PARS_ORDER.items():
+        for name, indx in self.pars_order.items():
             plt.subplot2grid((ndim, 1), (indx, 0))
             plt.plot(chain[burn_in:,:,indx], alpha=0.5)
             plt.ylabel(name)
@@ -343,7 +341,7 @@ class MCMCRunner(object):
             new_shape = (chain.shape[0], chain.shape[1]+1)
             new_chain = np.zeros((new_shape))
             new_chain[:,0:-1] = chain
-            i1, i2 = PARS_ORDER['sini'], PARS_ORDER['vcirc']
+            i1, i2 = self.pars_order['sini'], self.pars_order['vcirc']
             new_chain[:,-1] = chain[:,i1] * chain[:,i2]
             chain = new_chain
 
@@ -362,7 +360,7 @@ class MCMCRunner(object):
                     reference = arr
 
             names = self.ndim*['']
-            for name, indx in PARS_ORDER.items():
+            for name, indx in self.pars_order.items():
                 names[indx] = name
 
             if use_derived is True:
@@ -427,16 +425,21 @@ class KLensZeusRunner(ZeusRunner):
         ndim:     Number of sampled dimensions
         pfunc:    Posterior function to sample from
         datacube: Datacube object the fit a model to
-        pars: A dict of needed kwargs to evaluate posterior, such as
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
               covariance matrix, SED definition, etc.
         '''
 
         super(KLensZeusRunner, self).__init__(
-            nwalkers, ndim, pfunc, args=[datacube], kwargs={'pars': pars}
+            nwalkers, ndim, pfunc, args=[datacube], kwargs={
+                'pars': pars.meta.pars
+                }
             )
 
         self.datacube = datacube
         self.pars = pars
+
+        self.pars_order = self.pars.sampled.pars_order
 
         self.MAP_vmap = None
 
@@ -447,7 +450,7 @@ class KLensZeusRunner(ZeusRunner):
             discard=discard, thin=thin, recompute=recompute
             )
 
-        theta_pars = likelihood.theta2pars(self.MAP_medians)
+        theta_pars = self.pars.theta2pars(self.MAP_medians)
 
         # Now compute the corresonding (median) MAP velocity map
         # vel_pars = theta_pars.copy()
@@ -455,12 +458,12 @@ class KLensZeusRunner(ZeusRunner):
         # vel_pars['v_unit'] = self.pars['v_unit']
 
         # self.MAP_vmap = VelocityMap('default', vel_pars)
-        self.MAP_vmap = likelihood._setup_vmap(theta_pars, self.pars)
+        self.MAP_vmap = LogLikelihood._setup_vmap(theta_pars, self.pars.meta.pars)
 
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
-        self.MAP_imap = likelihood._setup_imap(
-            theta_pars, self.datacube, self.pars
+        self.MAP_imap = LogLikelihood._setup_imap(
+            theta_pars, self.datacube, self.pars.meta.pars
             )
 
         return
@@ -524,8 +527,7 @@ class KLensZeusRunner(ZeusRunner):
         # gather needed components to evaluate model
         datacube = self.datacube
         lambdas = datacube.lambdas
-        sed = likelihood._setup_sed(self.pars)
-        sed_array = np.array([sed.x, sed.y])
+        sed_array = LogLikelihood._setup_sed(self.pars.meta.pars)
         vmap = self.MAP_vmap
         imap = self.MAP_imap
 
@@ -540,8 +542,8 @@ class KLensZeusRunner(ZeusRunner):
 
         # compute intensity map from MAP
         # TODO: Eventually this should be called like vmap
-        theta_pars = likelihood.theta2pars(self.MAP_medians)
-        intensity = imap.render(theta_pars, datacube, self.pars)
+        theta_pars = self.pars.theta2pars(self.MAP_medians)
+        intensity = imap.render(theta_pars, datacube, self.pars.meta.pars)
 
         Nspec = datacube.Nspec
 
@@ -561,7 +563,7 @@ class KLensZeusRunner(ZeusRunner):
 
             # second, model
             ax = axs[1,i]
-            model = likelihood._compute_slice_model(
+            model = LogLikelihood._compute_slice_model(
                 lambdas[i], sed_array, zfactor, intensity
                 )
             im = ax.imshow(model, origin='lower')
@@ -630,7 +632,7 @@ def main(args):
     nwalkers = 2*ndims
     args = None
     kwargs = None
-    runner = ZeusRunner(nwalkers, ndims, log_posterior, args=args, kwargs=kwargs)
+    # runner = ZeusRunner(nwalkers, ndims, log_posterior, args=args, kwargs=kwargs)
 
     return 0
 

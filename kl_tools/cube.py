@@ -148,6 +148,13 @@ class DataCube(DataVector):
 
         return
 
+    @property
+    def data(self):
+        return self._data
+
+    def slice(self, indx):
+        return self.slices[indx].data
+
     def stack(self):
         return np.sum(self._data, axis=0)
 
@@ -389,6 +396,10 @@ class Slice(object):
         self.lambda_unit = bandpass.wave_type
 
         return
+
+    @property
+    def data(self):
+        return self._data
 
     def plot(self, show=True, close=True, outfile=None, size=9, title=None,
              imshow_kwargs=None):

@@ -458,12 +458,14 @@ class KLensZeusRunner(ZeusRunner):
         # vel_pars['v_unit'] = self.pars['v_unit']
 
         # self.MAP_vmap = VelocityMap('default', vel_pars)
-        self.MAP_vmap = LogLikelihood._setup_vmap(theta_pars, self.pars.meta.pars)
+        self.MAP_vmap = LogLikelihood._setup_vmap(
+            theta_pars, self.pars.meta.pars, 'default'
+            )
 
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
         self.MAP_imap = LogLikelihood._setup_imap(
-            theta_pars, self.datacube, self.pars.meta.pars
+            theta_pars, self.datacube, self.pars.meta
             )
 
         return

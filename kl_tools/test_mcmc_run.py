@@ -74,6 +74,7 @@ def main(args, pool):
         'v0': 10.,
         'vcirc': 200,
         'rscale': 5,
+        'beta': np.NaN
     }
 
     # additional args needed for prior / likelihood evaluation
@@ -114,26 +115,28 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
+            'beta': priors.UniformPrior(0, 3),
         },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 1e5, # counts
-            'hlr': 5, # pixels
-            # 'type': 'basis',
+            # 'type': 'inclined_exp',
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
+            'type': 'basis',
             # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
-            # 'basis_type': 'exp_shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 7,
-            #     # 'plane': 'disk',
-            #     'plane': 'obs',
-            #     'beta': 0.35,
-            #     'index': 1,
-            #     'b': 1,
-            #     }
+            'basis_type': 'exp_shapelets',
+            'basis_kwargs': {
+                'Nmax': 7,
+                # 'plane': 'disk',
+                'plane': 'obs',
+                # 'beta': 0.35,
+                'beta': 'sampled',
+                # 'index': 1,
+                # 'b': 1,
+                }
         },
-        # 'marginalize_intensity': True,
+        'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
     }

@@ -15,7 +15,7 @@ from numba import njit
 import utils
 import priors
 import intensity
-from parameters import Pars
+from parameters import Pars, MetaPars
 # import parameters
 from velocity import VelocityMap
 from cube import DataVector, DataCube
@@ -352,8 +352,8 @@ class LogLikelihood(LogBase):
 
         # create 2D velocity & intensity maps given sampled transformation
         # parameters
-        vmap = self._setup_vmap(theta_pars, self.meta)
-        imap = self._setup_imap(theta_pars, datavector, self.meta)
+        vmap = self.setup_vmap(theta_pars, self.meta)
+        imap = self.setup_imap(theta_pars, datavector, self.meta)
 
         # evaluate maps at pixel centers in obs plane
         if 'use_numba' in self.pars:
@@ -378,16 +378,24 @@ class LogLikelihood(LogBase):
 
         return model_datacube, v_array, i_array
 
-    @classmethod
-    def _setup_vmap(cls, theta_pars, pars, model_name='default'):
+    def setup_vmap(self, theta_pars, pars, model_name='default'):
         '''
         theta_pars: dict
-        A dict of the sampled mcmc params for both the velocity
-        map and the tranformation matrices
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
         pars: dict
-        A dict of anything else needed to compute the posterior
+            A dict of anything else needed to compute the posterior
         model_name: str
-        The model name to use when constructing the velocity map
+            The model name to use when constructing the velocity map
+        '''
+
+        # no extras for this func
+        return self._setup_vmap(theta_pars, pars, model_name)
+
+    @classmethod
+    def _setup_vmap(cls, theta_pars, pars, model_name):
+        '''
+        See setup_vmap()
         '''
 
         vmodel = theta_pars
@@ -400,17 +408,28 @@ class LogLikelihood(LogBase):
 
         return VelocityMap(model_name, vmodel)
 
-    @classmethod
-    def _setup_imap(cls, theta_pars, datacube, pars):
+    def setup_imap(self, theta_pars, datacube, meta):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
-        pars: dict
+        pars: MetaPars
             A dict of anything else needed to compute the posterior
         model_name: str
             The model name to use when constructing the velocity map
         '''
+
+        return self._setup_imap(theta_pars, datacube, meta)
+
+    @classmethod
+    def _setup_imap(cls, theta_pars, datacube, meta):
+        '''
+        See setup_imap()
+        '''
+
+        # Need to check if any basis func parameters are
+        # being sampled over
+        pars = meta.copy_with_sampled_pars(theta_pars)
 
         imap_pars = pars['intensity'].copy()
         imap_type = imap_pars['type']

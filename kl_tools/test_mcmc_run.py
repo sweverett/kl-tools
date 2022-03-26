@@ -115,7 +115,7 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
-            'beta': priors.UniformPrior(0, 3),
+            'beta': priors.UniformPrior(0, 0.5),
         },
         'intensity': {
             # For this test, use truth info
@@ -136,7 +136,7 @@ def main(args, pool):
                 # 'b': 1,
                 }
         },
-        'marginalize_intensity': True,
+        # 'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
         'use_numba': False,
     }

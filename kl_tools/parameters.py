@@ -55,6 +55,12 @@ class Pars(object):
     def theta2pars(self, theta):
         return self.sampled.theta2pars(theta)
 
+    def copy(self):
+        return self.__copy__()
+
+    def __copy__(self):
+        return Pars(self.sampled.copy(), self.meta.copy())
+
 class SampledPars(object):
     '''
     Sets the structure for arbitrary sampled parameters, which
@@ -118,6 +124,12 @@ class SampledPars(object):
 
     def __len__(self):
         return len(self.pars_order.keys())
+
+    def copy(self):
+        return self.__copy__()
+
+    def __copy__(self):
+        return SampledPars(self.pars_order.copy())
 
 class MetaPars(object):
     '''
@@ -201,6 +213,12 @@ class MetaPars(object):
 
     def __repr__(self):
         return str(self.pars)
+
+    def copy(self):
+        return self.__copy__()
+
+    def __copy__(self):
+        return MetaPars(self.pars.copy())
 
     def keys(self):
         return self.pars.keys()

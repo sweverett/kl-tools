@@ -64,17 +64,19 @@ def main(args, pool):
     utils.make_dir(outdir)
 
     true_pars = {
-        'g1': 0.05,
-        'g2': -0.025,
+        'g1': 0.018,
+        'g2': -0.018,
         # 'g1': 0.0,
         # 'g2': 0.0,
-        'theta_int': np.pi / 3,
+        'theta_int': np.pi / 6,
         # 'theta_int': 0.,
-        'sini': 0.8,
+        'sini': 0.5,
         'v0': 10.,
         'vcirc': 200,
-        'rscale': 5,
-        'beta': np.NaN
+        'rscale': 3,
+        # 'beta': np.NaN
+        'flux': 1.8e4,
+        'hlr': 3.5,
     }
 
     # additional args needed for prior / likelihood evaluation
@@ -85,8 +87,8 @@ def main(args, pool):
         'Nx': 30, # pixels
         'Ny': 30, # pixels
         'pix_scale': 1., # arcsec / pixel
-        'true_flux': 1e5, # counts
-        'true_hlr': 5, # pixels
+        'true_flux': 1.8e4, # counts
+        'true_hlr': 3.5, # pixels
         'v_unit': Unit('km / s'),
         'r_unit': Unit('kpc'),
         'z': z,
@@ -115,29 +117,32 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
-            'beta': priors.UniformPrior(0, 0.5),
+            # 'beta': priors.UniformPrior(0, 0.5),
+            'hlr': priors.UniformPrior(0, 8),
+            'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
-            # 'type': 'inclined_exp',
+            'type': 'inclined_exp',
             # 'flux': 1e5, # counts
-            # 'hlr': 5, # pixels
-            'type': 'basis',
+            'flux': 'sampled', # counts
+            'hlr': 'sampled', # pixels
+            # 'type': 'basis',
             # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
-            'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                'Nmax': 7,
-                # 'plane': 'disk',
-                'plane': 'obs',
-                # 'beta': 0.35,
-                'beta': 'sampled',
-                # 'index': 1,
-                # 'b': 1,
-                }
+            # 'basis_type': 'exp_shapelets',
+            # 'basis_kwargs': {
+            #     'Nmax': 7,
+            #     # 'plane': 'disk',
+            #     'plane': 'obs',
+            #     # 'beta': 0.35,
+            #     'beta': 'sampled',
+            #     # 'index': 1,
+            #     # 'b': 1,
+            #     }
         },
         # 'marginalize_intensity': True,
-        # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
+        # 'psf': gs.Gaussian(fwhm=1), # fwhm in pixels
         'use_numba': False,
     }
 
@@ -153,7 +158,7 @@ def main(args, pool):
         unit=meta_pars['bandpass_unit']
         )
 
-    Nx, Ny = 30, 30
+    Nx, Ny = meta_pars['Nx'], meta_pars['Ny']
     Nspec = len(lambdas)
     shape = (Nspec, Nx, Ny)
     print('Setting up test datacube and true Halpha image')

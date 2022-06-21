@@ -195,3 +195,4 @@ dependencies:
   - zstd=1.4.9
   - pip:
     - kl-tools==1.0
+prefix: /Users/sweveret/miniconda3/envs/kltools

@@ -35,7 +35,7 @@ class VelocityModel(object):
     _model_params = ['v0', 'vcirc', 'rscale', 'sini',
                      'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
 
-    _ignore_params = ['beta']
+    _ignore_params = ['beta', 'flux']
 
     def __init__(self, model_pars):
         if not isinstance(model_pars, dict):
@@ -63,8 +63,12 @@ class VelocityModel(object):
                 if name in self._ignore_params:
                     continue
                 else:
-                    raise AttributeError(f'{name} is not a valid model ' +\
-                                         f'parameter for {mname} velocity model!')
+                    #TODO: figure out how to handle this more elegantly...
+                    # now that we can marginalize over arbitrary pars,
+                    # can't simply raise an error here
+                    pass
+                    # raise AttributeError(f'{name} is not a valid model ' +\
+                    #                      f'parameter for {mname} velocity model!')
 
         # Make sure all req pars are present
         for par in self._model_params:
@@ -517,7 +521,8 @@ def main(args):
         'g1': 0.05,
         'g2': -0.025,
         'theta_int': np.pi / 3,
-        'sini': 0.8,
+        # 'sini': 0.8,
+        'sini': 0.0,
         'v0': 10.,
         'vcirc': 200,
         'rscale': 5,

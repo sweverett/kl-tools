@@ -43,7 +43,7 @@ class DataCube(DataVector):
     '''
 
     def __init__(self, data=None, shape=None, bandpasses=None, pix_scale=None,
-                 pars=None):
+                 weights=None, mask=None, pars=None):
         '''
         Initialize either a filled DataCube from an existing numpy
         array or an empty one from a given shape
@@ -60,6 +60,11 @@ class DataCube(DataVector):
             throughput function, lambda window, etc.
         pix_scale: float
             the pixel scale of the datacube slices
+        weights: int, list, np.ndarray
+            The weight maps for each slice. See set_weights()
+            for more info on acceptable types.
+        mask: np.ndarray
+            The global mask for the datacube observation.
         pars: dict
             A dictionary that holds any additional metadata
         '''
@@ -124,6 +129,16 @@ class DataCube(DataVector):
             # (could generalize, but not necessary)
             assert bp.wave_type == self.lambda_unit
 
+        # If weights/mask not passed, set non-informative defaults
+        if weights is not None:
+            self.set_weights(weights)
+        else:
+            self.weights = np.ones(self.shape)
+        if mask is not None:
+            self.set_mask(mask)
+        else:
+            self.mask = np.zeros(self.shape[1:])
+
         self._construct_slice_list()
 
         return
@@ -142,9 +157,15 @@ class DataCube(DataVector):
     def _construct_slice_list(self):
         self.slices = SliceList()
 
+        mask = self.mask
         for i in range(self.Nspec):
             bp = self.bandpasses[i]
-            self.slices.append(Slice(self._data[i,:,:], bp))
+            weight = self.weights[i]
+            self.slices.append(
+                Slice(
+                    self._data[i,:,:], bp, weight=weight, mask=mask
+                    )
+                )
 
         return
 
@@ -157,6 +178,59 @@ class DataCube(DataVector):
 
     def stack(self):
         return np.sum(self._data, axis=0)
+
+    def set_weights(self, weights):
+        '''
+        weights: float, list, np.ndarray
+
+        Simple method for assigning weight maps to datacube, without
+        any knowledge of input datacube structure. Can assign uniform
+        weight maps for all slices w/ a float, or pass a list of
+        weight maps. Pre-assigned default is all 1's.
+        '''
+
+        # set non-informative default
+        self.weights = np.ones(self.shape)
+
+        if isinstance(weights, (int, float)):
+            # set all weight maps to constant value
+            self.weights *= weights
+
+        elif isinstance(weights, (list, np.ndarray)):
+            if len(weights) != self.Nspec:
+                raise ValueError(f'Passed weights list has len={len(weights)}' +\
+                                 f' but Nspec={self.Nspec}!')
+            for i, w in enumerate(weights):
+                if isinstance(w, (int, float)):
+                    # set uniform slice weight
+                    self.weights[i] *= w
+                else:
+                    # assume np.ndarray
+                    if w.shape != self.shape[1:]:
+                        raise ValueError(f'weight shape of {w.shape} does not ' +\
+                                         f'match slice shape {self.shape[1:]}!')
+                    self.weights[i] = w
+        else:
+            raise TypeError('weights must be a float, list, or np.ndarray!')
+
+        return
+
+    def set_mask(self, mask):
+        '''
+        mask: np.ndarray
+
+        Simple method to set mask with no knowledge of datacube
+        structure. For now it must be a global mask, but in principle
+        could be per-slice.
+        '''
+
+        if mask.shape != self.shape[1:]:
+            raise ValueError(f'mask shape={mask.shape} does not match ' +\
+                             f'slice shape={self.shape[1:]}!')
+
+        self.mask = mask
+
+        return
 
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
@@ -386,9 +460,11 @@ class Slice(object):
     corresponding to a source observation in a given
     bandpass
     '''
-    def __init__(self, data, bandpass):
+    def __init__(self, data, bandpass, weight=None, mask=None):
         self._data = data
         self.bandpass = bandpass
+        self.weight = weight
+        self.mask = mask
 
         self.red_limit = bandpass.red_limit
         self.blue_limit = bandpass.blue_limit
@@ -399,6 +475,10 @@ class Slice(object):
 
     @property
     def data(self):
+        '''
+        Seems silly now, but this might be useful later
+        '''
+
         return self._data
 
     def plot(self, show=True, close=True, outfile=None, size=9, title=None,
@@ -527,7 +607,7 @@ def main(args):
     Nspec = len(bandpasses)
 
     print('Building empty test data')
-    shape = (100, 100, Nspec)
+    shape = (Nspec, 100, 100)
     data = np.zeros(shape)
 
     print('Building Slice object')
@@ -543,6 +623,25 @@ def main(args):
 
     print('Building DataCube object from array')
     cube = DataCube(data=data, bandpasses=bandpasses)
+
+    print('Building DataCube with constant weight & mask')
+    weights = 1. / 3
+    mask = np.zeros(shape[1:])
+    cube = DataCube(
+        data=data, bandpasses=bandpasses, weights=weights, mask=mask
+        )
+
+    print('Building DataCube with weight list & mask')
+    weights = [i for i in range(Nspec)]
+    cube = DataCube(
+        data=data, bandpasses=bandpasses, weights=weights, mask=mask
+        )
+
+    print('Building DataCube with weight arrays & mask')
+    weights = 2 * np.ones(shape)
+    cube = DataCube(
+        data=data, bandpasses=bandpasses, weights=weights, mask=mask
+        )
 
     print('Testing DataCube truncation on slice centers')
     lambda_range = le - li

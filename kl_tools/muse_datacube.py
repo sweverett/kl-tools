@@ -86,7 +86,7 @@ class MuseDataCube(cube.DataCube):
 
         # These MUSE observations have a limited spectral range, between 
         
-        self.line_value = 
+        self.line_value = 1.
 
 if __name__ == '__main__':
     testpath = pathlib.Path("../tests/testdata")

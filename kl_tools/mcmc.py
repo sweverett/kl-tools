@@ -14,7 +14,7 @@ import emcee
 
 import utils
 import priors
-from likelihood import LogLikelihood
+from likelihood import DataCubeLikelihood
 from velocity import VelocityMap
 
 import pudb
@@ -458,13 +458,13 @@ class KLensZeusRunner(ZeusRunner):
         # vel_pars['v_unit'] = self.pars['v_unit']
 
         # self.MAP_vmap = VelocityMap('default', vel_pars)
-        self.MAP_vmap = LogLikelihood._setup_vmap(
+        self.MAP_vmap = DataCubeLikelihood._setup_vmap(
             theta_pars, self.pars.meta.pars, 'default'
             )
 
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
-        self.MAP_imap = LogLikelihood._setup_imap(
+        self.MAP_imap = DataCubeLikelihood._setup_imap(
             theta_pars, self.datacube, self.pars.meta
             )
 
@@ -529,7 +529,7 @@ class KLensZeusRunner(ZeusRunner):
         # gather needed components to evaluate model
         datacube = self.datacube
         lambdas = datacube.lambdas
-        sed_array = LogLikelihood._setup_sed(self.pars.meta.pars)
+        sed_array = DataCubeLikelihood._setup_sed(self.pars.meta.pars)
         vmap = self.MAP_vmap
         imap = self.MAP_imap
 
@@ -565,7 +565,7 @@ class KLensZeusRunner(ZeusRunner):
 
             # second, model
             ax = axs[1,i]
-            model = LogLikelihood._compute_slice_model(
+            model = DataCubeLikelihood._compute_slice_model(
                 lambdas[i], sed_array, zfactor, intensity
                 )
             im = ax.imshow(model, origin='lower')

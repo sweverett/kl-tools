@@ -64,8 +64,8 @@ def main(args, pool):
     utils.make_dir(outdir)
 
     true_pars = {
-        'g1': 0.018,
-        'g2': -0.018,
+        'g1': 0.025,
+        'g2': -0.0125,
         # 'g1': 0.0,
         # 'g2': 0.0,
         'theta_int': np.pi / 6,
@@ -101,7 +101,7 @@ def main(args, pool):
         'sed_end': 657.5,
         'sed_resolution': 0.025,
         'sed_unit': Unit('nm'),
-        'cov_sigma': 3., # pixel counts; dummy value
+        'cov_sigma': 3., # pixel counts for mock data vector
         'bandpass_throughput': '.2',
         'bandpass_unit': 'nm',
         'bandpass_zp': 30,
@@ -124,9 +124,10 @@ def main(args, pool):
         'intensity': {
             # For this test, use truth info
             'type': 'inclined_exp',
-            # 'flux': 1e5, # counts
-            'flux': 'sampled', # counts
-            'hlr': 'sampled', # pixels
+            'flux': 1.8e4, # counts
+            'hlr': 3.5,
+            # 'flux': 'sampled', # counts
+            # 'hlr': 'sampled', # pixels
             # 'type': 'basis',
             # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
@@ -228,7 +229,7 @@ def main(args, pool):
     pars = Pars(sampled_pars, meta_pars)
     pars_order = pars.sampled.pars_order
 
-    log_posterior = LogPosterior(pars, datacube)
+    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
 
     #-----------------------------------------------------------------
     # Setup sampler

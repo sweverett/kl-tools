@@ -9,6 +9,7 @@ from astropy.table import Table
 import matplotlib.pyplot as plt
 import galsim as gs
 import pathlib
+import re
 import astropy.wcs as wcs
 import astropy.units as u
 import ipdb
@@ -16,14 +17,15 @@ import ipdb
 
 class MuseDataCube(cube.DataCube):
 
-    def __init__(self,filename3d = None, filename1d = None, catalogFile=None, pars=None):
+    def __init__(self,filename3d = None, filename1d = None, catalogFile=None, emlineFile = None, pars=None):
         '''
         Initialize a DataCube object from the contents of a MUSE fits datacube.
         filename3d: string, or anything parsable by pathlib.Path 
             Filename containing MUSE datacube
         filename1d: string, or anything parsable by pathlib.Path 
             Filename containing MUSE 1d calibrated spectrum.
-        catalog: 
+        catalogFile: catalog containing general data from the MUSE wide survey
+        emlineFile: catalog containing emission line tables from the MUSE wide survey
         pars: dict
 
         '''
@@ -41,6 +43,7 @@ class MuseDataCube(cube.DataCube):
         if not catalogPath.exists():
             print(f"{catalogFile} doesn't exist")
             ipdb.set_trace()
+        emlineCatPath = pathlib.Path(emlineFile)
 
 
         spec3d = fitsio.read(cubePath)
@@ -51,6 +54,8 @@ class MuseDataCube(cube.DataCube):
         objid = re.search('(\d+)_*',cubePath.name).groups()[0]
         fullCatalog = fitsio.read(catalogPath)
         self._catalogEntry = fullCatalog[fullCatalog['UNIQUE_ID'] == objid]
+        emlinecat = fitsio.read(emlineFile)
+        self._emLineEntry emlinecat[emlinecat['UNIQUE_ID'] == objid]
         
         self.Nx = spec3d.shape[1]
         self.Ny = spec3d.shape[2]
@@ -72,7 +77,7 @@ class MuseDataCube(cube.DataCube):
         
 
         
-    def _set_parameters(self):
+    def _set_parameters(self, line_choice = 'strongest'):
         '''
         return a parameter dictionary populated with (some) of the fields that will be needed in the likelihood parameters dictionary, based on the data.
         '''
@@ -83,17 +88,32 @@ class MuseDataCube(cube.DataCube):
         self.pars['Ny'] = self.Ny
         self.pars['bandpass_throughput'] = 0.2 # A guess, based on throughput here: https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
         self.pars['z'] = self._catalogEntry['Z']
-
-        # These MUSE observations have a limited spectral range, between 
+        self.pars['spec_resolution'] = 3000.
         
-        self.line_value = 1.
+        # If no line indicated, set parameters for fitting the strongest emission line.
+        if line_choice == 'strongest':
+            line_index = np.argmax(self._emLineEntry['SN'])
+        else:
+            thing = np.where(self._emLineEntry['IDENT'] == line_choice)
+            if len(thing) <1:
+                print(f"your choice of emission line, {line_choice}, is not in the linelist for this object, which contains only {self._emLineEntry['IDENT']}.")
+                ipdb.set_trace()
+            line_index = thing[0][0] #This had better be unique.
+        self.line_name = self._emLineEntry['IDENT'][line_index]
+
+        self.pars['sed_start'] = self._emLineEntry['LAMBDA_NB_MIN'][line_index]
+        self.pars['sed_end'] = self._emLineEntry['LAMBDA_NB_MIN'][line_index]
+        
+        
 
 if __name__ == '__main__':
     testpath = pathlib.Path("../tests/testdata")
     spec1dPath = testpath / pathlib.Path("spectrum_102021103.fits.gz")
     spec3dPath = testpath / pathlib.Path("102021103_objcube.fits.gz")
     catalogPath = testpath / pathlib.Path("MW_1-24_main_table.fits")
+    emlinePath = testpath / pathlib.Path("MW_1-24_emline_table.fits ")
     
     # Try initializing a datacube object with these paths.
     thisCube = MuseDataCube(filename3d = spec3dPath, filename1d = spec1dPath, catalogFile=catalogPath)
     ipdb.set_trace()
+    

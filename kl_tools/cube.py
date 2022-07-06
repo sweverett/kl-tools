@@ -43,7 +43,7 @@ class DataCube(DataVector):
     '''
 
     def __init__(self, data=None, shape=None, bandpasses=None, pix_scale=None,
-                 weights=None, mask=None, pars=None):
+                 weights=None, masks=None, pars=None):
         '''
         Initialize either a filled DataCube from an existing numpy
         array or an empty one from a given shape
@@ -63,8 +63,9 @@ class DataCube(DataVector):
         weights: int, list, np.ndarray
             The weight maps for each slice. See set_weights()
             for more info on acceptable types.
-        mask: np.ndarray
-            The global mask for the datacube observation.
+        masks: np.ndarray
+            The mask maps for each slice. See set_masks()
+            for more info on acceptable types.
         pars: dict
             A dictionary that holds any additional metadata
         '''
@@ -129,15 +130,15 @@ class DataCube(DataVector):
             # (could generalize, but not necessary)
             assert bp.wave_type == self.lambda_unit
 
-        # If weights/mask not passed, set non-informative defaults
+        # If weights/masks not passed, set non-informative defaults
         if weights is not None:
             self.set_weights(weights)
         else:
             self.weights = np.ones(self.shape)
-        if mask is not None:
-            self.set_mask(mask)
+        if masks is not None:
+            self.set_masks(masks)
         else:
-            self.mask = np.zeros(self.shape[1:])
+            self.masks = np.zeros(self.shape)
 
         self._construct_slice_list()
 
@@ -157,10 +158,10 @@ class DataCube(DataVector):
     def _construct_slice_list(self):
         self.slices = SliceList()
 
-        mask = self.mask
         for i in range(self.Nspec):
             bp = self.bandpasses[i]
             weight = self.weights[i]
+            mask = self.masks[i]
             self.slices.append(
                 Slice(
                     self._data[i,:,:], bp, weight=weight, mask=mask
@@ -179,56 +180,84 @@ class DataCube(DataVector):
     def stack(self):
         return np.sum(self._data, axis=0)
 
+    def _set_maps(self, maps, map_type):
+        '''
+        maps: float, list, np.ndarray
+            Weight or mask maps to set
+        map_type: str
+            Name of map type
+
+        Simple method for assigning weight or mask maps to datacube,
+        without any knowledge of input datacube structure. Can assign
+        uniform maps for all slices w/ a float, or pass a list of
+        maps. Pre-assigned default is all 1's.
+        '''
+
+        valid_maps = ['weights', 'masks']
+        if map_type not in valid_maps:
+            raise ValueError(f'map_type must be in {valid_maps}!')
+
+        # base array that will be filled
+        stored_maps = np.ones(self.shape)
+
+        if isinstance(maps, (int, float)):
+            # set all maps to constant value
+            stored_maps *= maps
+
+        elif isinstance(maps, (list, np.ndarray)):
+            if len(maps) != self.Nspec:
+                if isinstance(maps, np.ndarray):
+                    if (len(maps.shape) == 2) and (maps.shape == self.shape[1:]):
+                        # set all maps to the passed map
+                        # useful for say a global mask
+                        for i in range(self.Nspec):
+                            stored_maps[i] = maps
+                    else:
+                        raise ValueError('Passed {map_type} map has shape ' +\
+                                         f'{maps.shape} but datacube shape ' +\
+                                         f'is {self.shape}!')
+
+                else:
+                    raise ValueError(f'Passed maps list has len={len(maps)}' +\
+                                     f' but Nspec={self.Nspec}!')
+            else:
+                for i, m in enumerate(maps):
+                    if isinstance(m, (int, float)):
+                        # set uniform slice map
+                        stored_maps[i] *= m
+                    else:
+                        # assume slice is np.ndarray
+                        if m.shape != self.shape[1:]:
+                            raise ValueError(f'map shape of {m.shape} does not ' +\
+                                             f'match slice shape {self.shape[1:]}!')
+                        stored_maps[i] = m
+        else:
+            raise TypeError(f'{map_type} map must be a float, list, ' +\
+                            'or np.ndarray!')
+
+        setattr(self, map_type, stored_maps)
+
+        return
+
     def set_weights(self, weights):
         '''
         weights: float, list, np.ndarray
 
-        Simple method for assigning weight maps to datacube, without
-        any knowledge of input datacube structure. Can assign uniform
-        weight maps for all slices w/ a float, or pass a list of
-        weight maps. Pre-assigned default is all 1's.
+        see _set_maps()
         '''
 
-        # set non-informative default
-        self.weights = np.ones(self.shape)
-
-        if isinstance(weights, (int, float)):
-            # set all weight maps to constant value
-            self.weights *= weights
-
-        elif isinstance(weights, (list, np.ndarray)):
-            if len(weights) != self.Nspec:
-                raise ValueError(f'Passed weights list has len={len(weights)}' +\
-                                 f' but Nspec={self.Nspec}!')
-            for i, w in enumerate(weights):
-                if isinstance(w, (int, float)):
-                    # set uniform slice weight
-                    self.weights[i] *= w
-                else:
-                    # assume np.ndarray
-                    if w.shape != self.shape[1:]:
-                        raise ValueError(f'weight shape of {w.shape} does not ' +\
-                                         f'match slice shape {self.shape[1:]}!')
-                    self.weights[i] = w
-        else:
-            raise TypeError('weights must be a float, list, or np.ndarray!')
+        self._set_maps(weights, 'weights')
 
         return
 
-    def set_mask(self, mask):
+    def set_masks(self, masks):
         '''
-        mask: np.ndarray
+        mask: float, list, np.ndarray
 
-        Simple method to set mask with no knowledge of datacube
-        structure. For now it must be a global mask, but in principle
-        could be per-slice.
+        see _set_maps()
         '''
 
-        if mask.shape != self.shape[1:]:
-            raise ValueError(f'mask shape={mask.shape} does not match ' +\
-                             f'slice shape={self.shape[1:]}!')
-
-        self.mask = mask
+        self._set_maps(masks, 'masks')
 
         return
 
@@ -395,6 +424,10 @@ class DataCube(DataVector):
         return
 
     def write(self, outfile):
+        '''
+        TODO: Should update this now that there are
+        weight & mask maps stored
+        '''
         d = os.path.dirname(outfile)
 
         utils.make_dir(d)
@@ -626,21 +659,24 @@ def main(args):
 
     print('Building DataCube with constant weight & mask')
     weights = 1. / 3
-    mask = np.zeros(shape[1:])
+    masks = 0
     cube = DataCube(
-        data=data, bandpasses=bandpasses, weights=weights, mask=mask
+        data=data, bandpasses=bandpasses, weights=weights, masks=masks
         )
 
-    print('Building DataCube with weight list & mask')
+    print('Building DataCube with weight & mask lists')
     weights = [i for i in range(Nspec)]
+    masks = [0 for i in range(Nspec)]
     cube = DataCube(
-        data=data, bandpasses=bandpasses, weights=weights, mask=mask
+        data=data, bandpasses=bandpasses, weights=weights, masks=masks
         )
 
-    print('Building DataCube with weight arrays & mask')
+    print('Building DataCube with weight & mask arrays')
     weights = 2 * np.ones(shape)
+    masks = np.zeros(shape)
+    masks[-1] = np.ones(shape[1:])
     cube = DataCube(
-        data=data, bandpasses=bandpasses, weights=weights, mask=mask
+        data=data, bandpasses=bandpasses, weights=weights, masks=masks
         )
 
     print('Testing DataCube truncation on slice centers')

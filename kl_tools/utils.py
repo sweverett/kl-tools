@@ -55,6 +55,32 @@ def check_file(filename):
 
     return
 
+def check_type(var, name, desired_type):
+    '''
+    Checks that the passed variable (with given name)
+    is of the desired type
+    '''
+
+    if not isinstance(var, desired_type):
+        raise TypeError(f'{name} must be a {desired_type}!')
+
+    return
+
+def check_types(var_dict):
+    '''
+    Check that the passed variables match the desired type.
+    Convenience wrapper around check_type() for multiple variables
+
+    var_dict: dict
+        A dictionary in the format of name: (var, desired_type)
+    '''
+
+    for name, tup in var_dict.items():
+        var, desired_type = tup
+        check_type(var, name, desired_type)
+
+    return
+
 def make_dir(d):
     '''
     Makes dir if it does not already exist

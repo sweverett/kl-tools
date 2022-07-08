@@ -13,8 +13,8 @@ import astropy.units as units
 import utils
 from transformation import TransformableImage
 import transformation as transform
+from parameters import SampledPars
 import numba_transformation as numba_transform
-from parameters import pars2theta
 
 import pudb
 
@@ -35,6 +35,8 @@ class VelocityModel(object):
     _model_params = ['v0', 'vcirc', 'rscale', 'sini',
                      'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
 
+    _ignore_params = ['beta', 'flux']
+
     def __init__(self, model_pars):
         if not isinstance(model_pars, dict):
             t = type(model_pars)
@@ -45,7 +47,8 @@ class VelocityModel(object):
         self._check_model_pars()
 
         # Needed if using numba for transformations
-        self._build_pars_array()
+        # can set uring MCMC w/ self.build_pars_array()
+        self.pars_array = None
 
         return
 
@@ -57,8 +60,15 @@ class VelocityModel(object):
             if val is None:
                 raise ValueError(f'{param} must be set!')
             if name not in self._model_params:
-                raise AttributeError(f'{name} is not a valid model ' +\
-                                     f'parameter for {mname} velocity model!')
+                if name in self._ignore_params:
+                    continue
+                else:
+                    #TODO: figure out how to handle this more elegantly...
+                    # now that we can marginalize over arbitrary pars,
+                    # can't simply raise an error here
+                    pass
+                    # raise AttributeError(f'{name} is not a valid model ' +\
+                    #                      f'parameter for {mname} velocity model!')
 
         # Make sure all req pars are present
         for par in self._model_params:
@@ -75,12 +85,18 @@ class VelocityModel(object):
 
         return
 
-    def _build_pars_array(self):
+    def build_pars_array(self, pars):
         '''
         Numba requires a pars array instead of a more flexible dict
+
+        pars: Pars
+            A pars object that can convert between a pars dict and
+            sampled theta array
         '''
 
-        self.pars_arr = pars2theta(self.pars)
+        sampled = SampledPars(self.pars)
+
+        self.pars_arr = pars.pars2theta(self.pars)
 
         return
 
@@ -112,11 +128,12 @@ class VelocityMap(TransformableImage):
 
     def __init__(self, model_name, model_pars):
         '''
-        model_name: The name of the velocity to model.
-        model_pars: A dict with key:val pairs for the model parameters.
-                    Must be a registered velocity model.
+        model_name: str
+            The name of the velocity to model.
+        model_pars: dict
+            A dict with key:val pairs for the model parameters.
+            Must be a registered velocity model.
         '''
-
 
         self.model_name = model_name
         self.model = build_model(model_name, model_pars)
@@ -504,7 +521,8 @@ def main(args):
         'g1': 0.05,
         'g2': -0.025,
         'theta_int': np.pi / 3,
-        'sini': 0.8,
+        # 'sini': 0.8,
+        'sini': 0.0,
         'v0': 10.,
         'vcirc': 200,
         'rscale': 5,

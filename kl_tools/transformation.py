@@ -304,12 +304,6 @@ def _transform_obs2source(pars):
         [1.-g1, -g2],
         [-g2, 1.+g1]
     ])
-    # NOTE: to match TFCube...
-    # norm = 1. / (1. -(g1**2 + g2**2))
-    # transform =  norm * np.array([
-    #     [1.-g1, -g2],
-    #     [-g2, 1.+g1]
-    # ])
 
     return transform
 

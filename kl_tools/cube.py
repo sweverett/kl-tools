@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import numpy as np
 import fitsio
 from astropy.io import fits
@@ -20,52 +21,29 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
-def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
-                            throughput=1., zp=30., unit='nm'):
+class DataVector(object):
     '''
-    Setup list of bandpasses needed to instantiate a DataCube
-    given the simple case of constant spectral resolution, throughput,
-    and image zeropoints for all slices
-
-    Useful for quick setup of tests and simulated datavectors
-
-    lambda_blue: float
-        Blue-end of datacube wavelength range
-    lambda_red: float
-        Rd-end of datacube wavelength range
-    dlambda: float
-        Constant wavelength range per slice
-    throughput: float
-        Throughput of filter of data slices
-    unit: str
-        The wavelength unit
-    zeropoint: float
-        Image zeropoint for all data slices
+    Light wrapper around things like cube.DataCube to allow for
+    uniform interface for things like the intensity map rendering
     '''
 
-    li, lf = lambda_blue, lambda_red
-    lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
+    @abstractmethod
+    def stack(self):
+        '''
+        Each datavector must have a method that defines how to stack it
+        into a single (Nx,Ny) image for basis function fitting
+        '''
+        pass
 
-    bandpasses = []
-    for l1, l2 in lambdas:
-        bandpasses.append(gs.Bandpass(
-            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-            ))
-    bandpasses = [gs.Bandpass(
-        throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-        ) for l1,l2 in lambdas]
-
-    return bandpasses
-
-class DataCube(object):
-#     '''
-#     Base class for an abstract data cube.
-#     Contains astronomical images of a source
-#     at various wavelength slices
-#     '''
+class DataCube(DataVector):
+    '''
+    Base class for an abstract data cube.
+    Contains astronomical images of a source
+    at various wavelength slices
+    '''
 
     def __init__(self, data=None, shape=None, bandpasses=None, pix_scale=None,
-                 pars=None):
+                 weights=None, masks=None, pars=None):
         '''
         Initialize either a filled DataCube from an existing numpy
         array or an empty one from a given shape
@@ -82,6 +60,12 @@ class DataCube(object):
             throughput function, lambda window, etc.
         pix_scale: float
             the pixel scale of the datacube slices
+        weights: int, list, np.ndarray
+            The weight maps for each slice. See set_weights()
+            for more info on acceptable types.
+        masks: np.ndarray
+            The mask maps for each slice. See set_masks()
+            for more info on acceptable types.
         pars: dict
             A dictionary that holds any additional metadata
         '''
@@ -91,9 +75,9 @@ class DataCube(object):
                 raise ValueError('Must instantiate a DataCube with either ' + \
                                  'a data array or a shape tuple!')
 
-            self.Nx = shape[0]
-            self.Ny = shape[1]
-            self.Nspec = shape[2]
+            self.Nspec = shape[0]
+            self.Nx = shape[1]
+            self.Ny = shape[2]
             self.shape = shape
 
             self._check_shape_params()
@@ -106,17 +90,17 @@ class DataCube(object):
             if len(data.shape) != 3:
                 # Handle the case of 1 slice
                 assert len(data.shape) == 2
-                data = data.reshape(data.shape[0], data.shape[1], 1)
+                data = data.reshape(1, data.shape[0], data.shape[1])
 
             self.shape = data.shape
 
-            self.Nx = self.shape[0]
-            self.Ny = self.shape[1]
-            self.Nspec = self.shape[2]
+            self.Nspec = self.shape[0]
+            self.Nx = self.shape[1]
+            self.Ny = self.shape[2]
 
             self._data = data
 
-            if self.shape[2] != len(bandpasses):
+            if self.shape[0] != len(bandpasses):
                 raise ValueError('The length of the bandpasses must ' + \
                                  'equal the length of the third data dimension!')
 
@@ -146,12 +130,22 @@ class DataCube(object):
             # (could generalize, but not necessary)
             assert bp.wave_type == self.lambda_unit
 
+        # If weights/masks not passed, set non-informative defaults
+        if weights is not None:
+            self.set_weights(weights)
+        else:
+            self.weights = np.ones(self.shape)
+        if masks is not None:
+            self.set_masks(masks)
+        else:
+            self.masks = np.zeros(self.shape)
+
         self._construct_slice_list()
 
         return
 
     def _check_shape_params(self):
-        Nzip = zip(['Nx', 'Ny', 'Nspec'], [self.Nx, self.Ny, self.Nspec])
+        Nzip = zip(['Nspec', 'Nx', 'Ny'], [self.Nspec, self.Nx, self.Ny])
         for name, val in Nzip:
             if val < 1:
                 raise ValueError(f'{name} must be greater than 0!')
@@ -166,12 +160,106 @@ class DataCube(object):
 
         for i in range(self.Nspec):
             bp = self.bandpasses[i]
-            self.slices.append(Slice(self._data[:,:,i], bp))
+            weight = self.weights[i]
+            mask = self.masks[i]
+            self.slices.append(
+                Slice(
+                    self._data[i,:,:], bp, weight=weight, mask=mask
+                    )
+                )
 
         return
 
+    @property
+    def data(self):
+        return self._data
+
+    def slice(self, indx):
+        return self.slices[indx].data
+
     def stack(self):
-        return np.sum(self._data, axis=2)
+        return np.sum(self._data, axis=0)
+
+    def _set_maps(self, maps, map_type):
+        '''
+        maps: float, list, np.ndarray
+            Weight or mask maps to set
+        map_type: str
+            Name of map type
+
+        Simple method for assigning weight or mask maps to datacube,
+        without any knowledge of input datacube structure. Can assign
+        uniform maps for all slices w/ a float, or pass a list of
+        maps. Pre-assigned default is all 1's.
+        '''
+
+        valid_maps = ['weights', 'masks']
+        if map_type not in valid_maps:
+            raise ValueError(f'map_type must be in {valid_maps}!')
+
+        # base array that will be filled
+        stored_maps = np.ones(self.shape)
+
+        if isinstance(maps, (int, float)):
+            # set all maps to constant value
+            stored_maps *= maps
+
+        elif isinstance(maps, (list, np.ndarray)):
+            if len(maps) != self.Nspec:
+                if isinstance(maps, np.ndarray):
+                    if (len(maps.shape) == 2) and (maps.shape == self.shape[1:]):
+                        # set all maps to the passed map
+                        # useful for say a global mask
+                        for i in range(self.Nspec):
+                            stored_maps[i] = maps
+                    else:
+                        raise ValueError('Passed {map_type} map has shape ' +\
+                                         f'{maps.shape} but datacube shape ' +\
+                                         f'is {self.shape}!')
+
+                else:
+                    raise ValueError(f'Passed maps list has len={len(maps)}' +\
+                                     f' but Nspec={self.Nspec}!')
+            else:
+                for i, m in enumerate(maps):
+                    if isinstance(m, (int, float)):
+                        # set uniform slice map
+                        stored_maps[i] *= m
+                    else:
+                        # assume slice is np.ndarray
+                        if m.shape != self.shape[1:]:
+                            raise ValueError(f'map shape of {m.shape} does not ' +\
+                                             f'match slice shape {self.shape[1:]}!')
+                        stored_maps[i] = m
+        else:
+            raise TypeError(f'{map_type} map must be a float, list, ' +\
+                            'or np.ndarray!')
+
+        setattr(self, map_type, stored_maps)
+
+        return
+
+    def set_weights(self, weights):
+        '''
+        weights: float, list, np.ndarray
+
+        see _set_maps()
+        '''
+
+        self._set_maps(weights, 'weights')
+
+        return
+
+    def set_masks(self, masks):
+        '''
+        mask: float, list, np.ndarray
+
+        see _set_maps()
+        '''
+
+        self._set_maps(masks, 'masks')
+
+        return
 
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
@@ -259,7 +347,7 @@ class DataCube(object):
         all slices
         '''
 
-        return self._data[i,j,:]
+        return self._data[:,i,j]
 
     def truncate(self, blue_cut, red_cut, trunc_type='edge'):
         '''
@@ -292,7 +380,7 @@ class DataCube(object):
 
         # could either update attributes or return new DataCube
         # for now, just return a new one
-        trunc_data = self._data[:,:,cut]
+        trunc_data = self._data[cut,:,:]
 
         # Have to do it this way as lists cannot be indexed by np arrays
         # trunc_bandpasses = self.bandpasses[cut]
@@ -336,6 +424,10 @@ class DataCube(object):
         return
 
     def write(self, outfile):
+        '''
+        TODO: Should update this now that there are
+        weight & mask maps stored
+        '''
         d = os.path.dirname(outfile)
 
         utils.make_dir(d)
@@ -401,9 +493,11 @@ class Slice(object):
     corresponding to a source observation in a given
     bandpass
     '''
-    def __init__(self, data, bandpass):
+    def __init__(self, data, bandpass, weight=None, mask=None):
         self._data = data
         self.bandpass = bandpass
+        self.weight = weight
+        self.mask = mask
 
         self.red_limit = bandpass.red_limit
         self.blue_limit = bandpass.blue_limit
@@ -411,6 +505,14 @@ class Slice(object):
         self.lambda_unit = bandpass.wave_type
 
         return
+
+    @property
+    def data(self):
+        '''
+        Seems silly now, but this might be useful later
+        '''
+
+        return self._data
 
     def plot(self, show=True, close=True, outfile=None, size=9, title=None,
              imshow_kwargs=None):
@@ -441,6 +543,71 @@ class Slice(object):
             plt.close()
 
         return
+
+def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
+                            throughput=1., zp=30., unit='nm'):
+    '''
+    Setup list of bandpasses needed to instantiate a DataCube
+    given the simple case of constant spectral resolution, throughput,
+    and image zeropoints for all slices
+
+    Useful for quick setup of tests and simulated datavectors
+
+    lambda_blue: float
+        Blue-end of datacube wavelength range
+    lambda_red: float
+        Rd-end of datacube wavelength range
+    dlambda: float
+        Constant wavelength range per slice
+    throughput: float
+        Throughput of filter of data slices
+    unit: str
+        The wavelength unit
+    zeropoint: float
+        Image zeropoint for all data slices
+    '''
+
+    li, lf = lambda_blue, lambda_red
+    lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
+
+    bandpasses = []
+    for l1, l2 in lambdas:
+        bandpasses.append(gs.Bandpass(
+            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+            ))
+    bandpasses = [gs.Bandpass(
+        throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+        ) for l1,l2 in lambdas]
+
+    return bandpasses
+
+def get_datavector_types():
+    return DATAVECTOR_TYPES
+
+# NOTE: This is where you must register a new model
+DATAVECTOR_TYPES = {
+    'default': DataCube,
+    'datacube': DataCube,
+    }
+
+def build_datavector(name, kwargs):
+    '''
+    name: str
+        Name of datavector
+    kwargs: dict
+        Keyword args to pass to datavector constructor
+    '''
+
+    name = name.lower()
+
+    if name in DATAVECTOR_TYPES.keys():
+        # User-defined input construction
+        datavector = DATAVECTOR_TYPES[name](**kwargs)
+    else:
+        raise ValueError(f'{name} is not a registered datavector!')
+
+    return datavector
+
 
 # Used for testing
 def main(args):
@@ -473,12 +640,12 @@ def main(args):
     Nspec = len(bandpasses)
 
     print('Building empty test data')
-    shape = (100, 100, Nspec)
+    shape = (Nspec, 100, 100)
     data = np.zeros(shape)
 
     print('Building Slice object')
     n = 50 # slice num
-    s = Slice(data[:,:,n], bandpasses[n])
+    s = Slice(data[n,:,:], bandpasses[n])
 
     print('Testing slice plots')
     s.plot(show=False)
@@ -489,6 +656,28 @@ def main(args):
 
     print('Building DataCube object from array')
     cube = DataCube(data=data, bandpasses=bandpasses)
+
+    print('Building DataCube with constant weight & mask')
+    weights = 1. / 3
+    masks = 0
+    cube = DataCube(
+        data=data, bandpasses=bandpasses, weights=weights, masks=masks
+        )
+
+    print('Building DataCube with weight & mask lists')
+    weights = [i for i in range(Nspec)]
+    masks = [0 for i in range(Nspec)]
+    cube = DataCube(
+        data=data, bandpasses=bandpasses, weights=weights, masks=masks
+        )
+
+    print('Building DataCube with weight & mask arrays')
+    weights = 2 * np.ones(shape)
+    masks = np.zeros(shape)
+    masks[-1] = np.ones(shape[1:])
+    cube = DataCube(
+        data=data, bandpasses=bandpasses, weights=weights, masks=masks
+        )
 
     print('Testing DataCube truncation on slice centers')
     lambda_range = le - li

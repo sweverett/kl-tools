@@ -83,7 +83,11 @@ class MuseDataCube(cube.FitsDataCube):
         linecat = Table.read(linefile)
 
         # we want to save only the relevant entry from the two catalogs
-        obj_id = re.search('(\d+)_*', cubefile).groups()[0]
+        try:
+            obj_id = re.search('(\d+)_*', cubefile).groups()[0]
+        except TypeError:
+            # if a Pathlib obj is passed
+            obj_id = re.search('(\d+)_*', cubefile.name).groups()[0]
 
         cat_row = catalog[catalog['UNIQUE_ID'] == obj_id]
         line_row = linecat[linecat['UNIQUE_ID'] == obj_id]
@@ -112,10 +116,10 @@ class MuseDataCube(cube.FitsDataCube):
         '''
 
         self.pars = {}
-        self.pars['pix_scale'] = self.pixel_scale
+        self.pars['pix_scale'] = self.pix_scale
         self.pars['Nx'] = self.Nx
         self.pars['Ny'] = self.Ny
-        self.pars['z'] = self._catalogEntry['Z']
+        self.pars['z'] = self.obj_data['Z']
         self.pars['spec_resolution'] = 3000.
 
         # A guess, based on throughput here:

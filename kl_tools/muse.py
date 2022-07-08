@@ -132,41 +132,64 @@ class MuseDataCube(cube.FitsDataCube):
 
         return
 
-    def set_weights(self, ext=1):
+    def set_weights(self, weights=None, ext=1):
         '''
         Set weights from a muse datacube file
         '''
 
-        # should be an array of single weight values per slice
-        weights = fitsio.read(self.cubefile, ext=1)
+        if weights is None:
+            # should be an array of single weight values per slice
+            weights = fitsio.read(self.cubefile, ext=1)
 
-        l = len(weights)
-        if l != self.Nspec:
-            raise ValueError(f'The weight array has len {l} ' +\
-                             f'but {self.Nspec=}!')
+            l = len(weights)
+            if l != self.Nspec:
+                raise ValueError(f'The weight array has len {l} ' +\
+                                 f'but {self.Nspec=}!')
 
         super(MuseDataCube, self).set_weights(weights)
 
         return
 
-    def set_line(line_choice='strongest'):
+    def set_masks(self, masks=None, ext=2):
+        '''
+        Set masks from a muse datacube file
+        '''
+
+        if masks is None:
+            # should be an array of single mask values per slice
+            masks = fitsio.read(self.cubefile, ext=2)
+
+            l = len(masks)
+            if l != self.Nspec:
+                raise ValueError(f'The mask array has len {l} ' +\
+                                 f'but {self.Nspec=}!')
+
+        super(MuseDataCube, self).set_masks(masks)
+
+        return
+
+    def set_line(self, line_choice='strongest', truncate=True):
 
         # If no line indicated, set parameters for fitting the strongest emission line.
         if line_choice == 'strongest':
-            line_index = np.argmax(self.obj_data['SN'])
+            line_index = np.argmax(self.obj_data['SN_2'])
         else:
             thing = np.where(self.obj_data['IDENT'] == line_choice)
             if len(thing) <1:
                 print(f'your choice of emission line, {line_choice}, is ' +\
                       'not in the linelist for this object, which ' +\
                       f'contains only {self.obj_data["IDENT"]}.')
-                ipdb.set_trace()
             line_index = thing[0][0] # EH: This had better be unique.
 
         self.line_name = self.obj_data['IDENT'][line_index]
 
-        self.pars['sed_start'] = self.obj_data['LAMBDA_NB_MIN'][line_index]
-        self.pars['sed_end'] = self.obj_data['LAMBDA_NB_MIN'][line_index]
+        lblue = float(self.obj_data['LAMBDA_NB_MIN'][line_index])
+        lred = float(self.obj_data['LAMBDA_NB_MAX'][line_index])
+        self.pars['sed_start'] = lblue
+        self.pars['sed_end'] = lred
+
+        if truncate is True:
+            self.truncate(lblue, lred)
 
         return
 
@@ -180,12 +203,14 @@ def main(args):
     emlinePath = testpath / pathlib.Path("MW_1-24_emline_table.fits")
 
     # Try initializing a datacube object with these paths.
-    thisCube = MuseDataCube(
+    muse = MuseDataCube(
         cubefile=spec3dPath,
         specfile=spec1dPath,
         catfile=catPath,
         linefile=emlinePath
         )
+
+    muse.set_line()
 
     return 0
 

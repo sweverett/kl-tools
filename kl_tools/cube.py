@@ -1,4 +1,5 @@
 import numpy as np
+import fitsio
 from astropy.io import fits
 import galsim
 import os
@@ -6,7 +7,6 @@ import pickle
 from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
-import galsim as gs
 
 # from . import utils
 import utils
@@ -353,25 +353,23 @@ class FitsDataCube(DataCube):
     Same as Datacube, but instantiated from a fitscube file
     and associated file containing bandpass list
 
-    We assume the same structure as galsim.fits.writeCube()
+    Assumes the datacube has a shape of (Nspec,Nx,Ny)
 
-    cubefile: location of fits cube
-    bandpasses: either a filename of a bandpass list or the list
+    cubefile: str
+        Location of fits cube
+    bandpasses: str, list
+        Either a filename of a bandpass list or the list
     '''
 
-    def __init__(self, cubefile, bandpasses, dir=None):
+    def __init__(self, cubefile, bandpasses, dir=None, **kwargs):
         if dir is not None:
             cubefile = os.path.join(dir, cubefile)
 
+        utils.check_file(cubefile)
+
         self.cubefile = cubefile
 
-        fits_cube = galsim.fits.readCube(cubefile)
-        Nimages = len(fits_cube)
-        im_shape = fits_cube[0].array.shape
-        data = np.zeros((im_shape[0], im_shape[1], Nimages))
-
-        for i, im in enumerate(fits_cube):
-            data[:,:,i] = im.array
+        data = fitsio.read(cubefile)
 
         if isinstance(bandpasses, str):
             bandpass_file = bandpasses
@@ -385,7 +383,9 @@ class FitsDataCube(DataCube):
             if not isinstance(bandpasses, list):
                 raise Exception('For now, must pass bandpasses as either filename or list!')
 
-        super(FitsDataCube, self).__init__(data=data, bandpasses=bandpasses)
+        super(FitsDataCube, self).__init__(
+            data=data, bandpasses=bandpasses, **kwargs
+            )
 
         return
 

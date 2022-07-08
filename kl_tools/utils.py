@@ -45,6 +45,16 @@ def build_map_grid(Nx, Ny):
 
     return X, Y
 
+def check_file(filename):
+    '''
+    Check if file exists; err if not
+    '''
+
+    if not os.path.exists(filename):
+        raise OSError(f'{filename} does not exist!')
+
+    return
+
 def make_dir(d):
     '''
     Makes dir if it does not already exist

@@ -81,6 +81,41 @@ def check_types(var_dict):
 
     return
 
+def check_req_fields(config, req, name=None):
+    for field in req:
+        if not field in config:
+            raise ValueError(f'{name}config must have field {field}')
+
+    return
+
+def check_fields(config, req, opt, name=None):
+    '''
+    req: list of required field names
+    opt: list of optional field names
+    name: name of config type, for extra print info
+    '''
+    assert isinstance(config, dict)
+
+    if name is None:
+        name = ''
+    else:
+        name = name + ' '
+
+    if req is None:
+        req = []
+    if opt is None:
+        opt = []
+
+    # ensure all req fields are present
+    check_req_fields(config, req, name=name)
+
+    # now check for fields not in either
+    for field in config:
+        if (not field in req) and (not field in opt):
+            raise ValueError(f'{field} not a valid field for {name} config!')
+
+    return
+
 def make_dir(d):
     '''
     Makes dir if it does not already exist

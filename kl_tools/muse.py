@@ -1,7 +1,7 @@
 import cube
 import numpy as np
 from astropy.io import fits
-from astropy.table import Table, hstack
+from astropy.table import Table, join, hstack
 import os
 import pickle
 import fitsio
@@ -25,13 +25,12 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
-class MuseDataCube(cube.FitsDataCube):
+class MuseDataCube(cube.DataCube):
     '''
     Sublass DataCube for MUSE observations.
     '''
 
-    def __init__(self, cubefile=None, specfile=None, catfile=None,
-                 linefile=None, pars=None):
+    def __init__(self, cubefile, specfile, catfile, linefile, pars=None):
         '''
         Initialize a DataCube object from the contents of a MUSE fits datacube.
 
@@ -43,13 +42,14 @@ class MuseDataCube(cube.FitsDataCube):
             Catalog containing general data from the MUSE wide survey
         linefile: str, or anything parsable by pathlib.Path
             Catalog containing emission line tables from the MUSE wide survey
-        pars: dict
+        pars: dict, cube.CubePars
+            A dictionary or CubePars that holds any additional metadata
         '''
 
-        # cubefile already saved & checked in FitsDataCube constructor
-        for f in [specfile, catfile, linefile]:
+        for f in [cubefile, specfile, catfile, linefile]:
             utils.check_file(f)
 
+        self.cubefile = cubefile
         self.specfile = specfile
         self.catfile = catfile
         self.linefile = linefile
@@ -73,10 +73,22 @@ class MuseDataCube(cube.FitsDataCube):
             1.0, 'A', blue_limit=il-dl, red_limit=il+dl, zeropoint=22.5
             ) for il,dl in zip(self.spec1d['WAVE_VAC'], dlam)]
 
-        # construct a FitsDataCube
-        super(MuseDataCube, self).__init__(
-            cubefile=cubefile, bandpasses=bandpasses, pix_scale=pix_scale
-            )
+        pars_dict = {
+            'pix_scale': pix_scale,
+            'bandpasses': bandpasses
+        }
+        pars = cube.CubePars(pars_dict)
+
+        data = fitsio.read(cubefile)
+
+        super(MuseDataCube, self).__init__(data, pars=pars)
+
+        self.pars['files'] = {
+            'cubefile': cubefile,
+            'specfile': specfile,
+            'catfile': catfile,
+            'linefile': linefile,
+        }
 
         # grab obj data from available catalogs
         catalog = Table.read(catfile)
@@ -89,19 +101,13 @@ class MuseDataCube(cube.FitsDataCube):
             # if a Pathlib obj is passed
             obj_id = re.search('(\d+)_*', cubefile.name).groups()[0]
 
-        cat_row = catalog[catalog['UNIQUE_ID'] == obj_id]
-        line_row = linecat[linecat['UNIQUE_ID'] == obj_id]
-
-        self.obj_data = hstack([cat_row, line_row])
+        self.obj_data = catalog[catalog['UNIQUE_ID'] == obj_id]
+        self.lines = linecat[linecat['UNIQUE_ID'] == obj_id]
 
         self._set_parameters()
 
-        # TODO: turn on once we understand muse weights
         self.set_weights()
-
-        # Once everything is set up for MUSE, populate the parameters dict
-        # that the runner will need.
-        # TODO: implement!
+        self.set_masks()
 
         return
 
@@ -116,19 +122,20 @@ class MuseDataCube(cube.FitsDataCube):
         '''
 
         self.pars = {}
-        self.pars['pix_scale'] = self.pix_scale
-        self.pars['Nx'] = self.Nx
-        self.pars['Ny'] = self.Ny
         self.pars['z'] = self.obj_data['Z']
-        self.pars['spec_resolution'] = 3000.
 
-        # A guess, based on throughput here:
-        # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
-        self.pars['bandpass_throughput'] = 0.2
+        # some are set later
+        self.pars['sed'] = {
+            # A guess, based on throughput here:
+            # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
+            'throughput': 0.2,
+            'resolution': 3000.,
+            'lblue': None,
+            'lred': None
+        }
 
-        # are set later
-        self.pars['sed_start'] = None
-        self.pars['sed_end'] = None
+        Nlines = len(self.lines)
+        self.pars['emission_lines'] = zip(self.lines['IDENT'], range(Nlines))
 
         return
 
@@ -159,39 +166,64 @@ class MuseDataCube(cube.FitsDataCube):
             # should be an array of single mask values per slice
             masks = fitsio.read(self.cubefile, ext=2)
 
-            l = len(masks)
-            if l != self.Nspec:
-                raise ValueError(f'The mask array has len {l} ' +\
-                                 f'but {self.Nspec=}!')
-
         super(MuseDataCube, self).set_masks(masks)
 
         return
 
     def set_line(self, line_choice='strongest', truncate=True):
+        '''
+        Set the emission line actually used in an analysis of a datacube,
+        and possibly truncate it to slices near the line
+        '''
 
         # If no line indicated, set parameters for fitting the strongest emission line.
         if line_choice == 'strongest':
-            line_index = np.argmax(self.obj_data['SN_2'])
+            line_index = np.argmax(self.lines['SN'])
         else:
-            thing = np.where(self.obj_data['IDENT'] == line_choice)
+            thing = np.where(self.lines['IDENT'] == line_choice)
             if len(thing) <1:
                 print(f'your choice of emission line, {line_choice}, is ' +\
                       'not in the linelist for this object, which ' +\
                       f'contains only {self.obj_data["IDENT"]}.')
             line_index = thing[0][0] # EH: This had better be unique.
 
-        self.line_name = self.obj_data['IDENT'][line_index]
+        # update all line-related meta data
+        self.lines = self.lines[line_index]
+        self.pars['emission_lines'] = (self.lines['IDENT'], 0)
 
-        lblue = float(self.obj_data['LAMBDA_NB_MIN'][line_index])
-        lred = float(self.obj_data['LAMBDA_NB_MAX'][line_index])
-        self.pars['sed_start'] = lblue
-        self.pars['sed_end'] = lred
+        lblue = float(self.lines['LAMBDA_NB_MIN'])
+        lred = float(self.lines['LAMBDA_NB_MAX'])
+        self.pars['sed']['lblue'] = lblue
+        self.pars['sed']['lred'] = lred
 
+        # create new truncated datacube around line, if desired
         if truncate is True:
-            self.truncate(lblue, lred)
+            args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
+            super(MuseDataCube, self).__init__(*args, **kwargs)
 
         return
+
+    def get_inv_cov_list(self):
+        '''
+        Build inverse covariance matrices for slice images
+
+        returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
+        '''
+
+        # MUSE weight maps are really sky background, so we'll
+        # take the inverse squared
+        Nspec = self.Nspec
+        Npix = self.Nx * self.Ny
+
+        weights = self.weights
+
+        inv_cov_list = []
+        for i in range(Nspec):
+            inv_var = ((1. / weights[i])**2).reshape(Npix)
+            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
+            inv_cov_list.append(inv_cov)
+
+        return inv_cov_list
 
 def main(args):
 
@@ -211,6 +243,38 @@ def main(args):
         )
 
     muse.set_line()
+
+    outdir = os.path.join(utils.TEST_DIR, 'muse')
+    utils.make_dir(outdir)
+
+    import matplotlib.pyplot as plt
+    # plt.subplots(4,4)
+    for i in range(muse.Nspec):
+        lam = muse.lambdas[i]
+        # sci
+        plt.subplot(muse.Nspec,3,3*i+1)
+        plt.imshow(muse.data[i])
+        plt.colorbar()
+        plt.ylabel(f'({lam[0]:.1f},{lam[1]:.1f})')
+        if i == 0:
+            plt.title('sci')
+        # wgt
+        plt.subplot(muse.Nspec,3,3*i+2)
+        plt.imshow(muse.weights[i])
+        plt.colorbar()
+        if i == 0:
+            plt.title('wgt')
+        # msk
+        plt.subplot(muse.Nspec,3,3*i+3)
+        plt.imshow(muse.masks[i])
+        plt.colorbar()
+        if i == 0:
+            plt.title('msk')
+
+    plt.gcf().set_size_inches(7,24)
+
+    outfile = os.path.join(outdir, 'muse-datacube-truncated.png')
+    plt.savefig(outfile, bbox_inches='tight', dpi=300)
 
     return 0
 

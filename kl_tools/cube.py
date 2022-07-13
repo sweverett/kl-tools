@@ -608,48 +608,6 @@ class DataCube(DataVector):
 
         return
 
-class FitsDataCube(DataCube):
-
-    def __init__(self, cubefile, bandpasses, dir=None, **kwargs):
-        '''
-        Same as Datacube, but instantiated from a fitscube file
-        and associated file containing bandpass list
-
-        Assumes the datacube has a shape of (Nspec,Nx,Ny)
-
-        cubefile: str
-            Location of fits cube
-        bandpasses: str, list
-            Either a filename of a bandpass list or the list
-        '''
-
-        if dir is not None:
-            cubefile = os.path.join(dir, cubefile)
-
-            utils.check_file(cubefile)
-
-            self.cubefile = cubefile
-
-            data = fitsio.read(cubefile)
-
-            if isinstance(bandpasses, str):
-                bandpass_file = bandpasses
-                if '.pkl' in bandpass_file:
-                    with open(bandpass_file, 'rb') as f:
-                        bandpasses = pickle.load(f)
-                else:
-                    raise Exception('For now, only pickled lists of ' +\
-                                    'galsim.Bandpass objects are accepted')
-            else:
-                if not isinstance(bandpasses, list):
-                    raise Exception('For now, must pass bandpasses as either filename or list!')
-
-                super(FitsDataCube, self).__init__(
-                    data=data, bandpasses=bandpasses, **kwargs
-                )
-
-        return
-
 class SliceList(list):
     '''
     A list of Slice objects

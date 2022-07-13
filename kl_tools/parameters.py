@@ -239,11 +239,3 @@ class MCMCPars(MetaPars):
 
         return pars
 
-class CubePars(MetaPars):
-    '''
-    Class that defines structure for DataCube meta parameters,
-    e.g. image & emission line meta data
-    '''
-
-    _req_fields = ['pixel_scale', 'bandpasses']
-    _opt_fields = ['psf', 'emission_lines']

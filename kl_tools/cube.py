@@ -13,6 +13,7 @@ from argparse import ArgumentParser
 
 # from . import utils
 import utils
+import parameters
 
 import pudb
 
@@ -22,6 +23,74 @@ parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
+
+class CubePars(parameters.MetaPars):
+    '''
+    Class that defines structure for DataCube meta parameters,
+    e.g. image & emission line meta data
+    '''
+
+    _req_fields = ['pix_scale', 'bandpasses']
+    _opt_fields = ['psf', 'emission_lines', 'files']
+
+    def __init__(self, pars):
+        '''
+        pars: dict
+            Dictionary of meta pars for the DataCube
+        '''
+
+        super(CubePars, self).__init__(pars)
+
+        self._bandpasses = None
+        bp = self.pars['bandpasses']
+        try:
+            utils.check_type(bp, 'bandpasses', list)
+        except TypeError:
+            try:
+                utils.check_type(bp, 'bandpasses', dict)
+            except:
+                raise TypeError('CubePars bandpass field must be a' +\
+                                'list of galsim bandpasses or a dict!')
+
+        # ...
+
+        return
+
+    def build_bandpasses(self, remake=False):
+        '''
+        Build a bandpass list from pars if not provided directly
+        '''
+
+        if (self._bandpasses is not None) and (remake is False):
+            return self._bandpasses
+
+        bp = self.pars['bandpasses']
+
+        if isinstance(bp, list):
+            # we'll be lazy and just check the first entry
+            if not isinstance(bp[0], galsim.Bandpass):
+                raise TypeError('bandpass list must be filled with ' +\
+                                'galsim.Bandpass objects!')
+            bandpasses = bp
+        else:
+            # already checked it is a list or dict
+            bandpass_req = ['lambda_blue, lambda_red, dlambda']
+            bandpass_opt = ['throughput', 'zp', 'unit']
+            utils.check_fields(bp, bandpass_req, bandpass_opt)
+
+            args = [
+                pars['bandpass'].pop('lambda_blue'),
+                pars['bandpass'].pop('lambda_red'),
+                pars['bandpass'].pop('dlambda')
+                ]
+
+            kwargs = pars['bandpass']
+
+            bandpasses = setup_simple_bandpasses(*args, **kwargs)
+
+        self._bandpasses = bandpasses
+
+        return bandpasses
 
 class DataVector(object):
     '''
@@ -44,8 +113,8 @@ class DataCube(DataVector):
     at various wavelength slices
     '''
 
-    def __init__(self, data=None, shape=None, bandpasses=None,
-                 pix_scale=None, weights=None, masks=None, pars=None):
+    def __init__(self, data, pars=None, weights=None, masks=None,
+                 pix_scale=None, bandpasses=None):
         '''
         Initialize either a filled DataCube from an existing numpy
         array or an empty one from a given shape
@@ -53,121 +122,80 @@ class DataCube(DataVector):
         data: np.array
             A numpy array containing all image slice data.
             For now, assumed to be the shape format given below.
-        shape: tuple
-            A 3-tuple in the format of (Nspec, Nx, Ny)
-            where (Nx, Ny) are the shapes of the image slices
-            and Nspec is the Number of spectral slices.
-        bandpasses: list
-            A list of galsim.Bandpass objects containing
-            throughput function, lambda window, etc.
-        pix_scale: float
-            the pixel scale of the datacube slices
+        pars: dict, CubePars
+            A dictionary or CubePars that holds any additional metadata
+            NOTE: should *only* be None if pix_scale & bandapsses are
+            passed explicitly
         weights: int, list, np.ndarray
             The weight maps for each slice. See set_weights()
             for more info on acceptable types.
         masks: np.ndarray
             The mask maps for each slice. See set_masks()
             for more info on acceptable types.
-        pars: dict
-            A dictionary that holds any additional metadata
+
+        The following are not standard for current setups, but
+        exist for compatibility w/ previous verions:
+
+        bandpasses: list
+            A list of galsim.Bandpass objects containing
+            throughput function, lambda window, etc.
+        pix_scale: float
+            the pixel scale of the datacube slices
         '''
 
-        # partitioned as it is useful for datacube truncation
-        # as well
-        self._setup_datacube(
-            data=data,
-            shape=shape,
-            bandpasses=bandpasses,
-            pix_scale=pix_scale,
-            weights=weights,
-            masks=masks,
-            pars=pars
-            )
-
-        return
-
-    def _setup_datacube(self, data=None, shape=None, bandpasses=None,
-                       pix_scale=None, weights=None, masks=None, pars=None):
-        '''
-        This part is separate from the constructor as it is useful
-        for datacube truncation as well
-
-        see constructor for arg defs
-        '''
-
-        if data is None:
-            if shape is None:
-                raise ValueError('Must instantiate a DataCube with either ' + \
-                                 'a data array or a shape tuple!')
-
-            self.Nspec = shape[0]
-            self.Nx = shape[1]
-            self.Ny = shape[2]
-            self.shape = shape
-
-            self._check_shape_params()
-            self._data = np.zeros(self.shape)
-
+        # This is present to handle older versions of DataCube
+        if pars is None:
+            if (pix_scale is None) or (bandpasses is None):
+                raise Exception('Both pix_scale and bandpasses must be ' +\
+                                'passed if pars is not!')
+            pars_dict = {
+                'pix_scale': pix_scale,
+                'bandpasses': bandpasses
+            }
+            pars = CubePars(pars_dict)
         else:
-            if bandpasses is None:
-                raise ValueError('Must pass bandpasses if data is not None!')
+            if (pix_scale is not None) or (bandpasses is not None):
+                raise Exception('Cannot pass pix_scale or bandpasses if ' +\
+                                'pars is set!')
+            try:
+                utils.check_type(pars, 'pars', CubePars)
+            except TypeError:
+                try:
+                    utils.check_type(pars, 'pars', dict)
+                except:
+                    raise TypeError('pars must be either CubePars ' +\
+                                    'or a dict!')
+                pars = CubePars(pars)
 
-            if len(data.shape) != 3:
-                # Handle the case of 1 slice
-                assert len(data.shape) == 2
-                data = data.reshape(1, data.shape[0], data.shape[1])
+        self.pars = pars
+        self.pix_scale = pars['pix_scale']
+        self.bandpasses = pars.build_bandpasses()
 
-            self.shape = data.shape
+        if len(data.shape) != 3:
+            # Handle the case of 1 slice
+            assert len(data.shape) == 2
+            data = data.reshape(1, data.shape[0], data.shape[1])
 
-            self.Nspec = self.shape[0]
-            self.Nx = self.shape[1]
-            self.Ny = self.shape[2]
+        self.shape = data.shape
 
-            self._data = data
+        self.Nspec = self.shape[0]
+        self.Nx = self.shape[1]
+        self.Ny = self.shape[2]
 
-            if self.shape[0] != len(bandpasses):
-                raise ValueError('The length of the bandpasses must ' + \
-                                 'equal the length of the third data dimension!')
+        self._data = data
+
+        if self.shape[0] != len(self.bandpasses):
+            raise ValueError('The length of the bandpasses must ' + \
+                             'equal the length of the third data dimension!')
 
         if self.Nspec == 0:
             print('WARNING: there are no slices in passed datacube. ' +\
                   'Are you sure that is right?')
 
-        # a bit awkward, but this allows flexible setup for other params
-        if bandpasses is None:
-            raise ValueError('Must pass a list of bandpasses!')
-        self.bandpasses = bandpasses
-
-        d = {'pix_scale': (pix_scale, (int, float)), 'pars': (pars, dict)}
-        for name, (val, t) in d.items():
-            if val is not None:
-                if not isinstance(val, t):
-                    raise TypeError(f'{name} must be a {t}!')
-
-        if pix_scale is None:
-            if pars is None:
-                raise AttributeError('Must pass one of pix_scale and pars!')
-            if 'pix_scale' not in pars.keys():
-                raise AttributeError('Must pass pix_scale explicitly ' +\
-                                     'or in pars!')
-            pix_scale = pars['pix_scale']
-        else:
-            if pars is None:
-                pars = {'pix_scale': pix_scale}
-            else:
-                if 'pix_scale' in pars.keys():
-                    if pix_scale != pars['pix_scale']:
-                        raise ValueError('pix_scale does not match value in pars!')
-                else:
-                    pars['pix_scale'] = pix_scale
-
-        self.pix_scale = pix_scale
-        self.pars = pars
-
         # Not necessarily needed, but could help ease of access
         self.lambda_unit = u.Unit(self.bandpasses[0].wave_type)
         self.lambdas = [] # Tuples of bandpass bounds in unit of bandpass
-        for bp in bandpasses:
+        for bp in self.bandpasses:
             # galsim bandpass limits are always stored in nm
             li = (bp.blue_limit * u.nm).to(self.lambda_unit).value
             le = (bp.red_limit * u.nm).to(self.lambda_unit).value
@@ -216,6 +244,42 @@ class DataCube(DataVector):
                 )
 
         return
+
+    @classmethod
+    def from_fits(cls, cubefile, dir=None, **kwargs):
+        '''
+        Build a DataCube, but instantiated instead from a fitscube file
+        and associated file containing bandpass list
+
+        Assumes the datacube has a shape of (Nspec,Nx,Ny)
+
+        cubefile: str
+            Location of fits cube
+        '''
+
+        if dir is not None:
+            cubefile = os.path.join(dir, cubefile)
+
+        utils.check_file(cubefile)
+
+        cubefile = cubefile
+
+        data = fitsio.read(cubefile)
+
+        datacube = DataCube(data, **kwargs)
+
+        datacube.pars['files'] = {
+            'cubefile': cubefile
+        }
+
+        return datacube
+
+    @property
+    def sed(self):
+        if 'sed' in self.pars:
+            return self.pars['sed']
+        else:
+            raise AttributeError('SED never set for datacube!')
 
     @property
     def data(self):
@@ -399,21 +463,40 @@ class DataCube(DataVector):
 
         return self._data[:,i,j]
 
-    def truncate(self, blue_cut, red_cut, lambda_unit=None, trunc_type='edge'):
+    def truncate(self, blue_cut, red_cut, lambda_unit=None, cut_type='edge',
+                 trunc_type='in-place'):
         '''
         Modify existing datacube to only hold slices between blue_cut
         and red_cut using either the lambda on a slice center or edge
+
+        blue_cut: float
+            Blue-end wavelength for datacube truncation
+        red_cut: float
+            Red-end wavelength for datacube truncation
+        lambda_unit: astropy.Unit
+            The unit of the passed wavelength limits
+        cut_type: str
+            The type of truncation applied ['edge' or 'center']
+        trunc_type: str
+            Select whether to apply the truncation w/ the DataCube constructor
+            or to just return the (args, kwargs) needed to produce the
+            truncation (args, kwargs). This is particularly useful for
+            subclasses of DataCube
         '''
 
         for l in [blue_cut, red_cut]:
             if (not isinstance(l, float)) and (not isinstance(l, int)):
-                raise ValueError('Truncation wavelengths must be ints or floats!')
+                raise ValueError('Truncation wavelengths must be ints or ' +\
+                                 'floats!')
 
         if (blue_cut >= red_cut):
             raise ValueError('blue_cut must be less than red_cut!')
 
-        if trunc_type not in ['edge', 'center']:
-            raise ValueError('trunc_type can only be at the edge or center!')
+        if cut_type not in ['edge', 'center']:
+            raise ValueError('cut_type can only be at the edge or center!')
+
+        if trunc_type not in ['in-place', 'return-args']:
+            raise ValueError('trunc_type can only be in_place or return-args!')
 
         # make sure we get a correct comparison between possible
         # unit differences
@@ -424,11 +507,11 @@ class DataCube(DataVector):
         blue_cut *= lambda_unit
         red_cut *= lambda_unit
 
-        if trunc_type == 'center':
+        if cut_type == 'center':
             # truncate on slice center lambda value
             lambda_means = np.mean(self.lambdas, axis=1)
 
-            cut = (lu*lambda_means >= blue_cut) & (lambda_means <= red_cut)
+            cut = (lu*lambda_means >= blue_cut) & (lu*lambda_means <= red_cut)
 
         else:
             # truncate on slice lambda edge values
@@ -451,16 +534,27 @@ class DataCube(DataVector):
                             for i in range(self.Nspec)
                             if cut[i] == True]
 
+        trunc_pars_dict = {
+            'pix_scale': self.pix_scale,
+            'bandpasses': trunc_bandpasses
+        }
+        trunc_pars = CubePars(trunc_pars_dict)
 
-        # use main part of base constructor to reset affected attributes,
-        # regardless of potential subclass
-        self._setup_datacube(
-            data=trunc_data,
-            bandpasses=trunc_bandpasses,
-            weights=trunc_weights,
-            masks=trunc_masks,
-            pars=self.pars
+        if trunc_type == 'in-place':
+            self.__init__(
+                trunc_data,
+                pars=trunc_pars,
+                weights=trunc_weights,
+                masks=trunc_masks,
             )
+        elif trunc_type == 'return-args':
+            args = [trunc_data]
+            kwargs = {
+                'pars': trunc_pars,
+                'weights': trunc_weights,
+                'masks': trunc_masks
+            }
+            return (args, kwargs)
 
         return
 
@@ -511,47 +605,6 @@ class DataCube(DataVector):
             im_list.append(s._data)
 
         galsim.fits.writeCube(im_list, outfile)
-
-        return
-
-class FitsDataCube(DataCube):
-    '''
-    Same as Datacube, but instantiated from a fitscube file
-    and associated file containing bandpass list
-
-    Assumes the datacube has a shape of (Nspec,Nx,Ny)
-
-    cubefile: str
-        Location of fits cube
-    bandpasses: str, list
-        Either a filename of a bandpass list or the list
-    '''
-
-    def __init__(self, cubefile, bandpasses, dir=None, **kwargs):
-        if dir is not None:
-            cubefile = os.path.join(dir, cubefile)
-
-        utils.check_file(cubefile)
-
-        self.cubefile = cubefile
-
-        data = fitsio.read(cubefile)
-
-        if isinstance(bandpasses, str):
-            bandpass_file = bandpasses
-            if '.pkl' in bandpass_file:
-                with open(bandpass_file, 'rb') as f:
-                    bandpasses = pickle.load(f)
-            else:
-                raise Exception('For now, only pickled lists of ' +\
-                                'galsim.Bandpass objects are accepted')
-        else:
-            if not isinstance(bandpasses, list):
-                raise Exception('For now, must pass bandpasses as either filename or list!')
-
-        super(FitsDataCube, self).__init__(
-            data=data, bandpasses=bandpasses, **kwargs
-            )
 
         return
 
@@ -716,7 +769,10 @@ def main(args):
     print('Building empty test data')
     shape = (Nspec, 100, 100)
     data = np.zeros(shape)
-    pars = {'pix_scale': 1}
+    pars = {
+        'pix_scale': 1,
+        'bandpasses': bandpasses
+        }
 
     print('Building Slice object')
     n = 50 # slice num
@@ -730,22 +786,20 @@ def main(args):
     sl.append(s)
 
     print('Building DataCube object from array')
-    cube = DataCube(data=data, bandpasses=bandpasses, pars=pars)
+    cube = DataCube(data=data, pars=pars)
 
     print('Building DataCube with constant weight & mask')
     weights = 1. / 3
     masks = 0
     cube = DataCube(
-        data=data, bandpasses=bandpasses, weights=weights, masks=masks,
-        pars=pars
+        data=data, weights=weights, masks=masks, pars=pars
         )
 
     print('Building DataCube with weight & mask lists')
     weights = [i for i in range(Nspec)]
     masks = [0 for i in range(Nspec)]
     cube = DataCube(
-        data=data, bandpasses=bandpasses, weights=weights, masks=masks,
-        pars=pars
+        data=data, weights=weights, masks=masks, pars=pars
         )
 
     print('Building DataCube with weight & mask arrays')
@@ -753,8 +807,7 @@ def main(args):
     masks = np.zeros(shape)
     masks[-1] = np.ones(shape[1:])
     cube = DataCube(
-        data=data, bandpasses=bandpasses, weights=weights, masks=masks,
-        pars=pars
+        data=data,  weights=weights, masks=masks, pars=pars
         )
 
     print('Testing DataCube truncation on slice centers')
@@ -779,21 +832,22 @@ def main(args):
     mock_dir = os.path.join(utils.TEST_DIR,
                             'mocks',
                             'COSMOS')
-    test_cubefile = os.path.join(mock_dir,
-                                 'kl-mocks-COSMOS-001.fits')
-    bandpass_file = os.path.join(mock_dir,
-                                 'bandpass_list.pkl')
-    if (os.path.exists(test_cubefile)) and (os.path.exists(bandpass_file)):
-        print('Building from pickled bandpass list file')
-        fits_cube = FitsDataCube(
-            test_cubefile, bandpass_file, pars=pars
-            )
+    test_cubefile = os.path.join(
+        mock_dir,'kl-mocks-COSMOS-001.fits'
+        )
+    bandpass_file = os.path.join(
+        mock_dir, 'bandpass_list.pkl'
+        )
+    with open(bandpass_file, 'rb') as f:
+        bandpasses = pickle.load(f)
+    if os.path.exists(test_cubefile):
+        print('Building from pickled bandpass list file in pars')
+        pars['bandpasses'] = bandpasses
+        fits_cube = DataCube.from_fits(test_cubefile, pars=pars)
 
         print('Building from bandpass list directly')
-        with open(bandpass_file, 'rb') as f:
-            bandpasses = pickle.load(f)
-        fits_cube = FitsDataCube(
-            test_cubefile, bandpasses, pars=pars
+        fits_cube = DataCube.from_fits(
+            test_cubefile, bandpasses=bandpasses, pix_scale=pars['pix_scale']
             )
 
         print('Making slice plot from DataCube')

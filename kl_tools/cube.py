@@ -274,10 +274,16 @@ class DataCube(DataVector):
 
         return datacube
 
-    @property
-    def sed(self):
-        if 'sed' in self.pars:
-            return self.pars['sed']
+    def get_sed(self, line_index=None):
+        if line_index is None:
+            if len(self.pars['emission_lines']) == 0:
+                line_index = 0
+            else:
+                raise ValueError('Must pass a line_index if more than ' +\
+                                 'one line are stored!')
+
+        if 'emission_lines' in self.pars:
+            return self.pars['emission_lines'][line_index].sed
         else:
             raise AttributeError('SED never set for datacube!')
 

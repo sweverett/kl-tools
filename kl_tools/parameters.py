@@ -207,7 +207,8 @@ class MCMCPars(MetaPars):
     choices, etc.
     '''
 
-    _req_fields = ['intensity', 'priors']
+    _req_fields = ['intensity', 'priors', 'units']
+    _opt_fields = ['run_options']
 
     def copy_with_sampled_pars(self, theta_pars):
         '''

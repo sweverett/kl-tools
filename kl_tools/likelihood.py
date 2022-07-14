@@ -269,7 +269,7 @@ class LogLikelihood(LogBase):
         # but for now we are only using diagonal inv_cov matrices
         # anyway
         # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
-        log_det = imap.fitter.compute_marginalization_det(pars=self.pars, log=True)
+        log_det = imap.fitter.compute_marginalization_det(pars=self.meta, log=True)
 
         if log_det == 0:
             print('Warning: determinant is 0. Cannot compute ' +\
@@ -298,7 +298,7 @@ class LogLikelihood(LogBase):
         vmodel = theta_pars
 
         for name in ['r_unit', 'v_unit']:
-            if name in meta_pars:
+            if name in meta_pars['units']:
                 vmodel[name] = Unit(meta_pars[name])
             else:
                 raise AttributeError(f'pars must have a value for {name}!')
@@ -306,7 +306,7 @@ class LogLikelihood(LogBase):
         return VelocityMap(model_name, vmodel)
 
     @classmethod
-    def _setup_sed(cls, meta):
+    def _setup_sed(cls, datacube):
         '''
         numba can't handle most interpolators, so create
         a numpy one
@@ -314,7 +314,10 @@ class LogLikelihood(LogBase):
         meta: MetaPars
         '''
 
-        sed = meta['sed']
+        # NOTE: Right now, this will error if more than one
+        # emission lines are stored (as we don't have a line
+        # index to pass here), but can improve in future
+        sed = datacube.get_sed()
 
         return np.array([sed.x, sed.y])
 
@@ -438,12 +441,12 @@ class DataCubeLikelihood(LogLikelihood):
         vmap = self.setup_vmap(theta_pars)
         imap = self.setup_imap(theta_pars, datavector, self.meta)
 
-        # evaluate maps at pixel centers in obs plane
-        if 'use_numba' in self.pars:
-            use_numba = self.pars['use_numba']
-        else:
+        try:
+            use_numba = self.meta['run_options']['use_numba']
+        except KeyError:
             use_numba = False
 
+        # evaluate maps at pixel centers in obs plane
         v_array = vmap(
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
@@ -577,18 +580,11 @@ class DataCubeLikelihood(LogLikelihood):
         returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
         '''
 
-        Nspec = datacube.Nspec
-        Npix = datacube.Nx * datacube.Ny
+        # for now, we'll let each datacube class do this
+        # to allow for differences in weightmap definitions
+        # between experiments
 
-        weights = datacube.weights
-
-        inv_cov_list = []
-        for i in range(Nspec):
-            inv_var = ((1. / weights[i])**2).reshape(Npix)
-            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
-            inv_cov_list.append(inv_cov)
-
-        return inv_cov_list
+        return datacube.get_inv_cov_list()
 
 def get_likelihood_types():
     return LIKELIHOOD_TYPES
@@ -634,16 +630,16 @@ def _setup_test_sed(pars):
           will cause problems for optimizations
     '''
 
-    start = pars['sed_start']
-    end = pars['sed_end']
-    res = pars['sed_resolution']
+    start = pars['sed']['start']
+    end = pars['sed']['end']
+    res = pars['sed']['resolution']
 
     lambdas = np.arange(start, end+res, res)
 
     # Model emission line SED as gaussian
-    mu  = pars['line_value']
-    std = pars['line_std']
-    unit = pars['line_unit']
+    mu  = pars['line']['value']
+    std = pars['line']['std']
+    unit = pars['line']['unit']
 
     norm = 1. / (std * np.sqrt(2.*np.pi))
     gauss = norm * np.exp(-0.5*(lambdas - mu)**2 / std**2)

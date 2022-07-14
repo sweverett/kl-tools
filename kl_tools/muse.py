@@ -15,6 +15,7 @@ import astropy.units as u
 from argparse import ArgumentParser
 
 import utils
+from emission import EmissionLine, LINE_LAMBDAS
 
 import ipdb
 
@@ -125,17 +126,39 @@ class MuseDataCube(cube.DataCube):
         self.pars['z'] = self.obj_data['Z']
 
         # some are set later
-        self.pars['sed'] = {
+        self.pars['specs'] = {
             # A guess, based on throughput here:
             # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
             'throughput': 0.2,
             'resolution': 3000.,
-            'lblue': None,
-            'lred': None
         }
 
         Nlines = len(self.lines)
-        self.pars['emission_lines'] = zip(self.lines['IDENT'], range(Nlines))
+
+        z = self.pars['z']
+        R = self.pars['specs']['resolution']
+        lines = []
+        for line in self.lines:
+            ipdb.set_trace()
+            # TODO: We should investigate whether to use LAMBDA_SN directly,
+            # or even marginalize over z
+            line_lambda = LINE_LAMBDAS[line['IDENT']]
+
+            line_pars = {
+                'line_val': line_lambda.value,
+                'line_std': line_lambda.value * (1.+z) / R,
+                'line_unit': line_lambda.unit
+            }
+            # will be updated later
+            sed_pars = {
+                'lblue': float(line['LAMBDA_NB_MIN']),
+                'lred': float(line['LAMBDA_NB_MAX']),
+                'resolution': 0.1, # angstroms
+                'unit': line_lambda.unit
+            }
+            lines.append(EmissionLine(line_pars, sed_pars))
+
+        self.pars['emission_lines'] = lines
 
         return
 
@@ -189,12 +212,7 @@ class MuseDataCube(cube.DataCube):
 
         # update all line-related meta data
         self.lines = self.lines[line_index]
-        self.pars['emission_lines'] = (self.lines['IDENT'], 0)
-
-        lblue = float(self.lines['LAMBDA_NB_MIN'])
-        lred = float(self.lines['LAMBDA_NB_MAX'])
-        self.pars['sed']['lblue'] = lblue
-        self.pars['sed']['lred'] = lred
+        self.pars['emission_lines'] = self.pars['emission_lines'][line_index]
 
         # create new truncated datacube around line, if desired
         if truncate is True:

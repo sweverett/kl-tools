@@ -15,7 +15,7 @@ from argparse import ArgumentParser
 import utils
 import parameters
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 
@@ -60,6 +60,11 @@ class CubePars(parameters.MetaPars):
         '''
         Build a bandpass list from pars if not provided directly
         '''
+
+        # sometimes it is already set in the parameter dict
+        if 'bandpasses' in self.pars:
+            self._bandpasses = self.pars['bandpasses']
+            return self._bandpasses
 
         if (self._bandpasses is not None) and (remake is False):
             return self._bandpasses
@@ -275,17 +280,17 @@ class DataCube(DataVector):
         return datacube
 
     def get_sed(self, line_index=None):
-        if line_index is None:
-            if len(self.pars['emission_lines']) == 0:
-                line_index = 0
-            else:
-                raise ValueError('Must pass a line_index if more than ' +\
-                                 'one line are stored!')
+        try:
+            if line_index is None:
+                if len(self.pars['emission_lines']) == 1:
+                    line_index = 0
+                else:
+                    raise ValueError('Must pass a line_index if more than ' +\
+                                     'one line are stored!')
 
-        if 'emission_lines' in self.pars:
             return self.pars['emission_lines'][line_index].sed
-        else:
-            raise AttributeError('SED never set for datacube!')
+        except KeyError:
+            raise AttributeError('Emission lines never set for datacube!')
 
     @property
     def data(self):
@@ -535,28 +540,21 @@ class DataCube(DataVector):
         trunc_masks = self.masks[cut,:,:]
 
         # Have to do it this way as lists cannot be indexed by np arrays
-        # trunc_bandpasses = self.bandpasses[cut]
-        trunc_bandpasses = [self.bandpasses[i]
-                            for i in range(self.Nspec)
-                            if cut[i] == True]
-
-        trunc_pars_dict = {
-            'pix_scale': self.pix_scale,
-            'bandpasses': trunc_bandpasses
-        }
-        trunc_pars = CubePars(trunc_pars_dict)
+        self.pars['bandpasses'] = [self.bandpasses[i]
+                                   for i in range(self.Nspec)
+                                   if cut[i] == True]
 
         if trunc_type == 'in-place':
             self.__init__(
                 trunc_data,
-                pars=trunc_pars,
+                pars=pars,
                 weights=trunc_weights,
                 masks=trunc_masks,
             )
         elif trunc_type == 'return-args':
             args = [trunc_data]
             kwargs = {
-                'pars': trunc_pars,
+                'pars': self.pars,
                 'weights': trunc_weights,
                 'masks': trunc_masks
             }
@@ -821,13 +819,13 @@ def main(args):
     lambda_range = le - li
     blue_cut = li + 0.25*lambda_range + 0.5
     red_cut  = li + 0.75*lambda_range - 0.5
-    test_cube.truncate(blue_cut, red_cut, trunc_type='center')
+    test_cube.truncate(blue_cut, red_cut, cut_type='center')
     nslices_cen = len(test_cube.slices)
     print(f'----Truncation resulted in {nslices_cen} slices')
 
     print('Testing DataCube truncation on slice edges')
     test_cube = cube.copy()
-    test_cube.truncate(blue_cut, red_cut, trunc_type='edge')
+    test_cube.truncate(blue_cut, red_cut, cut_type='edge')
     nslices_edg = len(test_cube.slices)
     print(f'----Truncation resulted in {nslices_edg} slices')
 

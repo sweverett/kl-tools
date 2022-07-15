@@ -6,6 +6,7 @@ import os
 import pickle
 import fitsio
 from astropy.table import Table
+from scipy.sparse import identity, dia_matrix
 import matplotlib.pyplot as plt
 import galsim as gs
 import pathlib
@@ -122,7 +123,6 @@ class MuseDataCube(cube.DataCube):
         clean up later
         '''
 
-        self.pars = {}
         self.pars['z'] = self.obj_data['Z']
 
         # some are set later
@@ -135,19 +135,18 @@ class MuseDataCube(cube.DataCube):
 
         Nlines = len(self.lines)
 
-        z = self.pars['z']
+        z = float(self.pars['z'])
         R = self.pars['specs']['resolution']
         lines = []
         for line in self.lines:
-            ipdb.set_trace()
             # TODO: We should investigate whether to use LAMBDA_SN directly,
             # or even marginalize over z
             line_lambda = LINE_LAMBDAS[line['IDENT']]
 
             line_pars = {
-                'line_val': line_lambda.value,
-                'line_std': line_lambda.value * (1.+z) / R,
-                'line_unit': line_lambda.unit
+                'value': line_lambda.value * (1.+z),
+                'std': line_lambda.value * (1.+z) / R,
+                'unit': line_lambda.unit
             }
             # will be updated later
             sed_pars = {
@@ -212,10 +211,12 @@ class MuseDataCube(cube.DataCube):
 
         # update all line-related meta data
         self.lines = self.lines[line_index]
-        self.pars['emission_lines'] = self.pars['emission_lines'][line_index]
+        self.pars['emission_lines'] = [self.pars['emission_lines'][line_index]]
 
         # create new truncated datacube around line, if desired
         if truncate is True:
+            lblue = self.pars['emission_lines'][0].sed_pars['lblue']
+            lred = self.pars['emission_lines'][0].sed_pars['lred']
             args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
             super(MuseDataCube, self).__init__(*args, **kwargs)
 

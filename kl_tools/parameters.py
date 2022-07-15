@@ -45,7 +45,7 @@ class Pars(object):
 
         pars_order = dict(zip(sampled_pars, range(len(sampled_pars))))
         self.sampled = SampledPars(pars_order)
-        self.meta = MetaPars(meta_pars)
+        self.meta = MCMCPars(meta_pars)
 
         return
 
@@ -138,7 +138,7 @@ class MetaPars(object):
     MCMC, etc.
     '''
 
-    _req_fields = None
+    _req_fields = []
 
     def __init__(self, pars):
         '''

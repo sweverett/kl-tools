@@ -4,7 +4,6 @@ import os
 from time import time
 from scipy.interpolate import interp1d
 import scipy
-from scipy.sparse import identity, dia_matrix
 from astropy.units import Unit
 from argparse import ArgumentParser
 import galsim as gs
@@ -20,7 +19,7 @@ from parameters import Pars, MetaPars
 from velocity import VelocityMap
 from cube import DataVector, DataCube
 
-import pudb
+import ipdb
 
 # TODO: Make LogLikelihood a base class w/ abstract call,
 # and make current implementation for IFU
@@ -299,7 +298,7 @@ class LogLikelihood(LogBase):
 
         for name in ['r_unit', 'v_unit']:
             if name in meta_pars['units']:
-                vmodel[name] = Unit(meta_pars[name])
+                vmodel[name] = Unit(meta_pars['units'][name])
             else:
                 raise AttributeError(f'pars must have a value for {name}!')
 
@@ -418,20 +417,18 @@ class DataCubeLikelihood(LogLikelihood):
 
         return loglike
 
-    def _setup_model(self, theta_pars, datavector):
+    def _setup_model(self, theta_pars, datacube):
         '''
-        Setup the model datacube given the input datavector datacube
+        Setup the model datacube given the input datacube datacube
 
         theta_pars: dict
             Dictionary of sampled pars
-        datavector: DataCube
+        datacube: DataCube
             Datavector datacube truncated to desired lambda bounds
         '''
 
-        Nx, Ny = datavector.Nx, datavector.Ny
-        Nspec = datavector.Nspec
-
-        lambdas = np.array(datavector.lambdas)
+        Nx, Ny = datacube.Nx, datacube.Ny
+        Nspec = datacube.Nspec
 
         # create grid of pixel centers in image coords
         X, Y = utils.build_map_grid(Nx, Ny)
@@ -439,7 +436,7 @@ class DataCubeLikelihood(LogLikelihood):
         # create 2D velocity & intensity maps given sampled transformation
         # parameters
         vmap = self.setup_vmap(theta_pars)
-        imap = self.setup_imap(theta_pars, datavector, self.meta)
+        imap = self.setup_imap(theta_pars, datacube, self.meta)
 
         try:
             use_numba = self.meta['run_options']['use_numba']
@@ -451,15 +448,10 @@ class DataCubeLikelihood(LogLikelihood):
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
 
-        i_array = imap.render(theta_pars, datavector, self.meta)
-
-        sed_array = self._setup_sed(self.meta)
-
-        # create datacube
-        shape = (Nspec, Nx, Ny)
+        i_array = imap.render(theta_pars, datacube, self.meta)
 
         model_datacube = self._construct_model_datacube(
-            shape, lambdas, v_array, i_array
+            v_array, i_array, datacube
             )
 
         return model_datacube
@@ -493,27 +485,27 @@ class DataCubeLikelihood(LogLikelihood):
 
         return intensity.build_intensity_map(imap_type, datacube, imap_pars)
 
-    def _construct_model_datacube(self, shape, lambdas, v_array, i_array):
+    def _construct_model_datacube(self, v_array, i_array, datacube):
         '''
         Create the model datacube from model slices, using the evaluated
         velocity and intensity maps, SED, etc.
 
-        shape: tuple
-            A tuple of format (Nspec, Nx, Ny)
-        lambdas: list of tuples
-            A list of (lambda_b, lambda_r) tuples for each datacube slice
         v_array: np.array (2D)
             The vmap evaluated at image pixel positions for sampled pars.
             (Must be normalzied)
         i_array: np.array (2D)
             The imap evaluated at image pixel positions for sampled pars
+        datacube: DataCube
+            Datavector datacube truncated to desired lambda bounds
         '''
 
-        Nspec, Nx, Ny = shape
+        Nspec, Nx, Ny = datacube.shape
 
-        data = np.zeros(shape)
+        data = np.zeros(datacube.shape)
 
-        sed_array = self._setup_sed(self.meta)
+        lambdas = np.array(datacube.lambdas)
+
+        sed_array = self._setup_sed(datacube)
 
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)
@@ -529,10 +521,8 @@ class DataCubeLikelihood(LogLikelihood):
 
             data[i,:,:] = obs_array
 
-        pix_scale = self.meta['pix_scale']
-        bandpasses = self.meta['bandpasses']
         model_datacube = DataCube(
-            data=data, bandpasses=bandpasses, pix_scale=pix_scale
+            data=data, pars=datacube.pars
         )
 
         return model_datacube

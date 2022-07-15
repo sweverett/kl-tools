@@ -41,7 +41,7 @@ def build_map_grid(Nx, Ny):
     assert len(x) == Nx
     assert len(y) == Ny
 
-    X, Y = np.meshgrid(x, y)
+    X, Y = np.meshgrid(x, y, indexing='ij')
 
     return X, Y
 

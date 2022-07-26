@@ -71,7 +71,7 @@ def main(args, pool):
         'v0',
         'vcirc',
         'rscale',
-        'beta'
+        # 'beta'
         ]
 
     # additional args needed for prior / likelihood evaluation
@@ -92,7 +92,7 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 20),
-            'beta': priors.UniformPrior(0, .2),
+            # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
             },
@@ -111,8 +111,8 @@ def main(args, pool):
                 'Nmax': 7,
             #     # 'plane': 'disk',
                 'plane': 'obs',
-            #     # 'beta': 0.35,
-                'beta': 'sampled',
+                'beta': 0.17,
+                # 'beta': 'sampled',
             #     # 'index': 1,
             #     # 'b': 1,
                 }

@@ -222,7 +222,7 @@ class MCMCPars(MetaPars):
 
         pars = self.pars.copy()
 
-        return MetaPars(self._set_sampled_pars(theta_pars, pars))
+        return MCMCPars(self._set_sampled_pars(theta_pars, pars))
 
     @classmethod
     def _set_sampled_pars(cls, theta_pars, pars):

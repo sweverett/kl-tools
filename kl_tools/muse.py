@@ -110,7 +110,7 @@ class MuseDataCube(cube.DataCube):
 
         self.set_weights()
         self.set_masks()
-
+        
         return
 
     def _set_parameters(self):
@@ -175,8 +175,12 @@ class MuseDataCube(cube.DataCube):
                 raise ValueError(f'The weight array has len {l} ' +\
                                  f'but {self.Nspec=}!')
 
-        super(MuseDataCube, self).set_weights(weights)
-
+        actual_weights = 1./weights
+        bad = weights <= 0
+        if np.sum(bad) > 0:
+            actual_weights[bad] = 0
+        
+        super(MuseDataCube, self).set_weights(actual_weights)
         return
 
     def set_masks(self, masks=None, ext=2):
@@ -191,7 +195,28 @@ class MuseDataCube(cube.DataCube):
         super(MuseDataCube, self).set_masks(masks)
 
         return
+    
+    
+    def set_continuum(self,lmin_line, lmax_line, lmin_cont, lmax_cont, method='sum'):
+        '''
+        Build a 2d template for the continuum from the spectrum near the line.
+        '''
+        # Make a new cube object for the blue continuum and the red continuum.
+        lblue = lmin_cont
+        lred = lmin_line
+        args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
+        blue_cont_cube = cube.DataCube(*args,**kwargs)
+        blue_cont_template = np.sum(blue_cont_cube.data * blue_cont_cube.weights, axis=0) / np.sum(blue_cont_cube.weights, axis=0)
+        
+        lblue = lmax_line
+        lred = lmax_cont
+        args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
+        red_cont_cube = cube.DataCube(*args,**kwargs)
+        red_cont_template = np.sum(red_cont_cube.data * red_cont_cube.weights, axis=0) / np.sum(red_cont_cube.weights, axis=0)
 
+        self._continuum_template = (blue_cont_template + red_cont_template) / 2.
+        
+    
     def set_line(self, line_choice='strongest', truncate=True):
         '''
         Set the emission line actually used in an analysis of a datacube,
@@ -213,6 +238,11 @@ class MuseDataCube(cube.DataCube):
         self.lines = self.lines[line_index]
         self.pars['emission_lines'] = [self.pars['emission_lines'][line_index]]
 
+        # Estimate a continuum template
+        boxwidth = self.pars['emission_lines'][0].sed_pars['lred'] - self.pars['emission_lines'][0].sed_pars['lblue']
+        self.set_continuum(self.pars['emission_lines'][0].sed_pars['lblue'], self.pars['emission_lines'][0].sed_pars['lred'],\
+                                                self.pars['emission_lines'][0].sed_pars['lblue'] - boxwidth, \
+                                                self.pars['emission_lines'][0].sed_pars['lred'] + boxwidth)
         # create new truncated datacube around line, if desired
         if truncate is True:
             lblue = self.pars['emission_lines'][0].sed_pars['lblue']

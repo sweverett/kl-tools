@@ -71,7 +71,7 @@ def main(args, pool):
         'v0',
         'vcirc',
         'rscale',
-        # 'beta'
+        #'beta'
         ]
 
     # additional args needed for prior / likelihood evaluation
@@ -81,14 +81,14 @@ def main(args, pool):
             'r_unit': Unit('kpc')
             },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.3, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.3, clip_sigmas=2),
+            'g1': priors.UniformPrior(-0.01,0.01),#priors.GaussPrior(0., 0.03, clip_sigmas=2),
+            'g2': priors.UniformPrior(-0.01,0.01),#priors.GaussPrior(0., 0.05, clip_sigmas=2),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
             'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
+            'vcirc': priors.UniformPrior(0, 400),# clip_sigmas=2),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 20),
@@ -108,7 +108,7 @@ def main(args, pool):
             # 'basis_type': 'sersiclets',
             'basis_type': 'exp_shapelets',
             'basis_kwargs': {
-                'Nmax': 7,
+                'Nmax': 21,
             #     # 'plane': 'disk',
                 'plane': 'obs',
                 'beta': 0.17,

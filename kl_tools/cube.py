@@ -221,7 +221,7 @@ class DataCube(DataVector):
             self.masks = np.zeros(self.shape)
 
         self._construct_slice_list()
-
+        self._continuum_template = None
         return
 
     def _check_shape_params(self):
@@ -382,6 +382,13 @@ class DataCube(DataVector):
         self._set_maps(masks, 'masks')
 
         return
+
+    def get_continuum(self):
+        if self._continuum_template is None:
+            raise AttributeError('Need to have set calculate a template ' +\
+                                 'for the continuum first')
+
+        return self._continuum_template
 
     def copy(self):
         return deepcopy(self)

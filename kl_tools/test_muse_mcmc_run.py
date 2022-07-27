@@ -71,7 +71,7 @@ def main(args, pool):
         'v0',
         'vcirc',
         'rscale',
-        # 'beta'
+        #'beta'
         ]
 
     # additional args needed for prior / likelihood evaluation
@@ -111,7 +111,7 @@ def main(args, pool):
             # 'basis_type': 'sersiclets',
             'basis_type': 'exp_shapelets',
             'basis_kwargs': {
-                'Nmax': 7,
+                'Nmax': 21,
             #     # 'plane': 'disk',
                 'plane': 'obs',
                 'beta': 0.17,

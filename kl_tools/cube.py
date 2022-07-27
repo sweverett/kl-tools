@@ -386,6 +386,28 @@ class DataCube(DataVector):
     def copy(self):
         return deepcopy(self)
 
+    def get_inv_cov_list(self):
+        '''
+        Build inverse covariance matrices for slice images
+
+        returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
+        '''
+
+        Nspec = self.Nspec
+        Npix = self.Nx * self.Ny
+
+        weights = self.weights
+
+        inv_cov_list = []
+        for i in range(Nspec):
+            inv_var = (weights[i]**2).reshape(Npix)
+            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
+            inv_cov_list.append(inv_cov)
+
+        return inv_cov_list
+
+        return
+
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
         radius: aperture radius in pixels

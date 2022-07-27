@@ -278,6 +278,20 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # One way to handle the emission line continuum is to build
+        # a template function from the datacube
+
+        col = 'use_continuum_template'
+        if col in basis_kwargs:
+            if basis_kwargs[col] is True:
+                self.continuum_template = datacube.get_continuum()
+                if self.continuum_template is None:
+                    raise AttributeError('Datacube continnuum template is None!')
+            else:
+                self.continuum_template = None
+        else:
+            self.continuum_template = None
+
         # often useful to have a correct basis function scale given
         # stacked datacube image
         # if basis_type == 'shapelets':
@@ -428,6 +442,10 @@ class IntensityMapFitter(object):
         Ndata = self.nx * self.ny
         Nbasis = self.Nbasis
 
+        # add the continuum template to design matrix if desired
+        if self.continuum_template is not None:
+            Nbasis += 1
+
         # the plane where the basis is defined
         basis_plane = self.basis.plane
 
@@ -449,9 +467,12 @@ class IntensityMapFitter(object):
             self.design_mat = np.zeros((Ndata, Nbasis))
 
         for n in range(Nbasis):
-            func, func_args = self.basis.get_basis_func(n)
-            args = [x, y, *func_args]
-            self.design_mat[:,n] = func(*args)
+            try:
+                func, func_args = self.basis.get_basis_func(n)
+                args = [x, y, *func_args]
+                self.design_mat[:,n] = func(*args)
+            except:
+                ipdb.set_trace()
 
         return
 

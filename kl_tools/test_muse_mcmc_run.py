@@ -111,6 +111,7 @@ def main(args, pool):
             # 'basis_type': 'sersiclets',
             'basis_type': 'exp_shapelets',
             'basis_kwargs': {
+                'use_continuum_template': True,
                 'Nmax': 21,
             #     # 'plane': 'disk',
                 'plane': 'obs',

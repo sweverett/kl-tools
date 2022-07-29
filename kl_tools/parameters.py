@@ -1,3 +1,4 @@
+from copy import deepcopy
 import utils
 
 import pudb
@@ -45,7 +46,7 @@ class Pars(object):
 
         pars_order = dict(zip(sampled_pars, range(len(sampled_pars))))
         self.sampled = SampledPars(pars_order)
-        self.meta = MetaPars(meta_pars)
+        self.meta = MCMCPars(meta_pars)
 
         return
 
@@ -59,7 +60,7 @@ class Pars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return Pars(self.sampled.copy(), self.meta.copy())
+        return Pars(deepcopy(self.sampled), deepcopy(self.meta))
 
 class SampledPars(object):
     '''
@@ -129,7 +130,7 @@ class SampledPars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return SampledPars(self.pars_order.copy())
+        return SampledPars(deepcopy(self.pars_order))
 
 class MetaPars(object):
     '''
@@ -138,7 +139,7 @@ class MetaPars(object):
     MCMC, etc.
     '''
 
-    _req_fields = None
+    _req_fields = []
 
     def __init__(self, pars):
         '''
@@ -188,7 +189,7 @@ class MetaPars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return MetaPars(self.pars.copy())
+        return MetaPars(deepcopy(self.pars))
 
     def keys(self):
         return self.pars.keys()
@@ -207,7 +208,8 @@ class MCMCPars(MetaPars):
     choices, etc.
     '''
 
-    _req_fields = ['intensity', 'priors']
+    _req_fields = ['intensity', 'priors', 'units']
+    _opt_fields = ['run_options']
 
     def copy_with_sampled_pars(self, theta_pars):
         '''
@@ -219,9 +221,9 @@ class MCMCPars(MetaPars):
             map and the tranformation matrices
         '''
 
-        pars = self.pars.copy()
+        pars = deepcopy(self.pars)
 
-        return MetaPars(self._set_sampled_pars(theta_pars, pars))
+        return MCMCPars(self._set_sampled_pars(theta_pars, pars))
 
     @classmethod
     def _set_sampled_pars(cls, theta_pars, pars):

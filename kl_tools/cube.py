@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import numpy as np
+from scipy.sparse import identity, dia_matrix
 import fitsio
 from astropy.io import fits
 import astropy.units as u
@@ -15,7 +16,7 @@ from argparse import ArgumentParser
 import utils
 import parameters
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 
@@ -60,6 +61,11 @@ class CubePars(parameters.MetaPars):
         '''
         Build a bandpass list from pars if not provided directly
         '''
+
+        # sometimes it is already set in the parameter dict
+        if 'bandpasses' in self.pars:
+            self._bandpasses = self.pars['bandpasses']
+            return self._bandpasses
 
         if (self._bandpasses is not None) and (remake is False):
             return self._bandpasses
@@ -216,7 +222,7 @@ class DataCube(DataVector):
             self.masks = np.zeros(self.shape)
 
         self._construct_slice_list()
-
+        self._continuum_template = None
         return
 
     def _check_shape_params(self):
@@ -274,19 +280,25 @@ class DataCube(DataVector):
 
         return datacube
 
-    @property
-    def sed(self):
-        if 'sed' in self.pars:
-            return self.pars['sed']
-        else:
-            raise AttributeError('SED never set for datacube!')
+    def get_sed(self, line_index=None):
+        try:
+            if line_index is None:
+                if len(self.pars['emission_lines']) == 1:
+                    line_index = 0
+                else:
+                    raise ValueError('Must pass a line_index if more than ' +\
+                                     'one line are stored!')
+
+            return self.pars['emission_lines'][line_index].sed
+        except KeyError:
+            raise AttributeError('Emission lines never set for datacube!')
 
     @property
     def data(self):
         return self._data
 
     def slice(self, indx):
-        return self.slices[indx].data
+        return self.slices[indx]
 
     def stack(self):
         return np.sum(self._data, axis=0)
@@ -372,8 +384,35 @@ class DataCube(DataVector):
 
         return
 
+    def get_continuum(self):
+        if self._continuum_template is None:
+            raise AttributeError('Need to have set calculate a template ' +\
+                                 'for the continuum first')
+
+        return self._continuum_template
+
     def copy(self):
         return deepcopy(self)
+
+    def get_inv_cov_list(self):
+        '''
+        Build inverse covariance matrices for slice images
+
+        returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
+        '''
+
+        Nspec = self.Nspec
+        Npix = self.Nx * self.Ny
+
+        weights = self.weights
+
+        inv_cov_list = []
+        for i in range(Nspec):
+            inv_var = (weights[i]**2).reshape(Npix)
+            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
+            inv_cov_list.append(inv_cov)
+
+        return inv_cov_list
 
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''
@@ -529,28 +568,21 @@ class DataCube(DataVector):
         trunc_masks = self.masks[cut,:,:]
 
         # Have to do it this way as lists cannot be indexed by np arrays
-        # trunc_bandpasses = self.bandpasses[cut]
-        trunc_bandpasses = [self.bandpasses[i]
-                            for i in range(self.Nspec)
-                            if cut[i] == True]
-
-        trunc_pars_dict = {
-            'pix_scale': self.pix_scale,
-            'bandpasses': trunc_bandpasses
-        }
-        trunc_pars = CubePars(trunc_pars_dict)
+        self.pars['bandpasses'] = [self.bandpasses[i]
+                                   for i in range(self.Nspec)
+                                   if cut[i] == True]
 
         if trunc_type == 'in-place':
             self.__init__(
                 trunc_data,
-                pars=trunc_pars,
+                pars=self.pars,
                 weights=trunc_weights,
                 masks=trunc_masks,
             )
         elif trunc_type == 'return-args':
             args = [trunc_data]
             kwargs = {
-                'pars': trunc_pars,
+                'pars': self.pars,
                 'weights': trunc_weights,
                 'masks': trunc_masks
             }
@@ -815,13 +847,13 @@ def main(args):
     lambda_range = le - li
     blue_cut = li + 0.25*lambda_range + 0.5
     red_cut  = li + 0.75*lambda_range - 0.5
-    test_cube.truncate(blue_cut, red_cut, trunc_type='center')
+    test_cube.truncate(blue_cut, red_cut, cut_type='center')
     nslices_cen = len(test_cube.slices)
     print(f'----Truncation resulted in {nslices_cen} slices')
 
     print('Testing DataCube truncation on slice edges')
     test_cube = cube.copy()
-    test_cube.truncate(blue_cut, red_cut, trunc_type='edge')
+    test_cube.truncate(blue_cut, red_cut, cut_type='edge')
     nslices_edg = len(test_cube.slices)
     print(f'----Truncation resulted in {nslices_edg} slices')
 

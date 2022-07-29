@@ -516,7 +516,7 @@ class KLensZeusRunner(ZeusRunner):
         return
 
     def compare_MAP_to_data(self, show=True, close=True, outfile=None,
-                            size=(16,5)):
+                            size=(24,5)):
         '''
         For this subclass, have guaranteed access to datacube
         '''
@@ -529,7 +529,7 @@ class KLensZeusRunner(ZeusRunner):
         # gather needed components to evaluate model
         datacube = self.datacube
         lambdas = datacube.lambdas
-        sed_array = DataCubeLikelihood._setup_sed(self.pars.meta.pars)
+        sed_array = DataCubeLikelihood._setup_sed(datacube)
         vmap = self.MAP_vmap
         imap = self.MAP_imap
 

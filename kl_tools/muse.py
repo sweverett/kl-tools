@@ -6,6 +6,7 @@ import os
 import pickle
 import fitsio
 from astropy.table import Table
+from scipy.sparse import identity, dia_matrix
 import matplotlib.pyplot as plt
 import galsim as gs
 import pathlib
@@ -15,6 +16,7 @@ import astropy.units as u
 from argparse import ArgumentParser
 
 import utils
+from emission import EmissionLine, LINE_LAMBDAS
 
 import ipdb
 
@@ -71,7 +73,7 @@ class MuseDataCube(cube.DataCube):
         dlam = np.append(dlam,dlam[-1]) # array of spaxel widths
         bandpasses = [gs.Bandpass(
             1.0, 'A', blue_limit=il-dl, red_limit=il+dl, zeropoint=22.5
-            ) for il,dl in zip(self.spec1d['WAVE_VAC'], dlam)]
+            ) for il,dl in zip(self.spec1d['WAVE_VAC'], dlam/2.)]
 
         pars_dict = {
             'pix_scale': pix_scale,
@@ -121,21 +123,41 @@ class MuseDataCube(cube.DataCube):
         clean up later
         '''
 
-        self.pars = {}
         self.pars['z'] = self.obj_data['Z']
 
         # some are set later
-        self.pars['sed'] = {
+        self.pars['specs'] = {
             # A guess, based on throughput here:
             # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
             'throughput': 0.2,
-            'resolution': 3000.,
-            'lblue': None,
-            'lred': None
+            'resolution': 3200.,
         }
 
         Nlines = len(self.lines)
-        self.pars['emission_lines'] = zip(self.lines['IDENT'], range(Nlines))
+
+        z = float(self.pars['z'])
+        R = self.pars['specs']['resolution']
+        lines = []
+        for line in self.lines:
+            # TODO: We should investigate whether to use LAMBDA_SN directly,
+            # or even marginalize over z
+            line_lambda = LINE_LAMBDAS[line['IDENT']]
+
+            line_pars = {
+                'value': line_lambda.value * (1.+z),
+                'std': line_lambda.value * (1.+z) / R,
+                'unit': line_lambda.unit
+            }
+            # will be updated later
+            sed_pars = {
+                'lblue': float(line['LAMBDA_NB_MIN']),
+                'lred': float(line['LAMBDA_NB_MAX']),
+                'resolution': 0.1, # angstroms
+                'unit': line_lambda.unit
+            }
+            lines.append(EmissionLine(line_pars, sed_pars))
+
+        self.pars['emission_lines'] = lines
 
         return
 
@@ -153,7 +175,14 @@ class MuseDataCube(cube.DataCube):
                 raise ValueError(f'The weight array has len {l} ' +\
                                  f'but {self.Nspec=}!')
 
-        super(MuseDataCube, self).set_weights(weights)
+        # MUSE wgt maps are actually sky background, so take inverse
+        # and handle bad weights
+        actual_weights = 1./weights
+        bad = weights <= 0
+        if np.sum(bad) > 0:
+            actual_weights[bad] = 0
+
+        super(MuseDataCube, self).set_weights(actual_weights)
 
         return
 
@@ -167,6 +196,28 @@ class MuseDataCube(cube.DataCube):
             masks = fitsio.read(self.cubefile, ext=2)
 
         super(MuseDataCube, self).set_masks(masks)
+
+        return
+
+    def set_continuum(self,lmin_line, lmax_line, lmin_cont, lmax_cont, method='sum'):
+        '''
+        Build a 2d template for the continuum from the spectrum near the line.
+        '''
+
+        # Make a new cube object for the blue continuum and the red continuum.
+        lblue = lmin_cont
+        lred = lmin_line
+        args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
+        blue_cont_cube = cube.DataCube(*args,**kwargs)
+        blue_cont_template = np.sum(blue_cont_cube.data * blue_cont_cube.weights, axis=0) / np.sum(blue_cont_cube.weights, axis=0)
+
+        lblue = lmax_line
+        lred = lmax_cont
+        args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
+        red_cont_cube = cube.DataCube(*args,**kwargs)
+        red_cont_template = np.sum(red_cont_cube.data * red_cont_cube.weights, axis=0) / np.sum(red_cont_cube.weights, axis=0)
+
+        self._continuum_template = (blue_cont_template + red_cont_template) / 2.
 
         return
 
@@ -189,17 +240,29 @@ class MuseDataCube(cube.DataCube):
 
         # update all line-related meta data
         self.lines = self.lines[line_index]
-        self.pars['emission_lines'] = (self.lines['IDENT'], 0)
+        self.pars['emission_lines'] = [self.pars['emission_lines'][line_index]]
 
-        lblue = float(self.lines['LAMBDA_NB_MIN'])
-        lred = float(self.lines['LAMBDA_NB_MAX'])
-        self.pars['sed']['lblue'] = lblue
-        self.pars['sed']['lred'] = lred
+        # Estimate a continuum template
+        boxwidth = self.pars['emission_lines'][0].sed_pars['lred'] -\
+                   self.pars['emission_lines'][0].sed_pars['lblue']
+        self.set_continuum(
+            self.pars['emission_lines'][0].sed_pars['lblue'],
+            self.pars['emission_lines'][0].sed_pars['lred'],
+            self.pars['emission_lines'][0].sed_pars['lblue'] - boxwidth,
+            self.pars['emission_lines'][0].sed_pars['lred'] + boxwidth
+            )
+
+        # have to store it temporarily, and then set it after truncation
+        continuum_template = self._continuum_template
 
         # create new truncated datacube around line, if desired
         if truncate is True:
+            lblue = self.pars['emission_lines'][0].sed_pars['lblue']
+            lred = self.pars['emission_lines'][0].sed_pars['lred']
             args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
             super(MuseDataCube, self).__init__(*args, **kwargs)
+
+            self._continuum_template = continuum_template
 
         return
 

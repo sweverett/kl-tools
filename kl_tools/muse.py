@@ -266,6 +266,28 @@ class MuseDataCube(cube.DataCube):
 
         return
 
+    def get_inv_cov_list(self):
+        '''
+        Build inverse covariance matrices for slice images
+
+        returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
+        '''
+
+        # MUSE weight maps are really sky background, so we'll
+        # take the inverse squared
+        Nspec = self.Nspec
+        Npix = self.Nx * self.Ny
+
+        weights = self.weights
+
+        inv_cov_list = []
+        for i in range(Nspec):
+            inv_var = ((1. / weights[i])**2).reshape(Npix)
+            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
+            inv_cov_list.append(inv_cov)
+
+        return inv_cov_list
+
 def main(args):
 
     testdir = utils.get_test_dir()

@@ -63,7 +63,7 @@ class CubePars(parameters.MetaPars):
         '''
 
         # sometimes it is already set in the parameter dict
-        if 'bandpasses' in self.pars:
+        if ('bandpasses' in self.pars) and (self._bandpasses is None):
             self._bandpasses = self.pars['bandpasses']
             return self._bandpasses
 

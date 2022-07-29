@@ -297,7 +297,7 @@ class DataCube(DataVector):
         return self._data
 
     def slice(self, indx):
-        return self.slices[indx].data
+        return self.slices[indx]
 
     def stack(self):
         return np.sum(self._data, axis=0)
@@ -576,7 +576,7 @@ class DataCube(DataVector):
         if trunc_type == 'in-place':
             self.__init__(
                 trunc_data,
-                pars=pars,
+                pars=self.pars,
                 weights=trunc_weights,
                 masks=trunc_masks,
             )

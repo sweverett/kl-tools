@@ -1,3 +1,4 @@
+from copy import deepcopy
 import utils
 
 import pudb
@@ -59,7 +60,7 @@ class Pars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return Pars(self.sampled.copy(), self.meta.copy())
+        return Pars(deepcopy(self.sampled), deepcopy(self.meta))
 
 class SampledPars(object):
     '''
@@ -129,7 +130,7 @@ class SampledPars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return SampledPars(self.pars_order.copy())
+        return SampledPars(deepcopy(self.pars_order))
 
 class MetaPars(object):
     '''
@@ -188,7 +189,7 @@ class MetaPars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return MetaPars(self.pars.copy())
+        return MetaPars(deepcopy(self.pars))
 
     def keys(self):
         return self.pars.keys()
@@ -220,7 +221,7 @@ class MCMCPars(MetaPars):
             map and the tranformation matrices
         '''
 
-        pars = self.pars.copy()
+        pars = deepcopy(self.pars)
 
         return MCMCPars(self._set_sampled_pars(theta_pars, pars))
 

@@ -1,6 +1,7 @@
 from abc import abstractmethod
 import numpy as np
 import os
+from copy import deepcopy
 from time import time
 from scipy.interpolate import interp1d
 import scipy
@@ -128,6 +129,46 @@ class LogPosterior(LogBase):
         tuple
         '''
 
+        # TODO: Generalize or remove after debugging!
+        # let's also add the fitted image, mle coefficients, & cont template
+        # image = self.log_likelihood.imap.render(None, None, None) # works bc already computed
+        # cont_template = self.log_likelihood.imap.continuum_template
+        # cont_im = self.log_likelihood.imap.fitter.mle_continuum
+        # mle_coeff = self.log_likelihood.imap.fitter.mle_coefficients
+
+        # data_im = self.datavector.stack()
+
+        # # fig, axes = plt.subplots(nrows=1, ncols=5, sharex=True, sharey=True, wspace=0)
+        # plt.subplot(151)
+        # plt.imshow(data_im, origin='lower')
+        # plt.colorbar(fraction=0.046, pad=0.04)
+        # plt.title('Stacked Datacube')
+
+        # plt.subplot(152)
+        # plt.imshow(image, origin='lower')
+        # plt.colorbar(fraction=0.046, pad=0.04)
+        # plt.title('Fit stacked image')
+
+        # plt.subplot(153)
+        # plt.imshow(cont_im, origin='lower')
+        # plt.colorbar(fraction=0.046, pad=0.04)
+        # plt.title('Fit continuum image')
+
+        # plt.subplot(154)
+        # plt.imshow(image-data_im, origin='lower')
+        # plt.colorbar(fraction=0.046, pad=0.04)
+        # plt.title('Fit image - stacked datacube')
+
+        # plt.subplot(155)
+        # plt.imshow(image-cont_im, origin='lower')
+        # plt.colorbar(fraction=0.046, pad=0.04)
+        # plt.title('Fit image - fit continuum')
+
+        # plt.gcf().set_size_inches(24,4)
+        # plt.tight_layout()
+        # plt.show()
+
+        # return (prior, likelihood, image, cont_template, mle_coeff)
         return (prior, likelihood)
 
     def __call__(self, theta, data, pars):
@@ -405,7 +446,7 @@ class DataCubeLikelihood(LogLikelihood):
         # will be fast enough with numba anyway
         for i in range(Nspec):
 
-            diff = (datacube.slice(i) - model.slice(i)).reshape(Nx*Ny)
+            diff = (datacube.slice(i).data - model.slice(i).data).reshape(Nx*Ny)
             chi2 = diff.T.dot(inv_cov[i].dot(diff))
 
             loglike += -0.5*chi2
@@ -437,6 +478,9 @@ class DataCubeLikelihood(LogLikelihood):
         # parameters
         vmap = self.setup_vmap(theta_pars)
         imap = self.setup_imap(theta_pars, datacube, self.meta)
+
+        # TODO: temp for debugging!
+        self.imap = imap
 
         try:
             use_numba = self.meta['run_options']['use_numba']
@@ -479,7 +523,7 @@ class DataCubeLikelihood(LogLikelihood):
         # being sampled over
         pars = meta.copy_with_sampled_pars(theta_pars)
 
-        imap_pars = pars['intensity'].copy()
+        imap_pars = deepcopy(pars['intensity'])
         imap_type = imap_pars['type']
         del imap_pars['type']
 

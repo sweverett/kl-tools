@@ -175,6 +175,8 @@ class MuseDataCube(cube.DataCube):
                 raise ValueError(f'The weight array has len {l} ' +\
                                  f'but {self.Nspec=}!')
 
+        # MUSE wgt maps are actually sky background, so take inverse
+        # and handle bad weights
         actual_weights = 1./weights
         bad = weights <= 0
         if np.sum(bad) > 0:
@@ -263,28 +265,6 @@ class MuseDataCube(cube.DataCube):
             self._continuum_template = continuum_template
 
         return
-
-    def get_inv_cov_list(self):
-        '''
-        Build inverse covariance matrices for slice images
-
-        returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
-        '''
-
-        # MUSE weight maps are really sky background, so we'll
-        # take the inverse squared
-        Nspec = self.Nspec
-        Npix = self.Nx * self.Ny
-
-        weights = self.weights
-
-        inv_cov_list = []
-        for i in range(Nspec):
-            inv_var = ((1. / weights[i])**2).reshape(Npix)
-            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
-            inv_cov_list.append(inv_cov)
-
-        return inv_cov_list
 
 def main(args):
 

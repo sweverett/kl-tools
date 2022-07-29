@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import numpy as np
+from scipy.sparse import identity, dia_matrix
 import fitsio
 from astropy.io import fits
 import astropy.units as u
@@ -412,8 +413,6 @@ class DataCube(DataVector):
             inv_cov_list.append(inv_cov)
 
         return inv_cov_list
-
-        return
 
     def compute_aperture_spectrum(self, radius, offset=(0,0), plot_mask=False):
         '''

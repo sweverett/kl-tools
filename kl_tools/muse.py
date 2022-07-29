@@ -73,7 +73,7 @@ class MuseDataCube(cube.DataCube):
         dlam = np.append(dlam,dlam[-1]) # array of spaxel widths
         bandpasses = [gs.Bandpass(
             1.0, 'A', blue_limit=il-dl, red_limit=il+dl, zeropoint=22.5
-            ) for il,dl in zip(self.spec1d['WAVE_VAC'], dlam)]
+            ) for il,dl in zip(self.spec1d['WAVE_VAC'], dlam/2.)]
 
         pars_dict = {
             'pix_scale': pix_scale,
@@ -110,7 +110,7 @@ class MuseDataCube(cube.DataCube):
 
         self.set_weights()
         self.set_masks()
-        
+
         return
 
     def _set_parameters(self):
@@ -130,7 +130,7 @@ class MuseDataCube(cube.DataCube):
             # A guess, based on throughput here:
             # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
             'throughput': 0.2,
-            'resolution': 3000.,
+            'resolution': 3200.,
         }
 
         Nlines = len(self.lines)

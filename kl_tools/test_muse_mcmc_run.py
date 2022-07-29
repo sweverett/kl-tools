@@ -81,10 +81,10 @@ def main(args, pool):
             'r_unit': Unit('kpc')
             },
         'priors': {
-            # 'g1': priors.GaussPrior(0., 0.3, clip_sigmas=2),
-            # 'g2': priors.GaussPrior(0., 0.3, clip_sigmas=2),
-            'g1': priors.UniformPrior(-.01, 0.01),
-            'g2': priors.UniformPrior(-.01, 0.01),
+            'g1': priors.GaussPrior(0., 0.3, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.3, clip_sigmas=2),
+            # 'g1': priors.UniformPrior(-.01, 0.01),
+            # 'g2': priors.UniformPrior(-.01, 0.01),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., 2.*np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),

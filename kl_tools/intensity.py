@@ -325,7 +325,22 @@ class BasisIntensityMap(IntensityMap):
         return
 
     def _fit_to_datacube(self, theta_pars, datacube, pars):
-        self.image = self.fitter.fit(theta_pars, datacube, pars)
+        try:
+            if pars['run_options']['remove_continuum'] is True:
+                if self.continuum_template is None:
+                    ipdb.set_trace()
+                    print('WANRING: cannot remove continuum as a ' +\
+                          'template was not provided')
+                    remove_continuum = False
+                else:
+                    remove_continuum = True
+
+        except KeyError:
+            remove_continuum = False
+
+        self.image = self.fitter.fit(
+            theta_pars, datacube, pars, remove_continuum=remove_continuum
+            )
 
         return
 
@@ -592,7 +607,7 @@ class IntensityMapFitter(object):
 
         return
 
-    def fit(self, theta_pars, datacube, pars, cov=None):
+    def fit(self, theta_pars, datacube, pars, cov=None, remove_continuum=True):
         '''
         Fit MLE of the intensity map for a given set of datacube
         slices
@@ -614,6 +629,8 @@ class IntensityMapFitter(object):
                   constant sigma, it does not contribute to the MLE. Thus
                   you should only pass cov if it is non-trivial
             TODO: This should be handled by pars in future
+        remove_continuum: bool
+            If true, remove continuum template if fitted
         '''
 
         nx, ny = self.nx, self.ny
@@ -635,19 +652,21 @@ class IntensityMapFitter(object):
 
         # Now create MLE intensity map
         if self.continuum_template is None:
-            mle_im = self.basis.render_im(theta_pars, mle_coeff)
+            used_coeff = mle_coeff
+            mle_continuum = None
         else:
             # the last mle coefficient is for the continuum template
-            im_basis = self.basis.render_im(theta_pars, mle_coeff[:-1])
-            im_continuum = mle_coeff[-1]*self.continuum_template
+            used_coeff = mle_coeff[:-1]
+            mle_continuum = mle_coeff[-1] * self.continuum_template
 
             if self.basis.is_complex is True:
-                im_continuum = im_continuum.real
+                mle_continuum = mle_continuum.real
 
-            mle_im = im_basis + im_continuum
+        mle_im = self.basis.render_im(theta_pars, used_coeff)
 
         assert mle_im.shape == (nx, ny)
         self.mle_im = mle_im
+        self.mle_continuum = mle_continuum
 
         return mle_im
 

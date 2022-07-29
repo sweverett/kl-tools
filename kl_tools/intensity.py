@@ -14,7 +14,7 @@ import likelihood
 import parameters
 from transformation import transform_coords, TransformableImage
 
-import pudb
+import ipdb
 
 '''
 This file contains a mix of IntensityMap classes for explicit definitions
@@ -278,6 +278,20 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # One way to handle the emission line continuum is to build
+        # a template function from the datacube
+        try:
+            use_cont = basis_kwargs['use_continuum_template']
+            if use_cont is True:
+                self.continuum_template = datacube.get_continuum()
+                if self.continuum_template is None:
+                    raise AttributeError('Datacube continnuum template is None!')
+            else:
+                self.continuum_template = None
+
+        except KeyError:
+            self.continuum_template = None
+
         # often useful to have a correct basis function scale given
         # stacked datacube image
         # if basis_type == 'shapelets':
@@ -301,14 +315,32 @@ class BasisIntensityMap(IntensityMap):
         return
 
     def _setup_fitter(self, basis_type, nx, ny, basis_kwargs=None):
+
         self.fitter = IntensityMapFitter(
-            basis_type, nx, ny, basis_kwargs=basis_kwargs
+            basis_type, nx, ny,
+            continuum_template=self.continuum_template,
+            basis_kwargs=basis_kwargs
             )
 
         return
 
     def _fit_to_datacube(self, theta_pars, datacube, pars):
-        self.image = self.fitter.fit(theta_pars, datacube, pars)
+        try:
+            if pars['run_options']['remove_continuum'] is True:
+                if self.continuum_template is None:
+                    ipdb.set_trace()
+                    print('WANRING: cannot remove continuum as a ' +\
+                          'template was not provided')
+                    remove_continuum = False
+                else:
+                    remove_continuum = True
+
+        except KeyError:
+            remove_continuum = False
+
+        self.image = self.fitter.fit(
+            theta_pars, datacube, pars, remove_continuum=remove_continuum
+            )
 
         return
 
@@ -362,7 +394,8 @@ class IntensityMapFitter(object):
     This base class represents an intensity map defined
     by some set of basis functions {phi_i}.
     '''
-    def __init__(self, basis_type, nx, ny, basis_kwargs=None):
+    def __init__(self, basis_type, nx, ny, continuum_template=None,
+                 basis_kwargs=None):
         '''
         basis_type: str
             The name of the basis_type type used
@@ -370,6 +403,8 @@ class IntensityMapFitter(object):
             The number of pixels in the x-axis
         ny: int
             The number of pixels in the y-ayis
+        continuum_template: numpy.ndarray
+            A template array for the object continuum
         basis_kwargs: dict
             Keyword args needed to build given basis type
         '''
@@ -383,6 +418,8 @@ class IntensityMapFitter(object):
         self.basis_type = basis_type
         self.nx = nx
         self.ny = ny
+
+        self.continuum_template = continuum_template
 
         self.grid = utils.build_map_grid(nx, ny)
 
@@ -402,15 +439,23 @@ class IntensityMapFitter(object):
             basis_kwargs['nx'] = self.nx
             basis_kwargs['ny'] = self.ny
         else:
+            # TODO: do we really want this to be the default?
             basis_kwargs = {
                 'nx': self.nx,
                 'ny': self.ny,
-                'plane': 'disk',
+                'plane': 'obs',
                 'pix_scale': self.pix_scale
                 }
 
+        if 'use_continuum_template' in basis_kwargs:
+            basis_kwargs.pop('use_continuum_template')
+
         self.basis = basis.build_basis(self.basis_type, basis_kwargs)
         self.Nbasis = self.basis.N
+
+        if self.continuum_template is not None:
+            self.Nbasis += 1
+
         self.mle_coefficients = np.zeros(self.Nbasis)
 
         return
@@ -448,10 +493,19 @@ class IntensityMapFitter(object):
         else:
             self.design_mat = np.zeros((Ndata, Nbasis))
 
-        for n in range(Nbasis):
+        for n in range(self.basis.N):
             func, func_args = self.basis.get_basis_func(n)
             args = [x, y, *func_args]
             self.design_mat[:,n] = func(*args)
+
+        # handle continuum template separately
+        if self.continuum_template is not None:
+            template = self.continuum_template.reshape(Ndata)
+
+            # make sure we aren't overriding anything
+            assert (self.basis.N + 1) == self.Nbasis
+            assert np.sum(self.design_mat[:,-1]) == 0
+            self.design_mat[:,-1] = template
 
         return
 
@@ -553,7 +607,7 @@ class IntensityMapFitter(object):
 
         return
 
-    def fit(self, theta_pars, datacube, pars, cov=None):
+    def fit(self, theta_pars, datacube, pars, cov=None, remove_continuum=True):
         '''
         Fit MLE of the intensity map for a given set of datacube
         slices
@@ -575,6 +629,8 @@ class IntensityMapFitter(object):
                   constant sigma, it does not contribute to the MLE. Thus
                   you should only pass cov if it is non-trivial
             TODO: This should be handled by pars in future
+        remove_continuum: bool
+            If true, remove continuum template if fitted
         '''
 
         nx, ny = self.nx, self.ny
@@ -595,10 +651,22 @@ class IntensityMapFitter(object):
         self.mle_coefficients = mle_coeff
 
         # Now create MLE intensity map
-        mle_im = self.basis.render_im(theta_pars, mle_coeff)
+        if self.continuum_template is None:
+            used_coeff = mle_coeff
+            mle_continuum = None
+        else:
+            # the last mle coefficient is for the continuum template
+            used_coeff = mle_coeff[:-1]
+            mle_continuum = mle_coeff[-1] * self.continuum_template
+
+            if self.basis.is_complex is True:
+                mle_continuum = mle_continuum.real
+
+        mle_im = self.basis.render_im(theta_pars, used_coeff)
 
         assert mle_im.shape == (nx, ny)
         self.mle_im = mle_im
+        self.mle_continuum = mle_continuum
 
         return mle_im
 

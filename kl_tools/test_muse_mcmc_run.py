@@ -86,15 +86,15 @@ def main(args, pool):
             'g1': priors.UniformPrior(-.01, 0.01),
             'g2': priors.UniformPrior(-.01, 0.01),
             # 'theta_int': priors.UniformPrior(0., np.pi),
-            'theta_int': priors.UniformPrior(0., np.pi),
+            'theta_int': priors.UniformPrior(0., 2.*np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
-            'sini': priors.UniformPrior(-1, 1.),
+            'sini': priors.UniformPrior(0, 1.),
             'v0': priors.UniformPrior(0, 20),
             # 'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
-            'vcirc': priors.UniformPrior(0, 400),
+            'vcirc': priors.UniformPrior(0, 800),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
-            'rscale': priors.UniformPrior(0, 20),
+            'rscale': priors.UniformPrior(0, 40),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
@@ -112,7 +112,7 @@ def main(args, pool):
             'basis_type': 'exp_shapelets',
             'basis_kwargs': {
                 'use_continuum_template': True,
-                'Nmax': 21,
+                'Nmax': 7,
             #     # 'plane': 'disk',
                 'plane': 'obs',
                 'beta': 0.17,
@@ -124,6 +124,7 @@ def main(args, pool):
         # 'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=1), # fwhm in pixels
         'run_options': {
+            'remove_continuum': True,
             'use_numba': False
             }
     }
@@ -249,11 +250,15 @@ def main(args, pool):
     elif sampler == 'zeus':
         blobs = runner.sampler.get_blobs()
 
-    outfile = os.path.join(outdir, 'chain-probabilities.pkl')
+    outfile = os.path.join(outdir, 'chain-blob.pkl')
     print(f'Saving prior & likelihood values to {outfile}')
     data = {
         'prior': blobs[:,:,0],
-        'likelihood': blobs[:,:,1]
+        'likelihood': blobs[:,:,1],
+        # TODO: generalize or remove after debugging!
+        # 'image': blobs[:,:,2],
+        # 'cont_template': blobs[:,:,3],
+        # 'mle_coeff': blobs[:,:,4],
     }
     with open(outfile, 'wb') as f:
         pickle.dump(data, f)

@@ -546,7 +546,9 @@ class KLensZeusRunner(ZeusRunner):
 
         # compute intensity map from MAP
         # TODO: Eventually this should be called like vmap
-        intensity = imap.render(theta_pars, datacube, self.pars.meta.pars)
+        intensity, continuum = imap.render(
+            theta_pars, datacube, self.pars.meta.pars, im_type='both'
+            )
 
         Nspec = datacube.Nspec
 
@@ -567,7 +569,7 @@ class KLensZeusRunner(ZeusRunner):
             # second, model
             ax = axs[1,i]
             model = DataCubeLikelihood._compute_slice_model(
-                lambdas[i], sed_array, zfactor, intensity
+                lambdas[i], sed_array, zfactor, intensity, continuum
                 )
             im = ax.imshow(model, origin='lower')
             if i == 0:

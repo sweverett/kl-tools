@@ -52,7 +52,10 @@ class IntensityMap(object):
         self.nx = nx
         self.ny = ny
 
+        # we make a distinction between the intensity coming from emissoin
+        # vs the continuum
         self.image = None
+        self.continuum = None
 
         # some intensity maps will not change per sample, but in general
         # they might
@@ -60,8 +63,11 @@ class IntensityMap(object):
 
         return
 
-    def render(self, theta_pars, datacube, pars, redo=False):
+    def render(self, theta_pars, datacube, pars, redo=False,
+               im_type='emission'):
         '''
+        Render an image of the emission line intensity
+
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
@@ -71,18 +77,27 @@ class IntensityMap(object):
         redo: bool
             Set to remake rendered image regardless of whether
             it is already internally stored
+        im_type: str
+            Can set to either `emission`, `continuum`, or `both`
 
-        return: np.ndarray
-            The rendered intensity map
+        return: np.ndarray, tuple
+            The rendered intensity map (emission, continuum, or both)
         '''
 
         # only render if it has not been computed yet, or if
         # explicitly asked
-        if self.image is not None:
-            if redo is False:
-                return self.image
+        if (self.image is None) or (redo is True):
+            self._render(theta_pars, datacube, pars)
 
-        return self._render(theta_pars, datacube, pars)
+        if im_type == 'emission':
+            return self.image
+        elif im_type == 'continuum':
+            return self.continuum
+        elif im_type == 'both':
+            return self.image, self.continuum
+        else:
+            raise ValueError('im_type can only be one of ' +\
+                             'emission, continuum, or both!')
 
     @abstractmethod
     def _render(self, theta_pars, datacube, pars):
@@ -343,7 +358,6 @@ class BasisIntensityMap(IntensityMap):
         try:
             if pars['run_options']['remove_continuum'] is True:
                 if self.continuum_template is None:
-                    ipdb.set_trace()
                     print('WANRING: cannot remove continuum as a ' +\
                           'template was not provided')
                     remove_continuum = False
@@ -353,7 +367,7 @@ class BasisIntensityMap(IntensityMap):
         except KeyError:
             remove_continuum = False
 
-        self.image = self.fitter.fit(
+        self.image, self.continuum = self.fitter.fit(
             theta_pars, datacube, pars, remove_continuum=remove_continuum
             )
 
@@ -362,16 +376,21 @@ class BasisIntensityMap(IntensityMap):
     def get_basis(self):
         return self.fitter.basis
 
-    def render(self, theta_pars, datacube, pars, redo=False):
+    def render(self, theta_pars, datacube, pars, redo=False,
+               im_type='emission'):
+        '''
+        see IntensityMap.render()
+        '''
+
         return super(BasisIntensityMap, self).render(
-            theta_pars, datacube, pars, redo=redo
+            theta_pars, datacube, pars, redo=redo, im_type=im_type
             )
 
     def _render(self, theta_pars, datacube, pars):
 
         self._fit_to_datacube(theta_pars, datacube, pars)
 
-        return self.image
+        return
 
 def get_intensity_types():
     return INTENSITY_TYPES
@@ -683,7 +702,7 @@ class IntensityMapFitter(object):
         self.mle_im = mle_im
         self.mle_continuum = mle_continuum
 
-        return mle_im
+        return mle_im, mle_continuum
 
     def _fit_mle_coeff(self, data, cov=None):
         '''

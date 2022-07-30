@@ -504,10 +504,13 @@ class DataCubeLikelihood(LogLikelihood):
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
 
-        i_array = imap.render(theta_pars, datacube, self.meta)
+        # get both the emission line and continuum image
+        i_array, cont_array = imap.render(
+            theta_pars, datacube, self.meta, im_type='both'
+            )
 
         model_datacube = self._construct_model_datacube(
-            theta_pars, v_array, i_array, datacube
+            theta_pars, v_array, i_array, cont_array, datacube
             )
 
         return model_datacube
@@ -582,7 +585,8 @@ class DataCubeLikelihood(LogLikelihood):
 
         return
 
-    def _construct_model_datacube(self, theta_pars, v_array, i_array, datacube):
+    def _construct_model_datacube(self, theta_pars, v_array, i_array,
+                                  cont_array, datacube):
         '''
         Create the model datacube from model slices, using the evaluated
         velocity and intensity maps, SED, etc.
@@ -595,6 +599,8 @@ class DataCubeLikelihood(LogLikelihood):
             (Must be normalzied)
         i_array: np.array (2D)
             The imap evaluated at image pixel positions for sampled pars
+        cont_array: np.array (2D)
+            The imap of the fitted or modeled continuum
         datacube: DataCube
             Datavector datacube truncated to desired lambda bounds
         '''
@@ -611,7 +617,7 @@ class DataCubeLikelihood(LogLikelihood):
             zfactor = 1. / (1 + v_array)
 
             obs_array = self._compute_slice_model(
-                lambdas[i], sed_array, zfactor, i_array
+                lambdas[i], sed_array, zfactor, i_array, cont_array
             )
 
             # NB: here you could do something fancier, such as a
@@ -628,7 +634,7 @@ class DataCubeLikelihood(LogLikelihood):
         return model_datacube
 
     @classmethod
-    def _compute_slice_model(cls, lambdas, sed, zfactor, imap):
+    def _compute_slice_model(cls, lambdas, sed, zfactor, imap, continuum):
         '''
         Compute datacube slice given lambda range, sed, redshift factor
         per pixel, and the intemsity map
@@ -644,8 +650,10 @@ class DataCubeLikelihood(LogLikelihood):
             A 2D numpy array corresponding to the (normalized by c) velocity
             map at each pixel
         imap: np.ndarray (2D)
-            A 2D numpy array corresponding to the source intensity map
+            An array corresponding to the source intensity map
             at the emission line
+        imap: np.ndarray (2D)
+            An array corresponding to the continuum model
         '''
 
         lblue, lred = lambdas[0], lambdas[1]
@@ -660,6 +668,10 @@ class DataCubeLikelihood(LogLikelihood):
         mean_sed = (sed_b + sed_r) / 2.
         int_sed = (lred - lblue) * mean_sed
         model = imap * int_sed
+
+        # for now, continuum is modeled as lambda-independent
+        if continuum is not None:
+            model += continuum
 
         return model
 

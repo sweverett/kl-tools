@@ -221,8 +221,11 @@ class DataCube(DataVector):
         else:
             self.masks = np.zeros(self.shape)
 
-        self._construct_slice_list()
         self._continuum_template = None
+
+        # only create slice list when requested, to save time in MCMC sampling
+        self.slice_list = None
+
         return
 
     def _check_shape_params(self):
@@ -236,8 +239,15 @@ class DataCube(DataVector):
 
         return
 
+    @property
+    def slices(self):
+        if self.slice_list is None:
+            self._construct_slice_list()
+
+        return self.slice_list
+
     def _construct_slice_list(self):
-        self.slices = SliceList()
+        self.slice_list = SliceList()
 
         for i in range(self.Nspec):
             bp = self.bandpasses[i]
@@ -280,7 +290,16 @@ class DataCube(DataVector):
 
         return datacube
 
-    def get_sed(self, line_index=None):
+    def get_sed(self, line_index=None, line_pars_update=None):
+        '''
+        Get emission line SED, or modify if needed
+
+        line_index: int
+            The index of the desired emission line
+        line_pars_update: dict
+            Any differences to the internally stored line_pars in the datacube
+            emission line. Useful when sampling over SED parameters
+        '''
         try:
             if line_index is None:
                 if len(self.pars['emission_lines']) == 1:
@@ -289,7 +308,17 @@ class DataCube(DataVector):
                     raise ValueError('Must pass a line_index if more than ' +\
                                      'one line are stored!')
 
-            return self.pars['emission_lines'][line_index].sed
+            line = self.pars['emission_lines'][line_index]
+            if line_pars_update is None:
+                sed = line.sed
+            else:
+                line_pars = deepcopy(line.line_pars)
+                line_pars.update(line_pars_update)
+                sed_pars = line.sed_pars
+                sed = line._build_sed(line_pars, sed_pars)
+
+            return sed
+
         except KeyError:
             raise AttributeError('Emission lines never set for datacube!')
 

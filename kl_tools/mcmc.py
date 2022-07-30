@@ -526,10 +526,12 @@ class KLensZeusRunner(ZeusRunner):
                   'with default parameters')
             self.compute_MAP()
 
+        theta_pars = self.pars.theta2pars(self.MAP_medians)
+
         # gather needed components to evaluate model
         datacube = self.datacube
         lambdas = datacube.lambdas
-        sed_array = DataCubeLikelihood._setup_sed(datacube)
+        sed_array = DataCubeLikelihood._setup_sed(theta_pars, datacube)
         vmap = self.MAP_vmap
         imap = self.MAP_imap
 
@@ -544,7 +546,6 @@ class KLensZeusRunner(ZeusRunner):
 
         # compute intensity map from MAP
         # TODO: Eventually this should be called like vmap
-        theta_pars = self.pars.theta2pars(self.MAP_medians)
         intensity = imap.render(theta_pars, datacube, self.pars.meta.pars)
 
         Nspec = datacube.Nspec

@@ -54,6 +54,10 @@ class IntensityMap(object):
 
         self.image = None
 
+        # some intensity maps will not change per sample, but in general
+        # they might
+        self.is_static = False
+
         return
 
     def render(self, theta_pars, datacube, pars, redo=False):
@@ -150,6 +154,9 @@ class InclinedExponential(IntensityMap):
 
         self.flux = pars['flux']
         self.hlr = pars['hlr']
+
+        # same as default, but to make it explicit
+        self.is_static = False
 
         return
 
@@ -309,6 +316,14 @@ class BasisIntensityMap(IntensityMap):
         self.basis_kwargs = basis_kwargs
 
         self._setup_fitter(basis_type, nx, ny, basis_kwargs=basis_kwargs)
+
+        # at this stage we now know whether the imap will change per sample
+        if self.fitter.basis.plane == 'obs':
+            self.is_static = True
+        else:
+            # any other plane for the basis definition will make the fitted
+            # imap depend on the sample draw
+            self.is_static = False
 
         self.image = None
 

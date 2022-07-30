@@ -51,6 +51,9 @@ class LogBase(object):
         utils.check_type(parameters, 'pars', Pars)
         utils.check_type(datavector, 'datavector', DataVector)
 
+        # add an internal field to the meta pars dictionary
+        parameters.meta['_likelihood'] = {}
+
         self.parameters = parameters
         self.datavector = datavector
 
@@ -104,7 +107,7 @@ class LogPosterior(LogBase):
         '''
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
-            run, including SampledPars and MetaPars
+            run, including SampledPars and MCMCPars
         datavector: DataCube, etc.
             Arbitrary data vector that subclasses from DataVector.
             If DataCube, truncated to desired lambda bounds
@@ -346,18 +349,27 @@ class LogLikelihood(LogBase):
         return VelocityMap(model_name, vmodel)
 
     @classmethod
-    def _setup_sed(cls, datacube):
+    def _setup_sed(cls, theta_pars, datacube):
         '''
         numba can't handle most interpolators, so create
         a numpy one
-
-        meta: MetaPars
         '''
+
+        # if we are marginalizing over SED pars, modify stored
+        # SED with the sample
+        line_pars_update = {}
+
+        for par in ['z', 'R']:
+            if par in theta_pars:
+                line_pars_update[par] = theta_pars[par]
+
+        if len(line_pars_update) == 0:
+            line_pars_update = None
 
         # NOTE: Right now, this will error if more than one
         # emission lines are stored (as we don't have a line
         # index to pass here), but can improve in future
-        sed = datacube.get_sed()
+        sed = datacube.get_sed(line_pars_update=line_pars_update)
 
         return np.array([sed.x, sed.y])
 
@@ -446,7 +458,7 @@ class DataCubeLikelihood(LogLikelihood):
         # will be fast enough with numba anyway
         for i in range(Nspec):
 
-            diff = (datacube.slice(i).data - model.slice(i).data).reshape(Nx*Ny)
+            diff = (datacube.data[i] - model.data[i]).reshape(Nx*Ny)
             chi2 = diff.T.dot(inv_cov[i].dot(diff))
 
             loglike += -0.5*chi2
@@ -477,7 +489,7 @@ class DataCubeLikelihood(LogLikelihood):
         # create 2D velocity & intensity maps given sampled transformation
         # parameters
         vmap = self.setup_vmap(theta_pars)
-        imap = self.setup_imap(theta_pars, datacube, self.meta)
+        imap = self.setup_imap(theta_pars, datacube)
 
         # TODO: temp for debugging!
         self.imap = imap
@@ -495,28 +507,46 @@ class DataCubeLikelihood(LogLikelihood):
         i_array = imap.render(theta_pars, datacube, self.meta)
 
         model_datacube = self._construct_model_datacube(
-            v_array, i_array, datacube
+            theta_pars, v_array, i_array, datacube
             )
 
         return model_datacube
 
-    def setup_imap(self, theta_pars, datacube, meta):
+    def setup_imap(self, theta_pars, datacube):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
-        pars: MetaPars
-            A dict of anything else needed to compute the posterior
-        model_name: str
-            The model name to use when constructing the velocity map
+        datacube: DataCube
+            Datavector datacube truncated to desired lambda bounds
         '''
 
-        return self._setup_imap(theta_pars, datacube, meta)
+        # In some instances, the intensity  map will not change
+        # between samples
+        try:
+            static_imap = self.meta['_likelihood']['static_imap']
+        except KeyError:
+            static_imap = False
+
+        if static_imap is True:
+            if self.meta['_likelihood']['static_imap'] is True:
+                return self.meta['_likelihood']['imap']
+
+        # if not (or it is the first sample), generate imap and then
+        # check if it will be static
+        imap = self._setup_imap(theta_pars, datacube, self.meta)
+
+        # add static_imap check if not yet set
+        if 'static_imap' not in self.meta['_likelihood']:
+            self._check_for_static_imap(imap)
+
+        return imap
 
     @classmethod
     def _setup_imap(cls, theta_pars, datacube, meta):
         '''
-        See setup_imap()
+        See setup_imap(). Only runs if a new imap for the sample
+        is needed
         '''
 
         # Need to check if any basis func parameters are
@@ -529,11 +559,37 @@ class DataCubeLikelihood(LogLikelihood):
 
         return intensity.build_intensity_map(imap_type, datacube, imap_pars)
 
-    def _construct_model_datacube(self, v_array, i_array, datacube):
+    def _check_for_static_imap(self, imap):
+        '''
+        Check if given intensity model will require a new imap for each
+        sample. If not, internally store first imap and use it for
+        future samples
+
+        imap: IntensityMap
+            The generated intensity map object from _setup_imap()
+        '''
+
+        try:
+            self.meta['_likelihood'].update({
+                'static_imap': imap.is_static,
+                'imap': imap
+            })
+        except KeyError:
+            self.meta['_likelihood'] = {
+                'static_imap': imap.is_static,
+                'imap': imap
+            }
+
+        return
+
+    def _construct_model_datacube(self, theta_pars, v_array, i_array, datacube):
         '''
         Create the model datacube from model slices, using the evaluated
         velocity and intensity maps, SED, etc.
 
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
         v_array: np.array (2D)
             The vmap evaluated at image pixel positions for sampled pars.
             (Must be normalzied)
@@ -549,7 +605,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         lambdas = np.array(datacube.lambdas)
 
-        sed_array = self._setup_sed(datacube)
+        sed_array = self._setup_sed(theta_pars, datacube)
 
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)

@@ -144,8 +144,9 @@ class MuseDataCube(cube.DataCube):
             line_lambda = LINE_LAMBDAS[line['IDENT']]
 
             line_pars = {
-                'value': line_lambda.value * (1.+z),
-                'std': line_lambda.value * (1.+z) / R,
+                'value': line_lambda.value,
+                'R': R,
+                'z': z,
                 'unit': line_lambda.unit
             }
             # will be updated later

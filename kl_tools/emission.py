@@ -9,7 +9,7 @@ class EmissionLine(object):
     Holds relevant information for a specific emission line
     '''
 
-    _req_line_pars = ['value', 'std', 'unit']
+    _req_line_pars = ['value', 'R', 'z', 'unit']
     _req_sed_pars = ['lblue', 'lred', 'resolution', 'unit']
 
     def __init__(self, line_pars, sed_pars):
@@ -23,9 +23,11 @@ class EmissionLine(object):
         line_pars fields:
 
         value: float
-            Line central value
-        std: float
-            Width of line
+            Line central value (restframe, vacuum)
+        R: float
+            Spectral resolution of instrument
+        z: float
+            Redshift of line
         unit: astropy.Unit
             Unit of line wavelength
 
@@ -55,14 +57,18 @@ class EmissionLine(object):
         self.line_pars = line_pars
         self.sed_pars = sed_pars
 
-        self._setup_sed()
+        self.setup_sed()
 
         return
 
-    def _setup_sed(self):
+    def setup_sed(self):
 
-        sed_pars = self.sed_pars
-        line_pars = self.line_pars
+        self.sed = self._build_sed(self.line_pars, self.sed_pars)
+
+        return
+
+    @staticmethod
+    def _build_sed(line_pars, sed_pars):
 
         lblue = sed_pars['lblue']
         lred = sed_pars['lred']
@@ -72,17 +78,20 @@ class EmissionLine(object):
         lambdas = np.arange(lblue, lred+res, res) * lam_unit
 
         # Model emission line SED as gaussian
+        R = line_pars['R']
+        z = line_pars['z']
+        obs_val = line_pars['value'] * (1.+z)
+        obs_std = obs_val / R
+
         line_unit = line_pars['unit']
-        mu  = line_pars['value'] * line_unit
-        std = line_pars['std'] * line_unit
+        mu  = obs_val * line_unit
+        std = obs_std * line_unit
 
         norm = 1. / (std * np.sqrt(2.*np.pi))
         chi = ((lambdas - mu)/std).value
         gauss = norm * np.exp(-0.5*chi**2)
 
-        self.sed = interp1d(lambdas, gauss)
-
-        return
+        return interp1d(lambdas, gauss)
 
 class SED(object):
     '''

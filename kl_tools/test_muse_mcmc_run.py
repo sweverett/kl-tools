@@ -71,6 +71,8 @@ def main(args, pool):
         'v0',
         'vcirc',
         'rscale',
+        'x0',
+        'y0',
         'z',
         'R'
         #'beta'
@@ -83,10 +85,10 @@ def main(args, pool):
             'r_unit': Unit('kpc')
             },
         'priors': {
-            # 'g1': priors.GaussPrior(0., 0.3, clip_sigmas=2),
-            # 'g2': priors.GaussPrior(0., 0.3, clip_sigmas=2),
-            'g1': priors.UniformPrior(-.01, 0.01),
-            'g2': priors.UniformPrior(-.01, 0.01),
+            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            # 'g1': priors.UniformPrior(-.01, 0.01),
+            # 'g2': priors.UniformPrior(-.01, 0.01),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., 2.*np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
@@ -97,12 +99,17 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 40),
+            'x0': priors.GaussPrior(0, 5),
+            'y0': priors.GaussPrior(0, 5),
             'z': priors.GaussPrior(0.2466, .005),
-            'R': priors.GaussPrior(3200, 100, clip_sigmas=3),
+            'R': priors.GaussPrior(3200, 50, clip_sigmas=3),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
             },
+        'velocity': {
+            'model': 'offset'
+        },
         'intensity': {
             # For this test, use truth info
             # 'type': 'inclined_exp',

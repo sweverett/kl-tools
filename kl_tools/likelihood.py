@@ -320,7 +320,7 @@ class LogLikelihood(LogBase):
 
         return log_det
 
-    def setup_vmap(self, theta_pars, model_name='default'):
+    def setup_vmap(self, theta_pars):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
@@ -328,6 +328,11 @@ class LogLikelihood(LogBase):
         model_name: str
             The model name to use when constructing the velocity map
         '''
+
+        try:
+            model_name = self.pars['velocity']['model']
+        except KeyError:
+            model_name = 'default'
 
         # no extras for this func
         return self._setup_vmap(theta_pars, self.meta, model_name)

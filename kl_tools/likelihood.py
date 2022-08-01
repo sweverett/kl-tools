@@ -131,47 +131,6 @@ class LogPosterior(LogBase):
         For the base class, this will just be the (prior, likelihood)
         tuple
         '''
-
-        # TODO: Generalize or remove after debugging!
-        # let's also add the fitted image, mle coefficients, & cont template
-        # image = self.log_likelihood.imap.render(None, None, None) # works bc already computed
-        # cont_template = self.log_likelihood.imap.continuum_template
-        # cont_im = self.log_likelihood.imap.fitter.mle_continuum
-        # mle_coeff = self.log_likelihood.imap.fitter.mle_coefficients
-
-        # data_im = self.datavector.stack()
-
-        # # fig, axes = plt.subplots(nrows=1, ncols=5, sharex=True, sharey=True, wspace=0)
-        # plt.subplot(151)
-        # plt.imshow(data_im, origin='lower')
-        # plt.colorbar(fraction=0.046, pad=0.04)
-        # plt.title('Stacked Datacube')
-
-        # plt.subplot(152)
-        # plt.imshow(image, origin='lower')
-        # plt.colorbar(fraction=0.046, pad=0.04)
-        # plt.title('Fit stacked image')
-
-        # plt.subplot(153)
-        # plt.imshow(cont_im, origin='lower')
-        # plt.colorbar(fraction=0.046, pad=0.04)
-        # plt.title('Fit continuum image')
-
-        # plt.subplot(154)
-        # plt.imshow(image-data_im, origin='lower')
-        # plt.colorbar(fraction=0.046, pad=0.04)
-        # plt.title('Fit image - stacked datacube')
-
-        # plt.subplot(155)
-        # plt.imshow(image-cont_im, origin='lower')
-        # plt.colorbar(fraction=0.046, pad=0.04)
-        # plt.title('Fit image - fit continuum')
-
-        # plt.gcf().set_size_inches(24,4)
-        # plt.tight_layout()
-        # plt.show()
-
-        # return (prior, likelihood, image, cont_template, mle_coeff)
         return (prior, likelihood)
 
     def __call__(self, theta, data, pars):
@@ -308,9 +267,7 @@ class LogLikelihood(LogBase):
             )
 
     def _compute_log_det(self, imap):
-        # TODO: it would be better to pass inv_cov directly,
-        # but for now we are only using diagonal inv_cov matrices
-        # anyway
+        # TODO: Adapt this to work w/ new DataCube's w/ weight maps!
         # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
         log_det = imap.fitter.compute_marginalization_det(pars=self.meta, log=True)
 
@@ -360,11 +317,14 @@ class LogLikelihood(LogBase):
         a numpy one
         '''
 
+        # sed pars that are sample-able
+        _sed_pars = ['z', 'R']
+
         # if we are marginalizing over SED pars, modify stored
         # SED with the sample
         line_pars_update = {}
 
-        for par in ['z', 'R']:
+        for par in _sed_pars:
             if par in theta_pars:
                 line_pars_update[par] = theta_pars[par]
 

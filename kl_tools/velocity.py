@@ -6,10 +6,6 @@ from argparse import ArgumentParser
 import astropy.constants as const
 import astropy.units as units
 
-# i don't understand how to make this work correctly...
-# from . import utils
-# from . import transformation as transform
-# from . import numba_transformation as numba_transform
 import utils
 from transformation import TransformableImage
 import transformation as transform

@@ -145,7 +145,7 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux=None, hlr=None):
+    def __init__(self, datacube, flux, hlr):
         '''
         datacube: DataCube
             While this implementation will not use the datacube
@@ -161,14 +161,13 @@ class InclinedExponential(IntensityMap):
 
         pars = {'flux': flux, 'hlr': hlr}
         for name, val in pars.items():
-            if val is None:
-                pars[name] = 1.
-            else:
-                if not isinstance(val, (float, int)):
-                    raise TypeError(f'{name} must be a float or int!')
+            if not isinstance(val, (float, int)):
+                raise TypeError(f'{name} must be a float or int!')
 
-        self.flux = pars['flux']
-        self.hlr = pars['hlr']
+        self.flux = flux
+        self.hlr = hlr
+
+        self.pix_scale = datacube.pix_scale
 
         # same as default, but to make it explicit
         self.is_static = False
@@ -190,7 +189,6 @@ class InclinedExponential(IntensityMap):
             The rendered intensity map
         '''
 
-        # A = theta_pars['A']
         inc = Angle(np.arcsin(theta_pars['sini']), radians)
 
         gal = gs.InclinedExponential(
@@ -198,11 +196,13 @@ class InclinedExponential(IntensityMap):
         )
 
         # Only add knots if a psf is provided
-        if 'psf' in pars:
-            if 'knots' in pars:
-                knot_pars = pars['knots']
-                knots = gs.RandomKnots(**knot_pars)
-                gal = gal + knots
+        # NOTE: no longer workds due to psf conovlution
+        # happening later in modeling
+        # if 'psf' in pars:
+        #     if 'knots' in pars:
+        #         knot_pars = pars['knots']
+        #         knots = gs.RandomKnots(**knot_pars)
+        #         gal = gal + knots
 
         rot_angle = Angle(theta_pars['theta_int'], radians)
         gal = gal.rotate(rot_angle)
@@ -217,14 +217,9 @@ class InclinedExponential(IntensityMap):
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
 
-        # TODO: could generalize in future, but for now assume
-        #       a constant PSF for exposures
-        if 'psf' in pars:
-            psf = pars['psf']
-            gal = gs.Convolve([gal, psf])
-
-        pixscale = pars['pix_scale']
-        self.image = gal.drawImage(nx=self.nx, ny=self.ny, scale=pixscale).array
+        self.image = gal.drawImage(
+            nx=self.nx, ny=self.ny, scale=self.pix_scale
+            ).array
 
         return self.image
 

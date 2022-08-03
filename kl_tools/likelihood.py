@@ -578,11 +578,17 @@ class DataCubeLikelihood(LogLikelihood):
 
         sed_array = self._setup_sed(theta_pars, datacube)
 
+        if 'psf' in self.meta:
+            psf = self.meta['psf']
+        else:
+            psf = None
+
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)
 
             obs_array = self._compute_slice_model(
-                lambdas[i], sed_array, zfactor, i_array, cont_array
+                lambdas[i], sed_array, zfactor, i_array, cont_array,
+                psf=psf, pix_scale=self.pix_scale
             )
 
             # NB: here you could do something fancier, such as a
@@ -599,7 +605,8 @@ class DataCubeLikelihood(LogLikelihood):
         return model_datacube
 
     @classmethod
-    def _compute_slice_model(cls, lambdas, sed, zfactor, imap, continuum):
+    def _compute_slice_model(cls, lambdas, sed, zfactor, imap, continuum,
+                             psf=None, pix_scale=None):
         '''
         Compute datacube slice given lambda range, sed, redshift factor
         per pixel, and the intemsity map
@@ -619,7 +626,15 @@ class DataCubeLikelihood(LogLikelihood):
             at the emission line
         imap: np.ndarray (2D)
             An array corresponding to the continuum model
+        psf: galsim.GSObject
+            A galsim object representing the PSF to convolve by
+        pix_scale: float
+            The image pixel scale. Required if convolving by PSF
         '''
+
+        # they must come in pairs for PSF convolution
+        if (psf is not None) and (pix_scale is None):
+            raise Exception('Must pass a pix_scale if convovling by PSF!')
 
         lblue, lred = lambdas[0], lambdas[1]
 
@@ -634,7 +649,38 @@ class DataCubeLikelihood(LogLikelihood):
         int_sed = (lred - lblue) * mean_sed
         model = imap * int_sed
 
+        # TODO: could generalize in future, but for now assume
+        #       a constant PSF for exposures
+        if psf is not None:
+            nx, ny = imap.shape[0], imap.shape[1]
+            model_im = gs.Image(model, scale=pix_scale)
+            gal = gs.InterpolatedImage(model_im)
+            gal = gs.Convolve([gal, psf])
+            model = gal.drawImage(
+                nx=nx, ny=ny, method='no_pixel'
+                ).array
+
+            plt.subplot(131)
+            i1 = plt.imshow(model_im.array)
+            plt.colorbar(i1,fraction=0.046, pad=0.04)
+            plt.title('model_im pre-psf')
+            plt.subplot(132)
+            i2 = plt.imshow(model)
+            plt.colorbar(i2,fraction=0.046, pad=0.04)
+            plt.title('model post-psf')
+            plt.subplot(133)
+            i3 = plt.imshow(model_im.array-model)
+            plt.colorbar(i3,fraction=0.046, pad=0.04)
+            plt.title('pre-post')
+            plt.gcf().set_size_inches(14,4)
+            outdir = '/Users/sweveret/repos/kl-tools/tests/test-mcmc-run/psf-residuals/'
+            outfile = os.path.join(outdir, f'psf-residual-{lblue}-{lred}.png')
+            # plt.savefig(outfile, bbox_inches='tight', dpi=300)
+            plt.savefig(outfile, dpi=300)
+
         # for now, continuum is modeled as lambda-independent
+        # TODO: This assumes that the continuum template (if passed)
+        #       is *post* psf-convolution
         if continuum is not None:
             model += continuum
 
@@ -714,113 +760,6 @@ def _setup_test_sed(pars):
     sed = interp1d(lambdas, gauss)
 
     return sed
-
-def setup_likelihood_test(true_pars, pars, shape, lambdas):
-
-    throughput = pars['bandpass_throughput']
-    unit = pars['bandpass_unit']
-    zp = pars['bandpass_zp']
-
-    bandpasses = []
-    for l1, l2 in lambdas:
-        bandpasses.append(gs.Bandpass(
-            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-            ))
-
-    assert shape[0] == len(bandpasses)
-
-    sed = _setup_test_sed(pars)
-
-    datacube, vmap, true_im = _setup_test_datacube(
-        shape, lambdas, bandpasses, sed, true_pars, pars
-        )
-
-    return datacube, sed, vmap, true_im
-
-def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
-    '''
-    TODO: Restructure to allow for more general truth input
-    '''
-
-    Nspec, Nx, Ny = shape[0], shape[1], shape[2]
-
-    imap_pars = {
-        'flux': pars['true_flux'],
-        'hlr': pars['true_hlr']
-    }
-
-    # a slight abuse of API call here, passing a dummy datacube to
-    # instantiate an inclined exponential as truth
-    dc = DataCube(shape=shape, bandpasses=bandpasses)
-    imap = intensity.build_intensity_map('inclined_exp', dc, imap_pars)
-    true_im = imap.render(true_pars, dc, pars)
-
-    # TODO: TESTING!!!
-    #This alows us to draw the test datacube from shapelets instead
-    # if pars['intensity']['type'] == 'basis':
-    #     try:
-    #         use_basis = pars['intensity']['use_basis_as_truth']
-
-    #         if use_basis is True:
-    #             print('WARNING: Using basis for true image as test')
-    #             ps = pars['pix_scale']
-    #             dc = DataCube(
-    #                 shape=(1,Nx,Ny), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
-    #                 )
-
-    #             basis_type = pars['intensity']['basis_type']
-    #             kwargs = pars['intensity']['basis_kwargs']
-    #             shapelet_imap = intensity.BasisIntensityMap(
-    #                 dc, basis_type, basis_kwargs=kwargs)
-
-    #             # Now make new truth image from shapelet MLE fit
-    #             true_im = shapelet_imap.render(true_pars, dc, pars)
-
-    #     except KeyError:
-    #         pass
-
-    vel_pars = {}
-    for name in true_pars.keys():
-        vel_pars[name] = true_pars[name]
-    vel_pars['v_unit'] = pars['v_unit']
-    vel_pars['r_unit'] = pars['r_unit']
-
-    vmap = VelocityMap('default', vel_pars)
-
-    X, Y = utils.build_map_grid(Nx, Ny)
-    Vnorm = vmap('obs', X, Y, normalized=True)
-
-    # We use this one for the return map
-    V = vmap('obs', X, Y)
-
-    data = np.zeros(shape)
-
-    # numba won't allow a scipy.interp1D object
-    sed_array = np.array([sed.x, sed.y])
-
-    for i in range(Nspec):
-        zfactor = 1. / (1 + Vnorm)
-
-        obs_array = DataCubeLikelihood._compute_slice_model(
-            lambdas[i], sed_array, zfactor, true_im
-            )
-
-        obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
-
-        noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
-        obs_im.addNoise(noise)
-
-        data[i,:,:] = obs_im.array
-
-    pix_scale = pars['pix_scale']
-    datacube = DataCube(
-        data=data, bandpasses=bandpasses, pix_scale=pix_scale
-        )
-
-    # set weight maps according to added noise
-    datacube.set_weights(pars['cov_sigma'])
-
-    return datacube, V, true_im
 
 def setup_test_pars(nx, ny):
     '''

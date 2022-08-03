@@ -763,9 +763,6 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
         bandpasses.append(galsim.Bandpass(
             throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
             ))
-    bandpasses = [galsim.Bandpass(
-        throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-        ) for l1,l2 in lambdas]
 
     return bandpasses
 

@@ -73,6 +73,8 @@ class MCMCRunner(object):
         self.MAP_means = None
         self.MAP_medians = None
         self.MAP_sigmas = None
+        self.MAP_true = None # if actual loglikelihood values are passed
+        self.MAP_indx = None # if actual loglikelihood values are passed
 
         return
 
@@ -217,11 +219,12 @@ class MCMCRunner(object):
 
         return
 
-    def compute_MAP(self, discard=None, thin=1, recompute=False):
+    def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         '''
-        TODO: For now, just computing the means & medians
-              Will fail for multi-modal distributions
+        loglike: np.ndarray, list
+            A list or numpy array of log likelihood values from mcmc run
 
+        # NOTE: the following are only used if loglike is not provided:
         discard: int
             The number of samples to discard, from 0:discard
         thin: int
@@ -248,14 +251,26 @@ class MCMCRunner(object):
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
 
-        chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
+        if loglike is None:
+            # don't know actual min of loglikelihood, so do best we can
+            chain = self.sampler.get_chain(
+                flat=True, discard=discard, thin=thin
+                )
 
-        self.MAP_means   = np.mean(chain, axis=0)
-        self.MAP_medians = np.median(chain, axis=0)
+            self.MAP_means   = np.mean(chain, axis=0)
+            self.MAP_medians = np.median(chain, axis=0)
 
-        self.MAP_sigmas = []
-        for i in range(self.ndim):
-            self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
+            self.MAP_sigmas = []
+            for i in range(self.ndim):
+                self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
+        else:
+            chain = self.sampler.get_chain()
+            self.MAP_indx = np.unravel_index(loglike.argmax(), loglike.shape)
+            self.MAP_true = chain[self.MAP_indx]
+
+            self.MAP_sigmas = []
+            for i in range(self.ndim):
+                self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
 
         self.has_MAP = True
 
@@ -445,19 +460,16 @@ class KLensZeusRunner(ZeusRunner):
 
         return
 
-    def compute_MAP(self, discard=None, thin=1, recompute=False):
+    def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         super(KLensZeusRunner, self).compute_MAP(
-            discard=discard, thin=thin, recompute=recompute
+            loglike=loglike, discard=discard, thin=thin, recompute=recompute
             )
 
-        theta_pars = self.pars.theta2pars(self.MAP_medians)
+        if self.MAP_true is None:
+            theta_pars = self.pars.theta2pars(self.MAP_medians)
+        else:
+            theta_pars = self.pars.theta2pars(self.MAP_true)
 
-        # Now compute the corresonding (median) MAP velocity map
-        # vel_pars = theta_pars.copy()
-        # vel_pars['r_unit'] = self.pars['r_unit']
-        # vel_pars['v_unit'] = self.pars['v_unit']
-
-        # self.MAP_vmap = VelocityMap('default', vel_pars)
         self.MAP_vmap = DataCubeLikelihood._setup_vmap(
             theta_pars, self.pars.meta.pars, 'default'
             )
@@ -522,11 +534,12 @@ class KLensZeusRunner(ZeusRunner):
         '''
 
         if self.has_MAP is False:
-            print('MAP has not been computed yet; trying now ' +\
-                  'with default parameters')
-            self.compute_MAP()
+            raise Exception('MAP has not been computed yet!')
 
-        theta_pars = self.pars.theta2pars(self.MAP_medians)
+        if self.MAP_true is None:
+            theta_pars = self.pars.theta2pars(self.MAP_medians)
+        else:
+            theta_pars = self.pars.theta2pars(self.MAP_true)
 
         # gather needed components to evaluate model
         datacube = self.datacube

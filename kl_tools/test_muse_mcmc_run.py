@@ -133,7 +133,7 @@ def main(args, pool):
                 }
             },
         # 'marginalize_intensity': True,
-        # 'psf': gs.Gaussian(fwhm=1), # fwhm in pixels
+        'psf': gs.Gaussian(fwhm=4.0,flux=1.0), # fwhm in pixels
         'run_options': {
             'remove_continuum': True,
             'use_numba': False

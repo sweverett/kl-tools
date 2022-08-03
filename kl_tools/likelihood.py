@@ -651,13 +651,14 @@ class DataCubeLikelihood(LogLikelihood):
 
         # TODO: could generalize in future, but for now assume
         #       a constant PSF for exposures
-        if psf is not None:
+        if (psf is not None) and (np.sum(model) > 0):
+            # This fails if the model has no flux.
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
             gal = gs.InterpolatedImage(model_im)
             gal = gs.Convolve([gal, psf])
             model = gal.drawImage(
-                nx=nx, ny=ny, method='no_pixel'
+                nx=ny, ny=nx, method='no_pixel'
                 ).array
 
         # for now, continuum is modeled as lambda-independent

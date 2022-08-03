@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import zeus
 
 import utils
-from mcmc import KLensZeusRunner, KLensEmceeRunner
+from mcmc import build_mcmc_runner
 import priors
 import cube
 import mocks
@@ -27,7 +27,7 @@ from parameters import Pars
 from likelihood import LogPosterior
 from velocity import VelocityMap
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 
@@ -86,14 +86,14 @@ def main(args, pool):
             'r_unit': Unit('kpc'),
         },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.3, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.3, clip_sigmas=2),
+            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             # 'theta_int': priors.UniformPrior(0., np.pi),
-            'theta_int': priors.UniformPrior(0., 2*np.pi),
+            'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
             'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
+            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
@@ -104,7 +104,7 @@ def main(args, pool):
         'intensity': {
             # For this test, use truth info
             'type': 'inclined_exp',
-            'flux': 1.8e4, # counts
+            'flux': 2.8e4, # counts
             'hlr': 3.5,
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
@@ -122,8 +122,11 @@ def main(args, pool):
             #     # 'b': 1,
             #     }
         },
+        'velocity': {
+            'model': 'centered'
+        },
         # 'marginalize_intensity': True,
-        'psf': gs.Gaussian(fwhm=0.7), # fwhm in pixels
+        # 'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }
@@ -133,21 +136,21 @@ def main(args, pool):
         # image meta pars
         'Nx': 40, # pixels
         'Ny': 40, # pixels
-        'pix_scale': 0.5, # arcsec / pixel
+        'pix_scale': 0.25, # arcsec / pixel
         # intensity meta pars
-        'true_flux': 1.8e4, # counts
-        'true_hlr': 3.5, # pixels
+        'true_flux': mcmc_pars['intensity']['flux'],
+        'true_hlr': mcmc_pars['intensity']['hlr'], # pixels
         # velocty meta pars
-        'v_model': 'centered',
-        'v_unit': Unit('km / s'),
-        'r_unit': Unit('kpc'),
+        'v_model': mcmc_pars['velocity']['model'],
+        'v_unit': mcmc_pars['units']['v_unit'],
+        'r_unit': mcmc_pars['units']['r_unit'],
         # emission line meta pars
         'wavelength': 656.28, # nm; halpha
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
         'sky_sigma': 0.5, # pixel counts for mock data vector
-        'psf': mcmc_pars['psf']
+        # 'psf': mcmc_pars['psf']
     }
 
     print('Setting up test datacube and true Halpha image')
@@ -220,20 +223,23 @@ def main(args, pool):
     ndims = log_posterior.ndims
     nwalkers = 2*ndims
 
-    if sampler == 'zeus':
-        print('Setting up KLensZeusRunner')
+    print(f'Setting up {sampler} MCMCRunner')
+    args = [nwalkers, ndims]
+    if sampler in ['zeus', 'emcee']:
+        args += [log_posterior, datacube, pars]
+        kwargs = {}
 
-        runner = KLensZeusRunner(
-            nwalkers, ndims, log_posterior, datacube, pars
-            )
+    elif sampler == 'poco':
+        kwargs = {
+            'loglike': log_posterior.log_likelihood,
+            'loglike_args': [datacube],
+            'logprior': log_posterior.log_prior,
+        }
 
-    elif sampler == 'emcee':
-        print('Setting up KLensEmceeRunner')
+    runner = build_mcmc_runner(sampler, args, kwargs)
 
-        runner = KLensEmceeRunner(
-            nwalkers, ndims, log_posterior, datacube, pars
-            )
-
+    #-----------------------------------------------------------------
+    # Run MCMC
     print('Starting mcmc run')
     # try:
     runner.run(nsteps, pool)

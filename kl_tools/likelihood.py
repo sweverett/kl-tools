@@ -311,7 +311,7 @@ class LogLikelihood(LogBase):
         return VelocityMap(model_name, vmodel)
 
     @classmethod
-    def _setup_sed(cls, theta_pars, datacube):
+    def _setup_sed(cls, theta_pars, datavector):
         '''
         numba can't handle most interpolators, so create
         a numpy one
@@ -334,7 +334,7 @@ class LogLikelihood(LogBase):
         # NOTE: Right now, this will error if more than one
         # emission lines are stored (as we don't have a line
         # index to pass here), but can improve in future
-        sed = datacube.get_sed(line_pars_update=line_pars_update)
+        sed = datavector.get_sed(line_pars_update=line_pars_update)
 
         return np.array([sed.x, sed.y])
 
@@ -588,7 +588,7 @@ class DataCubeLikelihood(LogLikelihood):
 
             obs_array = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array, cont_array,
-                psf=psf, pix_scale=self.pix_scale
+                psf=psf, pix_scale=datacube.pix_scale
             )
 
             # NB: here you could do something fancier, such as a
@@ -659,24 +659,6 @@ class DataCubeLikelihood(LogLikelihood):
             model = gal.drawImage(
                 nx=nx, ny=ny, method='no_pixel'
                 ).array
-
-            plt.subplot(131)
-            i1 = plt.imshow(model_im.array)
-            plt.colorbar(i1,fraction=0.046, pad=0.04)
-            plt.title('model_im pre-psf')
-            plt.subplot(132)
-            i2 = plt.imshow(model)
-            plt.colorbar(i2,fraction=0.046, pad=0.04)
-            plt.title('model post-psf')
-            plt.subplot(133)
-            i3 = plt.imshow(model_im.array-model)
-            plt.colorbar(i3,fraction=0.046, pad=0.04)
-            plt.title('pre-post')
-            plt.gcf().set_size_inches(14,4)
-            outdir = '/Users/sweveret/repos/kl-tools/tests/test-mcmc-run/psf-residuals/'
-            outfile = os.path.join(outdir, f'psf-residual-{lblue}-{lred}.png')
-            # plt.savefig(outfile, bbox_inches='tight', dpi=300)
-            plt.savefig(outfile, dpi=300)
 
         # for now, continuum is modeled as lambda-independent
         # TODO: This assumes that the continuum template (if passed)

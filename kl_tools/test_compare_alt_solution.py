@@ -11,6 +11,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import velocity
 import intensity
 import utils
+# TODO: update likelihood imports if we want to run this old test again
 from likelihood import setup_likelihood_test, log_likelihood, _compute_slice_model
 from parameters import pars2theta
 
@@ -304,6 +305,7 @@ def main(args):
         ax = axes[1,i]
         zfactor = 1. / (1 + VMap('obs', X, Y, normalized=True))
         sed_array = np.array([sed.x, sed.y])
+        # TODO: update w/ psf if we want to run this old test again
         true_model = _compute_slice_model(
             (l1,l2), sed_array, zfactor, im)
         true_resid = dslice-true_model
@@ -320,6 +322,7 @@ def main(args):
         # plot alt model slices
         ax = axes[2,i]
         alt_zfactor = 1. / (1 + VMap_alt('obs', X, Y, normalized=True))
+        # TODO: update w/ psf if we want to run this old test again
         alt_model= _compute_slice_model(
             (l1,l2), sed_array, alt_zfactor, im_alt)
         alt_resid = dslice-alt_model

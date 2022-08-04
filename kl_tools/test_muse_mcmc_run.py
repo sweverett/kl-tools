@@ -85,8 +85,8 @@ def main(args, pool):
             'r_unit': Unit('kpc')
             },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
+            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
             # 'g1': priors.UniformPrior(-.01, 0.01),
             # 'g2': priors.UniformPrior(-.01, 0.01),
             # 'theta_int': priors.UniformPrior(0., np.pi),
@@ -101,8 +101,8 @@ def main(args, pool):
             'rscale': priors.UniformPrior(0, 40),
             'x0': priors.GaussPrior(0, 2.5),
             'y0': priors.GaussPrior(0, 2.5),
-            'z': priors.GaussPrior(0.2466, .005),
-            'R': priors.GaussPrior(3200, 25, clip_sigmas=3),
+            'z': priors.GaussPrior(0.2466, .0025, clip_sigmas=3),
+            'R': priors.GaussPrior(3200, 15, clip_sigmas=3),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
@@ -133,7 +133,8 @@ def main(args, pool):
                 }
             },
         # 'marginalize_intensity': True,
-        'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
+        # 'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
+        'psf': gs.Moffat(fwhm=.8, beta=1, flux=1.0), # fwhm in arcsec
         'run_options': {
             'remove_continuum': True,
             'use_numba': False

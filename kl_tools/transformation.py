@@ -18,7 +18,10 @@ Definition of each plane:
     source: View from the lensing source plane, rotated version of gal
             plane with theta = theta_intrinsic
 
-    obs:  Observed image plane. Sheared version of source plane
+    cen: View from the object-centered observed plane. Sheared version of
+         source plane
+
+    obs:  Observed image plane. Offset version of cen plane
 '''
 
 class TransformableImage(object):
@@ -42,7 +45,7 @@ class TransformableImage(object):
         '''
 
         self.transform_pars = transform_pars
-        self._planes = ['disk', 'gal', 'source', 'obs']
+        self._planes = ['disk', 'gal', 'source', 'cen', 'obs']
 
         self._setup_transformations()
 
@@ -55,9 +58,13 @@ class TransformableImage(object):
 
         pars = self.transform_pars
 
-        self.obs2source = _transform_obs2source(pars)
+        self.cen2source = _transform_cen2source(pars)
         self.source2gal = _transform_source2gal(pars)
         self.gal2disk = _transform_gal2disk(pars)
+
+        # we don't do the following as it is simpler to apply
+        # a translation directly instead of building a 3x3 matrix
+        # self.obs2cen = _transform_obs2cen(pars)
 
         return
 
@@ -101,6 +108,11 @@ class TransformableImage(object):
                 func = _nb_eval_in_obs_plane
             else:
                 func = self._eval_in_obs_plane
+        if plane == 'cen':
+            if use_numba is True:
+                func = _nb_eval_in_cen_plane
+            else:
+                func = self._eval_in_cen_plane
         elif plane == 'source':
             if use_numba is True:
                 func = _nb_eval_in_source_plane
@@ -152,7 +164,24 @@ class TransformableImage(object):
         velocity
         '''
 
-        xp, yp = _obs2source(pars, x, y)
+        xp, yp = _obs2cen(pars, x, y)
+
+        return cls._eval_in_cen_plane(pars, xp, yp, **kwargs)
+
+    @classmethod
+    def _eval_in_cen_plane(cls, pars, x, y, **kwargs):
+        '''
+        pars: dict
+            Holds the model & transformation parameters
+        x,y: np.ndarray
+            The position coordintates in the cen plane
+
+        kwargs holds any additional params that might be needed
+        in subclass evaluations, such as using speed instead of
+        velocity
+        '''
+
+        xp, yp = _cen2source(pars, x, y)
 
         return cls._eval_in_source_plane(pars, xp, yp, **kwargs)
 
@@ -203,7 +232,7 @@ def transform_coords(x, y, plane1, plane2, pars):
 
     # each plane assigned an index in order from
     # simplest disk plane to most complex obs plane
-    planes = ['disk', 'gal', 'source', 'obs']
+    planes = ['disk', 'gal', 'source', 'cen', 'obs']
     plane_map = dict(zip(planes, range(len(planes))))
 
     for plane in [plane1, plane2]:
@@ -219,12 +248,12 @@ def transform_coords(x, y, plane1, plane2, pars):
 
     # transforms in direction from disk to obs
     if start < end:
-        transforms = [_disk2gal, _gal2source, _source2obs]
+        transforms = [_disk2gal, _gal2source, _source2cen, _cen2obs]
         step = 1
 
     # transforms in direction from obs to disk
     else:
-        transforms = [_gal2disk, _source2gal, _obs2source]
+        transforms = [_gal2disk, _source2gal, _cen2source, _obs2cen]
         step = -1
 
         # Account for different starting point for inv transforms
@@ -282,49 +311,68 @@ def _multiply(transform, x, y):
     return xp, yp
 
 # The following transformation definitions require basic knowledge
-# of the source shear, intrinsic orientation, and profile inclination
-# angle
-#
-# The inverse transforms are computed on the fly from these defs
-# TODO: Could try to work out these inv transforms analytically
-#       for faster eval
+# of the source shear, intrinsic orientation, profile inclination
+# angle, and centroid offset
 
-def _transform_obs2source(pars):
+def _transform_obs2cen(pars):
     '''
-    Lensing transformation from obs to source plane
+    Lensing transformation from obs to cen plane
 
     pars is a dict
-    (x,y) is position on obs plane
+    (x,y) is position in obs plane
+
+    NOTE: we don't do the usual as we would have to
+    setup a 3x3 matrix to do the translation
+    '''
+    raise NotImplementedError('obs2cen not currently handled by a matrix!')
+
+def _transform_cen2obs(pars):
+    '''
+    Lensing transformation from cen to obs plane
+
+    pars is a dict
+    (x,y) is position in cen plane
+
+    NOTE: we don't do the usual as we would have to
+    setup a 3x3 matrix to do the translation
+    '''
+    raise NotImplementedError('cen2obs not currently handled by a matrix!')
+
+def _transform_cen2source(pars):
+    '''
+    Lensing transformation from cen to source plane
+
+    pars is a dict
+    (x,y) is position in cen plane
     '''
 
     g1, g2 = pars['g1'], pars['g2']
 
     # Lensing transformation
-    transform =  np.array([
+    # NOTE: ignoring kappa for now
+    transform = np.array([
         [1.-g1, -g2],
         [-g2, 1.+g1]
     ])
 
     return transform
 
-def _transform_source2obs(pars):
+def _transform_source2cen(pars):
     '''
-    Inverse lensing transformation from source to obs plane
+    Inverse lensing transformation from source to cen plane
 
     pars is a dict
-    (x,y) is position on obs plane
+    (x,y) is position in source plane
     '''
 
     g1, g2 = pars['g1'], pars['g2']
 
+    # NOTE: ignoring kappa for now
     norm = 1. / (1. - (g1**2 + g2**2))
-    transform =  norm * np.array([
+    transform = norm * np.array([
         [1.+g1, g2],
         [g2, 1.-g1]
     ])
-    # transform = np.linalg.inv(
-    #     _transform_obs2source(pars)
-    #     )
 
     return transform
 
@@ -333,7 +381,7 @@ def _transform_source2gal(pars):
     Rotation by intrinsic angle
 
     pars is a dict
-    (x,y) is position on source plane
+    (x,y) is position in source plane
     '''
 
     theta_int = pars['theta_int']
@@ -343,7 +391,7 @@ def _transform_source2gal(pars):
 
     c, s = np.cos(theta), np.sin(theta)
 
-    transform =  np.array([
+    transform = np.array([
         [c, -s],
         [s,  c]
     ])
@@ -355,14 +403,14 @@ def _transform_gal2source(pars):
     Rotation by intrinsic angle
 
     pars is a dict
-    (x,y) is position on source plane
+    (x,y) is position in gal plane
     '''
 
     theta_int = pars['theta_int']
 
     c, s = np.cos(theta_int), np.sin(theta_int)
 
-    transform =  np.array([
+    transform = np.array([
         [c, -s],
         [s,  c]
     ])
@@ -372,16 +420,15 @@ def _transform_gal2source(pars):
 def _transform_gal2disk(pars):
     '''
     Account for inclination angle
+
     pars is a dict
-    (x,y) is position on galaxy plane
+    (x,y) is position in galaxy plane
     '''
 
     sini = pars['sini']
-    # i = np.arcsin(sini)
-    # cosi = np.cos(i)
     cosi = np.sqrt(1-sini**2)
 
-    transform =  np.array([
+    transform = np.array([
         [1., 0],
         [0, 1. / cosi]
     ])
@@ -391,38 +438,64 @@ def _transform_gal2disk(pars):
 def _transform_disk2gal(pars):
     '''
     Account for inclination angle
+
     pars is a dict
-    (x,y) is position on galaxy plane
+    (x,y) is position in disk plane
     '''
 
     sini = pars['sini']
-    # i = np.arcsin(sini)
-    # cosi = np.cos(i)
     cosi = np.sqrt(1-sini**2)
 
-    transform =  np.array([
+    transform = np.array([
         [1., 0],
         [0, cosi]
     ])
 
     return transform
 
-def _obs2source(pars, x, y):
+def _obs2cen(pars, x, y):
     '''
     pars is a dict
-    (x,y) is position on obs plane
+    (x,y) is position in obs plane
 
-    returns: (x', y') in source plane
+    returns: (x', y') in cen plane
     '''
 
-    transform = _transform_obs2source(pars)
+    # NOTE: we don't do the usual as we would have to
+    # setup a 3x3 matrix to do the translation; we
+    # instead use a simpler approach
+    # transform = _transform_obs2cen(pars)
+    # return _multiply(transform, x, y)
+
+    try:
+        x0 = pars['x0']
+        y0 = pars['y0']
+    except KeyError:
+        # no offsets to apply in passed model
+        x0 = 0.
+        y0 = 0.
+
+    xp = x - x0
+    yp = y - y0
+
+    return xp, yp
+
+def _cen2source(pars, x, y):
+    '''
+    pars is a dict
+    (x,y) is position in cenplane
+
+    returns: (x', y') in cen plane
+    '''
+
+    transform = _transform_cen2source(pars)
 
     return _multiply(transform, x, y)
 
 def _source2gal(pars, x, y):
     '''
     pars is a dict
-    (x,y) is position on source plane
+    (x,y) is position in source plane
 
     returns: (x', y') in gal plane
     '''
@@ -434,7 +507,7 @@ def _source2gal(pars, x, y):
 def _gal2disk(pars, x, y):
     '''
     pars is a dict
-    (x,y) is position on gal plane
+    (x,y) is position in gal plane
 
     returns: (x', y') in disk plane
     '''
@@ -443,51 +516,66 @@ def _gal2disk(pars, x, y):
 
     return _multiply(transform, x, y)
 
-def _source2obs(pars, x, y):
+def _cen2obs(pars, x, y):
     '''
     pars is a dict
-    (x,y) is position on source plane
+    (x,y) is position in cen plane
 
     returns: (x', y') in obs plane
     '''
 
-    transform = _transform_source2obs(pars)
+    # NOTE: we don't do the usual as we would have to
+    # setup a 3x3 matrix to do the translation; we
+    # instead use a simpler approach
+    # transform = _transform_obs2cen(pars)
+    # return _multiply(transform, x, y)
 
-    # Old way:
-    # obs2source = _transform_obs2source(pars)
-    # transform = np.linalg.inv(obs2source)
+    try:
+        x0 = pars['x0']
+        y0 = pars['y0']
+    except KeyError:
+        # no offsets to apply in passed model
+        x0 = 0.
+        y0 = 0.
+
+    xp = x + x0
+    yp = y + y0
+
+    return xp, yp
+
+def _source2cen(pars, x, y):
+    '''
+    pars is a dict
+    (x,y) is position in source plane
+
+    returns: (x', y') in cen plane
+    '''
+
+    transform = _transform_source2cen(pars)
 
     return _multiply(transform, x, y)
 
 def _gal2source(pars, x, y):
     '''
     pars is a dict
-    (x,y) is position on gal plane
+    (x,y) is position in gal plane
 
     returns: (x', y') in source plane
     '''
 
     transform = _transform_gal2source(pars)
 
-    # Old way:
-    # source2gal = _transform_source2gal(pars)
-    # transform = np.linalg.inv(source2gal)
-
     return _multiply(transform, x, y)
 
 def _disk2gal(pars, x, y):
     '''
     pars is a dict
-    (x,y) is position on disk plane
+    (x,y) is position in disk plane
 
     returns: (x', y') in gal plane
     '''
 
     transform = _transform_disk2gal(pars)
-
-    # Old way:
-    # gal2disk = _transform_gal2disk(pars)
-    # transform = np.linalg.inv(gal2disk)
 
     return _multiply(transform, x, y)
 

@@ -41,9 +41,19 @@ def build_map_grid(Nx, Ny):
     assert len(x) == Nx
     assert len(y) == Ny
 
-    X, Y = np.meshgrid(x, y)
+    X, Y = np.meshgrid(x, y, indexing='ij')
 
     return X, Y
+
+def check_file(filename):
+    '''
+    Check if file exists; err if not
+    '''
+
+    if not os.path.exists(filename):
+        raise OSError(f'{filename} does not exist!')
+
+    return
 
 def check_type(var, name, desired_type):
     '''
@@ -68,6 +78,41 @@ def check_types(var_dict):
     for name, tup in var_dict.items():
         var, desired_type = tup
         check_type(var, name, desired_type)
+
+    return
+
+def check_req_fields(config, req, name=None):
+    for field in req:
+        if not field in config:
+            raise ValueError(f'{name}config must have field {field}')
+
+    return
+
+def check_fields(config, req, opt, name=None):
+    '''
+    req: list of required field names
+    opt: list of optional field names
+    name: name of config type, for extra print info
+    '''
+    assert isinstance(config, dict)
+
+    if name is None:
+        name = ''
+    else:
+        name = name + ' '
+
+    if req is None:
+        req = []
+    if opt is None:
+        opt = []
+
+    # ensure all req fields are present
+    check_req_fields(config, req, name=name)
+
+    # now check for fields not in either
+    for field in config:
+        if (not field in req) and (not field in opt):
+            raise ValueError(f'{field} not a valid field for {name} config!')
 
     return
 

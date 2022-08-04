@@ -1,6 +1,7 @@
+from copy import deepcopy
 import utils
 
-import pudb
+import ipdb
 
 '''
 This file defines the structure and conversions between a params dict
@@ -45,7 +46,7 @@ class Pars(object):
 
         pars_order = dict(zip(sampled_pars, range(len(sampled_pars))))
         self.sampled = SampledPars(pars_order)
-        self.meta = MetaPars(meta_pars)
+        self.meta = MCMCPars(meta_pars)
 
         return
 
@@ -59,7 +60,7 @@ class Pars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return Pars(self.sampled.copy(), self.meta.copy())
+        return Pars(deepcopy(self.sampled), deepcopy(self.meta))
 
 class SampledPars(object):
     '''
@@ -129,16 +130,16 @@ class SampledPars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return SampledPars(self.pars_order.copy())
+        return SampledPars(deepcopy(self.pars_order))
 
 class MetaPars(object):
     '''
-    Class that defines structure for the general parameters
-    used in MCMC sampling for a given experiment, modeling
-    choices, etc.
+    Base class that defines structure for the general meta
+    parameters needed for an object, e.g. DataCube, likelihood
+    MCMC, etc.
     '''
 
-    _req_fields = ['intensity', 'psf', 'sed']
+    _req_fields = []
 
     def __init__(self, pars):
         '''
@@ -167,36 +168,6 @@ class MetaPars(object):
 
         return
 
-    def copy_with_sampled_pars(self, theta_pars):
-        '''
-        Scans through a MetaPars dict and sets any sampled meta pars
-        to the current value in a returned copy
-
-        theta_pars: dict
-            A dict of the sampled mcmc params for both the velocity
-            map and the tranformation matrices
-        '''
-
-        pars = self.pars.copy()
-
-        return MetaPars(self._set_sampled_pars(theta_pars, pars))
-
-    @classmethod
-    def _set_sampled_pars(cls, theta_pars, pars):
-        '''
-        Helper func for copy_with_sampled_pars()
-        Assumes pars is already a copy of self.pars
-        '''
-
-        for key, val in pars.items():
-            if isinstance(val, str) and (val.lower() == 'sampled'):
-                pars[key] = theta_pars[key]
-
-            elif isinstance(val, dict):
-                pars[key] = cls._set_sampled_pars(theta_pars, pars[key])
-
-        return pars
-
     def __getitem__(self, key):
         return self.pars[key]
 
@@ -218,7 +189,7 @@ class MetaPars(object):
         return self.__copy__()
 
     def __copy__(self):
-        return MetaPars(self.pars.copy())
+        return MetaPars(deepcopy(self.pars))
 
     def keys(self):
         return self.pars.keys()
@@ -228,3 +199,45 @@ class MetaPars(object):
 
     def values(self):
         return self.pars.values()
+
+class MCMCPars(MetaPars):
+
+    '''
+    Class that defines structure for the parameters
+    used in MCMC sampling for a given experiment, modeling
+    choices, etc.
+    '''
+
+    _req_fields = ['intensity', 'priors', 'units']
+    _opt_fields = ['run_options', 'velocity', '_likelihood']
+
+    def copy_with_sampled_pars(self, theta_pars):
+        '''
+        Scans through a MetaPars dict and sets any sampled meta pars
+        to the current value in a returned copy
+
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        '''
+
+        pars = deepcopy(self.pars)
+
+        return MCMCPars(self._set_sampled_pars(theta_pars, pars))
+
+    @classmethod
+    def _set_sampled_pars(cls, theta_pars, pars):
+        '''
+        Helper func for copy_with_sampled_pars()
+        Assumes pars is already a copy of self.pars
+        '''
+
+        for key, val in pars.items():
+            if isinstance(val, str) and (val.lower() == 'sampled'):
+                pars[key] = theta_pars[key]
+
+            elif isinstance(val, dict):
+                pars[key] = cls._set_sampled_pars(theta_pars, pars[key])
+
+        return pars
+

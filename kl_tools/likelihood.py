@@ -1,10 +1,10 @@
 from abc import abstractmethod
 import numpy as np
 import os
+from copy import deepcopy
 from time import time
 from scipy.interpolate import interp1d
 import scipy
-from scipy.sparse import identity, dia_matrix
 from astropy.units import Unit
 from argparse import ArgumentParser
 import galsim as gs
@@ -20,7 +20,7 @@ from parameters import Pars, MetaPars
 from velocity import VelocityMap
 from cube import DataVector, DataCube
 
-import pudb
+import ipdb
 
 # TODO: Make LogLikelihood a base class w/ abstract call,
 # and make current implementation for IFU
@@ -50,6 +50,9 @@ class LogBase(object):
 
         utils.check_type(parameters, 'pars', Pars)
         utils.check_type(datavector, 'datavector', DataVector)
+
+        # add an internal field to the meta pars dictionary
+        parameters.meta['_likelihood'] = {}
 
         self.parameters = parameters
         self.datavector = datavector
@@ -104,7 +107,7 @@ class LogPosterior(LogBase):
         '''
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
-            run, including SampledPars and MetaPars
+            run, including SampledPars and MCMCPars
         datavector: DataCube, etc.
             Arbitrary data vector that subclasses from DataVector.
             If DataCube, truncated to desired lambda bounds
@@ -128,7 +131,6 @@ class LogPosterior(LogBase):
         For the base class, this will just be the (prior, likelihood)
         tuple
         '''
-
         return (prior, likelihood)
 
     def __call__(self, theta, data, pars):
@@ -265,11 +267,9 @@ class LogLikelihood(LogBase):
             )
 
     def _compute_log_det(self, imap):
-        # TODO: it would be better to pass inv_cov directly,
-        # but for now we are only using diagonal inv_cov matrices
-        # anyway
+        # TODO: Adapt this to work w/ new DataCube's w/ weight maps!
         # log_det = imap.fitter.compute_marginalization_det(inv_cov=inv_cov, log=True)
-        log_det = imap.fitter.compute_marginalization_det(pars=self.pars, log=True)
+        log_det = imap.fitter.compute_marginalization_det(pars=self.meta, log=True)
 
         if log_det == 0:
             print('Warning: determinant is 0. Cannot compute ' +\
@@ -277,7 +277,7 @@ class LogLikelihood(LogBase):
 
         return log_det
 
-    def setup_vmap(self, theta_pars, model_name='default'):
+    def setup_vmap(self, theta_pars):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
@@ -285,6 +285,11 @@ class LogLikelihood(LogBase):
         model_name: str
             The model name to use when constructing the velocity map
         '''
+
+        try:
+            model_name = self.pars['velocity']['model']
+        except KeyError:
+            model_name = 'default'
 
         # no extras for this func
         return self._setup_vmap(theta_pars, self.meta, model_name)
@@ -298,23 +303,38 @@ class LogLikelihood(LogBase):
         vmodel = theta_pars
 
         for name in ['r_unit', 'v_unit']:
-            if name in meta_pars:
-                vmodel[name] = Unit(meta_pars[name])
+            if name in meta_pars['units']:
+                vmodel[name] = Unit(meta_pars['units'][name])
             else:
                 raise AttributeError(f'pars must have a value for {name}!')
 
         return VelocityMap(model_name, vmodel)
 
     @classmethod
-    def _setup_sed(cls, meta):
+    def _setup_sed(cls, theta_pars, datavector):
         '''
         numba can't handle most interpolators, so create
         a numpy one
-
-        meta: MetaPars
         '''
 
-        sed = meta['sed']
+        # sed pars that are sample-able
+        _sed_pars = ['z', 'R']
+
+        # if we are marginalizing over SED pars, modify stored
+        # SED with the sample
+        line_pars_update = {}
+
+        for par in _sed_pars:
+            if par in theta_pars:
+                line_pars_update[par] = theta_pars[par]
+
+        if len(line_pars_update) == 0:
+            line_pars_update = None
+
+        # NOTE: Right now, this will error if more than one
+        # emission lines are stored (as we don't have a line
+        # index to pass here), but can improve in future
+        sed = datavector.get_sed(line_pars_update=line_pars_update)
 
         return np.array([sed.x, sed.y])
 
@@ -403,7 +423,7 @@ class DataCubeLikelihood(LogLikelihood):
         # will be fast enough with numba anyway
         for i in range(Nspec):
 
-            diff = (datacube.slice(i) - model.slice(i)).reshape(Nx*Ny)
+            diff = (datacube.data[i] - model.data[i]).reshape(Nx*Ny)
             chi2 = diff.T.dot(inv_cov[i].dot(diff))
 
             loglike += -0.5*chi2
@@ -415,20 +435,18 @@ class DataCubeLikelihood(LogLikelihood):
 
         return loglike
 
-    def _setup_model(self, theta_pars, datavector):
+    def _setup_model(self, theta_pars, datacube):
         '''
-        Setup the model datacube given the input datavector datacube
+        Setup the model datacube given the input datacube datacube
 
         theta_pars: dict
             Dictionary of sampled pars
-        datavector: DataCube
+        datacube: DataCube
             Datavector datacube truncated to desired lambda bounds
         '''
 
-        Nx, Ny = datavector.Nx, datavector.Ny
-        Nspec = datavector.Nspec
-
-        lambdas = np.array(datavector.lambdas)
+        Nx, Ny = datacube.Nx, datacube.Ny
+        Nspec = datacube.Nspec
 
         # create grid of pixel centers in image coords
         X, Y = utils.build_map_grid(Nx, Ny)
@@ -436,87 +454,141 @@ class DataCubeLikelihood(LogLikelihood):
         # create 2D velocity & intensity maps given sampled transformation
         # parameters
         vmap = self.setup_vmap(theta_pars)
-        imap = self.setup_imap(theta_pars, datavector, self.meta)
+        imap = self.setup_imap(theta_pars, datacube)
 
-        # evaluate maps at pixel centers in obs plane
-        if 'use_numba' in self.pars:
-            use_numba = self.pars['use_numba']
-        else:
+        # TODO: temp for debugging!
+        self.imap = imap
+
+        try:
+            use_numba = self.meta['run_options']['use_numba']
+        except KeyError:
             use_numba = False
 
+        # evaluate maps at pixel centers in obs plane
         v_array = vmap(
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
 
-        i_array = imap.render(theta_pars, datavector, self.meta)
-
-        sed_array = self._setup_sed(self.meta)
-
-        # create datacube
-        shape = (Nspec, Nx, Ny)
+        # get both the emission line and continuum image
+        i_array, cont_array = imap.render(
+            theta_pars, datacube, self.meta, im_type='both'
+            )
 
         model_datacube = self._construct_model_datacube(
-            shape, lambdas, v_array, i_array
+            theta_pars, v_array, i_array, cont_array, datacube
             )
 
         return model_datacube
 
-    def setup_imap(self, theta_pars, datacube, meta):
+    def setup_imap(self, theta_pars, datacube):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
-        pars: MetaPars
-            A dict of anything else needed to compute the posterior
-        model_name: str
-            The model name to use when constructing the velocity map
+        datacube: DataCube
+            Datavector datacube truncated to desired lambda bounds
         '''
 
-        return self._setup_imap(theta_pars, datacube, meta)
+        # In some instances, the intensity  map will not change
+        # between samples
+        try:
+            static_imap = self.meta['_likelihood']['static_imap']
+        except KeyError:
+            static_imap = False
+
+        if static_imap is True:
+            if self.meta['_likelihood']['static_imap'] is True:
+                return self.meta['_likelihood']['imap']
+
+        # if not (or it is the first sample), generate imap and then
+        # check if it will be static
+        imap = self._setup_imap(theta_pars, datacube, self.meta)
+
+        # add static_imap check if not yet set
+        if 'static_imap' not in self.meta['_likelihood']:
+            self._check_for_static_imap(imap)
+
+        return imap
 
     @classmethod
     def _setup_imap(cls, theta_pars, datacube, meta):
         '''
-        See setup_imap()
+        See setup_imap(). Only runs if a new imap for the sample
+        is needed
         '''
 
         # Need to check if any basis func parameters are
         # being sampled over
         pars = meta.copy_with_sampled_pars(theta_pars)
 
-        imap_pars = pars['intensity'].copy()
+        imap_pars = deepcopy(pars['intensity'])
         imap_type = imap_pars['type']
         del imap_pars['type']
 
         return intensity.build_intensity_map(imap_type, datacube, imap_pars)
 
-    def _construct_model_datacube(self, shape, lambdas, v_array, i_array):
+    def _check_for_static_imap(self, imap):
+        '''
+        Check if given intensity model will require a new imap for each
+        sample. If not, internally store first imap and use it for
+        future samples
+
+        imap: IntensityMap
+            The generated intensity map object from _setup_imap()
+        '''
+
+        try:
+            self.meta['_likelihood'].update({
+                'static_imap': imap.is_static,
+                'imap': imap
+            })
+        except KeyError:
+            self.meta['_likelihood'] = {
+                'static_imap': imap.is_static,
+                'imap': imap
+            }
+
+        return
+
+    def _construct_model_datacube(self, theta_pars, v_array, i_array,
+                                  cont_array, datacube):
         '''
         Create the model datacube from model slices, using the evaluated
         velocity and intensity maps, SED, etc.
 
-        shape: tuple
-            A tuple of format (Nspec, Nx, Ny)
-        lambdas: list of tuples
-            A list of (lambda_b, lambda_r) tuples for each datacube slice
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
         v_array: np.array (2D)
             The vmap evaluated at image pixel positions for sampled pars.
             (Must be normalzied)
         i_array: np.array (2D)
             The imap evaluated at image pixel positions for sampled pars
+        cont_array: np.array (2D)
+            The imap of the fitted or modeled continuum
+        datacube: DataCube
+            Datavector datacube truncated to desired lambda bounds
         '''
 
-        Nspec, Nx, Ny = shape
+        Nspec, Nx, Ny = datacube.shape
 
-        data = np.zeros(shape)
+        data = np.zeros(datacube.shape)
 
-        sed_array = self._setup_sed(self.meta)
+        lambdas = np.array(datacube.lambdas)
+
+        sed_array = self._setup_sed(theta_pars, datacube)
+
+        if 'psf' in self.meta:
+            psf = self.meta['psf']
+        else:
+            psf = None
 
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)
 
             obs_array = self._compute_slice_model(
-                lambdas[i], sed_array, zfactor, i_array
+                lambdas[i], sed_array, zfactor, i_array, cont_array,
+                psf=psf, pix_scale=datacube.pix_scale
             )
 
             # NB: here you could do something fancier, such as a
@@ -526,16 +598,15 @@ class DataCubeLikelihood(LogLikelihood):
 
             data[i,:,:] = obs_array
 
-        pix_scale = self.meta['pix_scale']
-        bandpasses = self.meta['bandpasses']
         model_datacube = DataCube(
-            data=data, bandpasses=bandpasses, pix_scale=pix_scale
+            data=data, pars=datacube.pars
         )
 
         return model_datacube
 
     @classmethod
-    def _compute_slice_model(cls, lambdas, sed, zfactor, imap):
+    def _compute_slice_model(cls, lambdas, sed, zfactor, imap, continuum,
+                             psf=None, pix_scale=None):
         '''
         Compute datacube slice given lambda range, sed, redshift factor
         per pixel, and the intemsity map
@@ -551,9 +622,19 @@ class DataCubeLikelihood(LogLikelihood):
             A 2D numpy array corresponding to the (normalized by c) velocity
             map at each pixel
         imap: np.ndarray (2D)
-            A 2D numpy array corresponding to the source intensity map
+            An array corresponding to the source intensity map
             at the emission line
+        imap: np.ndarray (2D)
+            An array corresponding to the continuum model
+        psf: galsim.GSObject
+            A galsim object representing the PSF to convolve by
+        pix_scale: float
+            The image pixel scale. Required if convolving by PSF
         '''
+
+        # they must come in pairs for PSF convolution
+        if (psf is not None) and (pix_scale is None):
+            raise Exception('Must pass a pix_scale if convovling by PSF!')
 
         lblue, lred = lambdas[0], lambdas[1]
 
@@ -568,6 +649,25 @@ class DataCubeLikelihood(LogLikelihood):
         int_sed = (lred - lblue) * mean_sed
         model = imap * int_sed
 
+        # TODO: could generalize in future, but for now assume
+        #       a constant PSF for exposures
+        if (psf is not None) and (np.sum(model) > 0):
+            # This fails if the model has no flux, which
+            # can happen for very wrong redshift samples
+            nx, ny = imap.shape[0], imap.shape[1]
+            model_im = gs.Image(model, scale=pix_scale)
+            gal = gs.InterpolatedImage(model_im)
+            gal = gs.Convolve([gal, psf])
+            model = gal.drawImage(
+                nx=ny, ny=nx, method='no_pixel'
+                ).array
+
+        # for now, continuum is modeled as lambda-independent
+        # TODO: This assumes that the continuum template (if passed)
+        #       is *post* psf-convolution
+        if continuum is not None:
+            model += continuum
+
         return model
 
     def _setup_inv_cov_list(self, datacube):
@@ -577,18 +677,11 @@ class DataCubeLikelihood(LogLikelihood):
         returns: List of (Nx*Ny, Nx*Ny) scipy sparse matrices
         '''
 
-        Nspec = datacube.Nspec
-        Npix = datacube.Nx * datacube.Ny
+        # for now, we'll let each datacube class do this
+        # to allow for differences in weightmap definitions
+        # between experiments
 
-        weights = datacube.weights
-
-        inv_cov_list = []
-        for i in range(Nspec):
-            inv_var = ((1. / weights[i])**2).reshape(Npix)
-            inv_cov = dia_matrix((inv_var, 0), shape=(Npix,Npix))
-            inv_cov_list.append(inv_cov)
-
-        return inv_cov_list
+        return datacube.get_inv_cov_list()
 
 def get_likelihood_types():
     return LIKELIHOOD_TYPES
@@ -621,208 +714,6 @@ def build_likelihood_model(name, parameters, datavector):
 
     return likelihood
 
-#---------------------------------------------------------------------
-# Some helper functions
-
-def _setup_test_sed(pars):
-    '''
-    Build interpolation table for normalized emission line SED
-
-    pars: dict contianing emission line parameters
-
-    TODO: See if constructing the SED once and passing it in args
-          will cause problems for optimizations
-    '''
-
-    start = pars['sed_start']
-    end = pars['sed_end']
-    res = pars['sed_resolution']
-
-    lambdas = np.arange(start, end+res, res)
-
-    # Model emission line SED as gaussian
-    mu  = pars['line_value']
-    std = pars['line_std']
-    unit = pars['line_unit']
-
-    norm = 1. / (std * np.sqrt(2.*np.pi))
-    gauss = norm * np.exp(-0.5*(lambdas - mu)**2 / std**2)
-
-    sed = interp1d(lambdas, gauss)
-
-    return sed
-
-def setup_likelihood_test(true_pars, pars, shape, lambdas):
-
-    throughput = pars['bandpass_throughput']
-    unit = pars['bandpass_unit']
-    zp = pars['bandpass_zp']
-
-    bandpasses = []
-    for l1, l2 in lambdas:
-        bandpasses.append(gs.Bandpass(
-            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-            ))
-
-    assert shape[0] == len(bandpasses)
-
-    sed = _setup_test_sed(pars)
-
-    datacube, vmap, true_im = _setup_test_datacube(
-        shape, lambdas, bandpasses, sed, true_pars, pars
-        )
-
-    return datacube, sed, vmap, true_im
-
-def _setup_test_datacube(shape, lambdas, bandpasses, sed, true_pars, pars):
-    '''
-    TODO: Restructure to allow for more general truth input
-    '''
-
-    Nspec, Nx, Ny = shape[0], shape[1], shape[2]
-
-    imap_pars = {
-        'flux': pars['true_flux'],
-        'hlr': pars['true_hlr']
-    }
-
-    # a slight abuse of API call here, passing a dummy datacube to
-    # instantiate an inclined exponential as truth
-    dc = DataCube(shape=shape, bandpasses=bandpasses)
-    imap = intensity.build_intensity_map('inclined_exp', dc, imap_pars)
-    true_im = imap.render(true_pars, dc, pars)
-
-    # TODO: TESTING!!!
-    #This alows us to draw the test datacube from shapelets instead
-    # if pars['intensity']['type'] == 'basis':
-    #     try:
-    #         use_basis = pars['intensity']['use_basis_as_truth']
-
-    #         if use_basis is True:
-    #             print('WARNING: Using basis for true image as test')
-    #             ps = pars['pix_scale']
-    #             dc = DataCube(
-    #                 shape=(1,Nx,Ny), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
-    #                 )
-
-    #             basis_type = pars['intensity']['basis_type']
-    #             kwargs = pars['intensity']['basis_kwargs']
-    #             shapelet_imap = intensity.BasisIntensityMap(
-    #                 dc, basis_type, basis_kwargs=kwargs)
-
-    #             # Now make new truth image from shapelet MLE fit
-    #             true_im = shapelet_imap.render(true_pars, dc, pars)
-
-    #     except KeyError:
-    #         pass
-
-    vel_pars = {}
-    for name in true_pars.keys():
-        vel_pars[name] = true_pars[name]
-    vel_pars['v_unit'] = pars['v_unit']
-    vel_pars['r_unit'] = pars['r_unit']
-
-    vmap = VelocityMap('default', vel_pars)
-
-    X, Y = utils.build_map_grid(Nx, Ny)
-    Vnorm = vmap('obs', X, Y, normalized=True)
-
-    # We use this one for the return map
-    V = vmap('obs', X, Y)
-
-    data = np.zeros(shape)
-
-    # numba won't allow a scipy.interp1D object
-    sed_array = np.array([sed.x, sed.y])
-
-    for i in range(Nspec):
-        zfactor = 1. / (1 + Vnorm)
-
-        obs_array = DataCubeLikelihood._compute_slice_model(
-            lambdas[i], sed_array, zfactor, true_im
-            )
-
-        obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
-
-        noise = gs.GaussianNoise(sigma=pars['cov_sigma'])
-        obs_im.addNoise(noise)
-
-        data[i,:,:] = obs_im.array
-
-    pix_scale = pars['pix_scale']
-    datacube = DataCube(
-        data=data, bandpasses=bandpasses, pix_scale=pix_scale
-        )
-
-    # set weight maps according to added noise
-    datacube.set_weights(pars['cov_sigma'])
-
-    return datacube, V, true_im
-
-def setup_test_pars(nx, ny):
-    '''
-    Initialize a test set of true_pars and pars for
-    reasonable values
-
-    nx: int
-        Size of image on x-axis
-    ny: int
-        Size of image on y-axis
-    '''
-
-    true_pars = {
-        'g1': 0.05,
-        'g2': -0.025,
-        'theta_int': np.pi / 3,
-        'sini': 0.8,
-        'v0': 10.,
-        'vcirc': 200,
-        'rscale': 5,
-    }
-
-    # additional args
-    halpha = 656.28 # nm
-    R = 5000.
-    z = 0.3
-    pars = {
-        'true_flux': 1e5, # counts
-        'true_hlr': 5, # pixels
-        'v_unit': Unit('km / s'),
-        'r_unit': Unit('kpc'),
-        'z': z,
-        'spec_resolution': R,
-        'line_std': halpha * (1.+z) / R, # emission line SED std; nm
-        'line_value': 656.28, # emission line SED std; nm
-        'line_unit': Unit('nm'),
-        'sed_start': 650,
-        'sed_end': 660,
-        'sed_resolution': 0.025,
-        'sed_unit': Unit('nm'),
-        'cov_sigma': 1, # pixel counts; dummy value
-        'bandpass_throughput': '.2',
-        'bandpass_unit': 'nm',
-        'bandpass_zp': 30,
-        'use_numba': False,
-        'pix_scale': 1.,
-        'priors': {
-            'g1': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
-            'theta_int': priors.UniformPrior(0., np.pi),
-            'sini': priors.UniformPrior(0., 1.),
-            'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
-            'rscale': priors.UniformPrior(0, 10),
-        },
-        'intensity': {
-            'type': 'inclined_exp',
-
-        },
-        }
-    pars['Nx'] = nx
-    pars['Ny'] = ny
-
-    return true_pars, pars
-
 def main(args):
 
     show = args.show
@@ -840,158 +731,56 @@ def main(args):
         'rscale': 5,
     }
 
-    # additional args needed for prior / likelihood evaluation
-    pars = {
-        'Nx': 30, # pixels
-        'Ny': 30, # pixels
-        'pix_scale': 1., # arcsec / pix
-        'true_flux': 1e4, # counts
-        'true_hlr': 3, # pixels
-        'v_unit': Unit('km / s'),
-        'r_unit': Unit('kpc'),
-        'line_std': 2, # emission line SED std; nm
-        'line_value': 656.28, # emission line SED std; nm
-        'line_unit': Unit('nm'),
-        'sed_start': 655,
-        'sed_end': 657.5,
-        'sed_resolution': 0.025,
-        'sed_unit': Unit('nm'),
-        'cov_sigma': 1., # pixel counts; dummy value
-        'bandpass_throughput': '0.2',
-        'bandpass_unit': 'nm',
-        'bandpass_zp': 30,
+    mcmc_pars = {
+        'units': {
+            'v_unit': Unit('km / s'),
+            'r_unit': Unit('kpc'),
+        },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
-            'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
+            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             'theta_int': priors.UniformPrior(0., np.pi),
             'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20),
+            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
             'rscale': priors.UniformPrior(0, 10),
         },
         'intensity': {
-            'type': 'inclined_exp'
+            # For this test, use truth info
+            'type': 'inclined_exp',
+            'flux': 3.8e4, # counts
+            'hlr': 3.5,
         },
-        'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
+        'velocity': {
+            'model': 'centered'
+        },
+        'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
+        'run_options': {
+            'use_numba': False,
+            }
     }
 
-    li, le, dl = 654, 657, 1
-    lambdas = [(l, l+dl) for l in range(li, le, dl)]
+    # create dummy datacube for tests
+    data = np.zeros((100,10,10))
+    pix_scale = 1
+    bandpasses = [gs.Bandpass(
+        1., 'A', blue_limit=1e4, red_limit=2e4)
+                  for i in range(100)
+                  ]
+    datacube = DataCube(data, pix_scale=pix_scale, bandpasses=bandpasses)
 
-    Nx, Ny = pars['Nx'], pars['Ny']
-    Nspec = len(lambdas)
-    shape = (Nspec, Nx, Ny)
+    sampled_pars = list(true_pars)
+    pars = Pars(sampled_pars, mcmc_pars)
+    pars_order = pars.sampled.pars_order
 
-    print('Setting up test datacube and true Halpha image')
-    datacube, sed, vmap, true_im = setup_likelihood_test(
-        true_pars, pars, shape, lambdas
-        )
+    print('Creating LogPosterior object w/ default likelihood')
+    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
 
-    pars['sed'] = sed
+    print('Creating LogPosterior object w/ datacube likelihood')
+    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
 
-    outfile = os.path.join(outdir, 'true-im.png')
-    print(f'Saving true intensity profile in obs plane to {outfile}')
-    plt.imshow(true_im, origin='lower')
-    plt.colorbar()
-    plt.title('True Halpha profile in obs plane')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    outfile = os.path.join(outdir, 'vmap.png')
-    print(f'Saving true vamp in obs plane to {outfile}')
-    plt.imshow(vmap, origin='lower')
-    plt.colorbar(label='v / c')
-    plt.title('True velocity map in obs plane')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    outfile = os.path.join(outdir, 'datacube.fits')
-    print(f'Saving test datacube to {outfile}')
-    datacube.write(outfile)
-
-    outfile = os.path.join(outdir, 'datacube-slice.png')
-    print(f'Saving example datacube slice im to {outfile}')
-    lc = Nspec // 2
-    s = datacube.slices[lc]
-    plt.imshow(s._data, origin='lower')
-    plt.colorbar()
-    plt.title(f'Test datacube slice at lambda={lambdas[lc]}')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    theta = pars2theta(true_pars)
-
-    print('Computing log posterior for correct theta')
-    ptrue = log_posterior(theta, datacube, pars)[0]
-    chi2_true = -2.*ptrue / (Nx*Ny*Nspec - len(theta))
-    print(f'Posterior value = {ptrue:.2f}')
-
-    print('Computing log posterior for random scatter about correct theta')
-    N = 1000
-    p = []
-    chi2 = []
-    new_thetas = []
-    radius = 0.25
-    for i in range(N):
-        scale = radius * np.array(theta)
-        new_theta = theta + scale * np.random.rand(len(theta))
-        new_thetas.append(new_theta)
-        p.append(log_posterior(new_theta, datacube, pars)[0])
-        chi2.append(-2.*p[i] / (Nx*Ny*Nspec - len(new_theta)))
-    if N <= 10:
-        print(f'Posterior values:\n{p}')
-
-    # outfile = os.path.join(outdir, 'posterior-dist-ball.png')
-    outfile = os.path.join(outdir, 'posterior-dist-ball.png')
-    print('Plotting hist of reduced chi2 vs. chi2 at truth to {outfile}')
-    cmin = np.min(chi2)
-    cmax = np.max(chi2)
-    Nbins = 20
-    bins = np.linspace(cmin, cmax, num=Nbins, endpoint=True)
-    plt.hist(chi2, ec='k', bins=bins)
-    plt.axvline(chi2_true, ls='--', c='k', lw=2, label='Eval at true theta')
-    plt.legend()
-    plt.xlabel('Reduced Chi2')
-    plt.ylabel('Counts')
-    plt.yscale('log')
-    plt.title('Reduced chi2 evaluations for a random ball centered at truth\n '
-              f'with radius = {radius} * truth')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    outfile = os.path.join(outdir, 'theta-diff.png')
-    print('Plotting diff between true theta and MAP')
-    best = new_thetas[int(np.where(chi2 == np.min(chi2))[0])]
-    plt.plot(100. * (best-theta) / theta, 'o', c='k', markersize=5)
-    plt.axhline(0, c='k', ls='--', lw=2)
-    xx = range(0, len(best))
-    plt.fill_between(
-        xx, -10*np.ones(len(xx)), 10*np.ones(len(xx)), color='gray', alpha=0.25
-        )
-    my_xticks = len(best)*['']
-    for name, indx in PARS_ORDER.items():
-        my_xticks[indx] = name
-    plt.xticks(xx, my_xticks)
-    plt.xlabel('theta params')
-    plt.ylabel('Percent Error (MAP - true)')
-    plt.title('% Error in MAP vs. true sampled params')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+    print('Calling Logposterior w/ random theta')
+    theta = np.random.rand(len(sampled_pars))
 
     return 0
 

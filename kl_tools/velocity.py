@@ -6,10 +6,6 @@ from argparse import ArgumentParser
 import astropy.constants as const
 import astropy.units as units
 
-# i don't understand how to make this work correctly...
-# from . import utils
-# from . import transformation as transform
-# from . import numba_transformation as numba_transform
 import utils
 from transformation import TransformableImage
 import transformation as transform
@@ -49,6 +45,10 @@ class VelocityModel(object):
         # Needed if using numba for transformations
         # can set uring MCMC w/ self.build_pars_array()
         self.pars_array = None
+
+        # some models can include an offset, which adds a
+        # transformation layer
+        self.has_offset = False
 
         return
 
@@ -103,6 +103,31 @@ class VelocityModel(object):
     def get_transform_pars(self):
         pars = {}
         for name in ['g1', 'g2', 'sini', 'theta_int']:
+            pars[name] = self.pars[name]
+
+        return pars
+
+class OffsetVelocityModel(VelocityModel):
+    '''
+    Same as default velocity model, but w/ a 2D centroid offset
+    '''
+
+    name = 'offset'
+    _model_params = ['v0', 'vcirc', 'rscale', 'sini', 'x0', 'y0',
+                     'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
+
+    _ignore_params = ['beta', 'flux']
+
+    def __init__(self, model_pars):
+        super(OffsetVelocityModel, self).__init__(model_pars)
+
+        self.has_offset = True
+
+        return
+
+    def get_transform_pars(self):
+        pars = {}
+        for name in ['g1', 'g2', 'sini', 'theta_int', 'x0', 'y0']:
             pars[name] = self.pars[name]
 
         return pars
@@ -166,19 +191,28 @@ class VelocityMap(TransformableImage):
         else:
             norm = 1.
 
+        if self.model.has_offset is True:
+            offset = True
+        else:
+            offset = False
+
         return norm * self._eval_map_in_plane(
-            plane, x, y, speed=speed, use_numba=use_numba
+            plane, offset, x, y, speed=speed, use_numba=use_numba
             )
 
-    def _eval_map_in_plane(self, plane, x, y, speed=False, use_numba=False):
+    def _eval_map_in_plane(self, plane, offset, x, y, speed=False,
+                           use_numba=False):
         '''
         We use static methods defined in transformation.py
         to speed up these very common function calls
 
         The input (x,y) position is defined in the plane
 
-        # The input (x,y) position is transformed from the obs
-        # plane to the relevant plane
+        The input (x,y) position is transformed from the obs
+        plane to the relevant plane
+
+        offset determines whether to include the centroid translation
+        layer. Will skip if not needed
 
         speed: bool
             Set to True to return speed map instead of velocity
@@ -194,7 +228,7 @@ class VelocityMap(TransformableImage):
 
         func = self._get_plane_eval_func(plane, use_numba=use_numba)
 
-        return func(pars, x, y, speed=speed)
+        return func(pars, x, y, speed=speed, offset=offset)
 
     @classmethod
     def _eval_in_obs_plane(cls, pars, x, y, **kwargs):
@@ -209,9 +243,19 @@ class VelocityMap(TransformableImage):
         velocity
         '''
 
-        # evaluate vmap in obs plane without any systematic offset
-        obs_vmap = super(VelocityMap, cls)._eval_in_obs_plane(
-            pars, x, y, **kwargs)
+        cen_offset = kwargs['offset']
+
+        # first evaluate vmap in obs plane without any systematic
+        # velocity offset (distinct from centroid offset)
+        if cen_offset is True:
+            obs_vmap = super(VelocityMap, cls)._eval_in_obs_plane(
+                pars, x, y, **kwargs
+                )
+        else:
+            # skip the centroid offset translation layer
+            obs_vmap = super(VelocityMap, cls)._eval_in_source_plane(
+                pars, x, y, **kwargs
+                )
 
         # now add systematic velocity
         return pars['v0'] + obs_vmap
@@ -359,7 +403,7 @@ class VelocityMap(TransformableImage):
         return
 
     def plot_all_planes(self, plot_kwargs={}, show=True, close=True, outfile=None,
-                        size=(9, 8), speed=False, normalized=False, center=True):
+                        size=(13, 8), speed=False, normalized=False, center=True):
         if size not in plot_kwargs:
             plot_kwargs['size'] = size
 
@@ -394,16 +438,15 @@ class VelocityMap(TransformableImage):
 
         # Figure out subplot grid
         Nplanes = len(self._planes)
-        sqrt = np.sqrt(Nplanes)
 
-        if sqrt % 1 == 0:
-            N = sqrt
+        if Nplanes == 4:
+            ncols = 2
         else:
-            N = int(sqrt+1)
+            ncols = 3
 
         k = 1
         for plane in self._planes:
-            plt.subplot(N,N,k)
+            plt.subplot(2,ncols,k)
             # X, Y = transform.transform_coords(Xdisk, Ydisk, 'disk', plane, pars)
             # X,Y = Xdisk, Ydisk
             # Xplane, Yplane = transform.transform_coords(X,Y, plane)
@@ -425,7 +468,7 @@ class VelocityMap(TransformableImage):
 
         return
 
-    def plot_map_transforms(self, size=(9,8), outfile=None, show=True, close=True,
+    def plot_map_transforms(self, size=None, outfile=None, show=True, close=True,
                             speed=False, center=True, rmax=None):
 
         pars = self.model.pars
@@ -455,12 +498,23 @@ class VelocityMap(TransformableImage):
         else:
             mtype = 'Velocity'
 
-        planes = ['disk', 'gal', 'source', 'obs']
+        # don't bother plotting cen plane if there is no offset
+        planes = self._planes.copy()
+        if self.model.has_offset is False:
+            planes.remove('cen')
+
+        if len(planes) == 4:
+            ncols = 2
+            size = (9,8)
+        else:
+            ncols = 3
+            size = (13,8)
+
         for k, plane in enumerate(planes):
             Xplane, Yplane = transform.transform_coords(X, Y, 'disk', plane, pars)
             Vplane = self(plane, Xplane, Yplane, speed=speed)
 
-            plt.subplot(2,2,k+1)
+            plt.subplot(2,ncols,k+1)
             plt.pcolormesh(Xplane, Yplane, Vplane)
             plt.colorbar(label=f'{vunit}')
             plt.xlim(xlim)
@@ -494,6 +548,7 @@ def get_model_types():
 MODEL_TYPES = {
     'default': VelocityModel,
     'centered': VelocityModel,
+    'offset': OffsetVelocityModel
     }
 
 def build_model(name, pars, logger=None):
@@ -518,11 +573,11 @@ def main(args):
 
     model_name = 'centered'
     model_pars = {
-        'g1': 0.05,
-        'g2': -0.025,
+        'g1': 0.1,
+        'g2': -0.075,
         'theta_int': np.pi / 3,
-        # 'sini': 0.8,
-        'sini': 0.0,
+        'sini': 0.8,
+        # 'sini': 0.0,
         'v0': 10.,
         'vcirc': 200,
         'rscale': 5,
@@ -574,6 +629,47 @@ def main(args):
     vmap.plot_all_planes(
         plot_kwargs=plot_kwargs, show=show, outfile=outfile,
                          normalized=True, center=center,
+        )
+
+    print('Creating an OffsetVelocityModel')
+    model_name = 'offset'
+    model_pars = {
+        'g1': 0.1,
+        'g2': -0.075,
+        'theta_int': np.pi / 3,
+        'sini': 0.8,
+        'v0': 10.,
+        'vcirc': 200,
+        'rscale': 5,
+        'x0': 10,
+        'y0': 10,
+        'r_unit': units.Unit('pixel'),
+        'v_unit': units.km / units.s,
+    }
+    vmodel = build_model(model_name, model_pars)
+
+    print('Creating VelocityMap from OffsetVelocityModel')
+    offset_vmap = VelocityMap(model_name, model_pars)
+
+    print('Making speed map transform plots for offset vmap')
+    outfile = os.path.join(outdir, f'speedmap-transorms-offset.png')
+    offset_vmap.plot_map_transforms(
+        outfile=outfile, show=show, speed=True, center=center,
+        rmax=rmax
+        )
+
+    print('Making velocity map transform plots for offset vmap')
+    outfile = os.path.join(outdir, f'vmap-transorms-offset.png')
+    offset_vmap.plot_map_transforms(
+        outfile=outfile, show=show, speed=False, center=center,
+        rmax=rmax
+        )
+
+    print('Making combined velocity field plot for offset vmap')
+    plot_kwargs = {'rmax':rmax}
+    outfile = os.path.join(outdir, 'vmap-all-offset.png')
+    offset_vmap.plot_all_planes(
+        plot_kwargs=plot_kwargs, show=show, outfile=outfile, center=center,
         )
 
     return 0

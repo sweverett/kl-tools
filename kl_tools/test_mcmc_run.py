@@ -33,7 +33,7 @@ parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
@@ -104,7 +104,7 @@ def main(args, pool):
         'intensity': {
             # For this test, use truth info
             'type': 'inclined_exp',
-            'flux': 2.8e4, # counts
+            'flux': 3.8e4, # counts
             'hlr': 3.5,
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
@@ -136,7 +136,7 @@ def main(args, pool):
         # image meta pars
         'Nx': 40, # pixels
         'Ny': 40, # pixels
-        'pix_scale': 0.25, # arcsec / pixel
+        'pix_scale': 0.5, # arcsec / pixel
         # intensity meta pars
         'true_flux': mcmc_pars['intensity']['flux'],
         'true_hlr': mcmc_pars['intensity']['hlr'], # pixels
@@ -221,28 +221,32 @@ def main(args, pool):
     # Setup sampler
 
     ndims = log_posterior.ndims
-    nwalkers = 2*ndims
 
     print(f'Setting up {sampler} MCMCRunner')
-    args = [nwalkers, ndims]
+    kwargs = {}
     if sampler in ['zeus', 'emcee']:
-        args += [log_posterior, datacube, pars]
-        kwargs = {}
+        nwalkers = 2*ndims
+        args = [nwalkers, ndims, log_posterior, datacube, pars]
 
     elif sampler == 'poco':
-        kwargs = {
-            'loglike': log_posterior.log_likelihood,
-            'loglike_args': [datacube],
-            'logprior': log_posterior.log_prior,
-        }
+        nwalkers = 1000
+        args = [
+            nwalkers,
+            ndims,
+            log_posterior.log_likelihood,
+            log_posterior.log_prior,
+            datacube,
+            pars
+            ]
 
     runner = build_mcmc_runner(sampler, args, kwargs)
 
     #-----------------------------------------------------------------
     # Run MCMC
+
     print('Starting mcmc run')
     # try:
-    runner.run(nsteps, pool)
+    runner.run(pool, nsteps=nsteps)
     # except Exception as e:
     #     g1 = runner.start[:,0]
     #     g2 = runner.start[:,1]

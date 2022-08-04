@@ -652,7 +652,8 @@ class DataCubeLikelihood(LogLikelihood):
         # TODO: could generalize in future, but for now assume
         #       a constant PSF for exposures
         if (psf is not None) and (np.sum(model) > 0):
-            # This fails if the model has no flux.
+            # This fails if the model has no flux, which
+            # can happen for very wrong redshift samples
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
             gal = gs.InterpolatedImage(model_im)

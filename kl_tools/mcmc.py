@@ -126,6 +126,8 @@ class MCMCRunner(object):
         self.MAP_true = None # if actual loglikelihood values are passed
         self.MAP_indx = None # if actual loglikelihood values are passed
 
+        self.sampler = None
+
         return
 
     @property
@@ -146,6 +148,10 @@ class MCMCRunner(object):
         '''
         pass
 
+    @property
+    def meta(self):
+        pass
+
     @abstractmethod
     def _initialize_sampler(self, pool=None):
         pass
@@ -162,12 +168,12 @@ class MCMCRunner(object):
         each prior, centered at the max of the prior
         '''
 
-        if 'priors' in self.kwargs['pars']:
+        if 'priors' in self.meta:
             # use peak of priors for initialization
             self.start = np.zeros((self.nwalkers, self.ndim))
 
             for name, indx in self.pars_order.items():
-                prior = self.kwargs['pars']['priors'][name]
+                prior = self.meta['priors'][name]
                 peak, cen = prior.peak, prior.cen
 
                 base = peak if peak is not None else cen
@@ -223,14 +229,14 @@ class MCMCRunner(object):
 
         return outliers, Noutliers
 
-    def run(self, nsteps, pool, start=None, return_sampler=False,
+    def run(self, pool, nsteps=None, start=None, return_sampler=False,
             vb=True):
         '''
-        nsteps: int
-            Number of MCMC steps / iterations
         pool: Pool
             A pool object returned from schwimmbad. Can be SerialPool,
             MultiPool, or MPIPool
+        nsteps: int
+            Number of MCMC steps / iterations
         start: list
             Can provide starting walker positions if you don't
             want to use the default initialization
@@ -267,13 +273,9 @@ class MCMCRunner(object):
                     pool.wait()
                     sys.exit(0)
 
-            sampler = self._initialize_sampler(pool=pool)
+            self.sampler = self._initialize_sampler(pool=pool)
 
-            sampler.run_mcmc(
-                start, nsteps, progress=progress
-                )
-
-        self.sampler = sampler
+            self._run_sampler(start, nsteps=nsteps, progress=progress)
 
         self.has_run = True
 
@@ -281,6 +283,25 @@ class MCMCRunner(object):
             return self.sampler
         else:
             return
+
+    def _run_sampler(self, start, nsteps=None, progress=True):
+        '''
+        A standard way to run the sampler in the emcee/zeus convention.
+        Can be overloaded by subclasses for different sampler calls
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        if nsteps is None:
+            raise Exception('nsteps should be set except for a few ' +\
+                            'specific samplers!')
+
+        self.sampler.run_mcmc(
+            start, nsteps, progress=progress
+            )
+
+        return
 
     def set_burn_in(burn_in):
         self.burn_in = burn_in
@@ -508,6 +529,10 @@ class ZeusRunner(MCMCRunner):
     def pfunc(self):
         return self.logpost
 
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+
 class KLensZeusRunner(ZeusRunner):
     '''
     Main difference is that we assume args=[datacube] and
@@ -530,8 +555,9 @@ class KLensZeusRunner(ZeusRunner):
         '''
 
         super(KLensZeusRunner, self).__init__(
-            nwalkers, ndim, logpost=pfunc, logpost_args=[datacube],
-            logpost_kwargs={'pars': pars.meta.pars}
+            nwalkers, ndim, logpost=pfunc, logpost_args=[datacube, pars],
+            # nwalkers, ndim, logpost=pfunc, logpost_args=[datacube],
+            # logpost_kwargs={'pars': pars.meta.pars}
             )
 
         self.datacube = datacube
@@ -727,12 +753,32 @@ class KLensEmceeRunner(KLensZeusRunner):
 
         return sampler
 
-class KLensPocoRunner(MCMCRunner):
+class PocoRunner(MCMCRunner):
+
+    def _initialize_sampler(self, pool=None):
+        sampler = pc.Sampler(
+            self.nparticles, self.ndim,
+            log_likelihood=self.loglike,
+            log_prior=self.logprior,
+            log_likelihood_args=self.loglike_args,
+            log_likelihood_kwargs=self.loglike_kwargs,
+            log_prior_args=self.logprior_args,
+            log_prior_kwargs=self.logprior_kwargs,
+            pool=pool,
+            infer_vectorization=False
+            # NOTE: wes bounds as we implement this in our priors
+            #bounds=bounds
+            )
+
+        return sampler
+
+class KLensPocoRunner(PocoRunner):
     '''
     See https://pocomc.readthedocs.io/en/latest/
     '''
 
     def __init__(self, nparticles, ndim, loglike, logprior,
+                 datacube, pars,
                  loglike_args=None, loglike_kwargs=None,
                  logprior_args=None, logprior_kwargs=None):
         '''
@@ -745,6 +791,11 @@ class KLensPocoRunner(MCMCRunner):
             Log likelihood function to sample from
         logprior: function / callable
             Log prior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
+              covariance matrix, SED definition, etc.
         loglike_args: list
             List of additional args needed to evaluate log likelihood,
             such as the data vector, covariance matrix, etc.
@@ -759,11 +810,28 @@ class KLensPocoRunner(MCMCRunner):
             such as meta parameters, etc.
 
         NOTE: to make this consistent w/ the other mcmc runner classes,
-        you must pass your Pars object in loglike_kwargs, not prior!
+        you must pass datacube & pars separately from the rest of the
+        args/kwargs!
         '''
 
-        # super(PocoRunner, self).__init__(
-        #     )
+        if loglike_args is not None:
+            loglike_args = [datacube] + loglike_args
+        else:
+            loglike_args = [datacube]
+
+        super(KLensPocoRunner, self).__init__(
+            nparticles, ndim,
+            loglike=loglike, logprior=logprior,
+            loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
+            logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+            )
+
+        self.datacube = datacube
+        self.pars = pars
+
+        self.pars_order = self.pars.sampled.pars_order
+
+        self.MAP_vmap = None
 
         #...
 
@@ -779,21 +847,23 @@ class KLensPocoRunner(MCMCRunner):
     def kwargs(self):
         return self.loglike_kwargs
 
-    def _initialize_sampler(self, pool=None):
-        sampler = pc.Sampler(
-            self.nparticles, self.ndim,
-            log_likelihood=self.loglike,
-            log_prior=self.logprior,
-            log_likelihood_args=self.args,
-            log_likelihood_kwargs=self.kwargs,
-            log_prior_args=self.prior_args,
-            log_prior_kwargs=self.prior_kwargs,
-            pool=pool
-            # NOTE: wes bounds as we implement this in our priors
-            #bounds=bounds
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+
+    def _run_sampler(self, start, nsteps=None, progress=True):
+        '''
+        The poco-specific way to run the sampler object
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        self.sampler.run(
+            start, progress=progress
             )
 
-        return sampler
+        return
 
 def get_runner_types():
     return RUNNER_TYPES

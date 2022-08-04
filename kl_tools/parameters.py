@@ -1,7 +1,7 @@
 from copy import deepcopy
 import utils
 
-import pudb
+import ipdb
 
 '''
 This file defines the structure and conversions between a params dict

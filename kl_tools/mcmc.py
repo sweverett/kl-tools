@@ -177,12 +177,13 @@ class MCMCRunner(object):
                 peak, cen = prior.peak, prior.cen
 
                 base = peak if peak is not None else cen
-                radius = base*scale if base !=0 else scale
 
-                # for (g1,g2), there seems to be some additional
-                # outlier problems. So reduce
-                if name in ['g1', 'g2']:
-                    radius /= 2.
+                if prior.scale is not None:
+                    radius = prior.scale
+                elif base != 0:
+                    radius = base*scale
+                else:
+                    radius = scale
 
                 # random ball about base value
                 ball = radius * np.random.randn(self.nwalkers)
@@ -215,16 +216,16 @@ class MCMCRunner(object):
         prior: prior being sampled with random points about ball
         '''
 
-        outliers = np.abs(ball) > 2.*radius
+        outliers = np.abs(ball) > 3.*radius
         if isinstance(prior, priors.UniformPrior):
             left, right = prior.left, prior.right
             outliers = outliers | \
-                        ((base + ball) < left) | \
-                        ((base + ball) > right)
+                        ((base + ball) <= left) | \
+                        ((base + ball) >= right)
         elif isinstance(prior, priors.GaussPrior):
             if prior.clip_sigmas is not None:
                 outliers = outliers | \
-                    (abs(base + ball - prior.mu) > prior.clip_sigmas)
+                    (abs(ball) > prior.clip_sigmas*prior.sigma)
         Noutliers = len(np.where(outliers == True)[0])
 
         return outliers, Noutliers

@@ -42,6 +42,7 @@ class UniformPrior(Prior):
         # There is no defined peak for a uniform dist
         self.peak = None
         self.cen = np.mean([left, right])
+        self.scale = None
 
         return
 
@@ -104,6 +105,7 @@ class GaussPrior(Prior):
 
         self.peak = mu
         self.cen = mu
+        self.scale = self.sigma
 
         return
 

@@ -826,158 +826,56 @@ def main(args):
         'rscale': 5,
     }
 
-    # additional args needed for prior / likelihood evaluation
-    pars = {
-        'Nx': 30, # pixels
-        'Ny': 30, # pixels
-        'pix_scale': 1., # arcsec / pix
-        'true_flux': 1e4, # counts
-        'true_hlr': 3, # pixels
-        'v_unit': Unit('km / s'),
-        'r_unit': Unit('kpc'),
-        'line_std': 2, # emission line SED std; nm
-        'line_value': 656.28, # emission line SED std; nm
-        'line_unit': Unit('nm'),
-        'sed_start': 655,
-        'sed_end': 657.5,
-        'sed_resolution': 0.025,
-        'sed_unit': Unit('nm'),
-        'cov_sigma': 1., # pixel counts; dummy value
-        'bandpass_throughput': '0.2',
-        'bandpass_unit': 'nm',
-        'bandpass_zp': 30,
+    mcmc_pars = {
+        'units': {
+            'v_unit': Unit('km / s'),
+            'r_unit': Unit('kpc'),
+        },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
-            'g2': priors.GaussPrior(0., 0.1),# clip_sigmas=3),
+            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             'theta_int': priors.UniformPrior(0., np.pi),
             'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20),
+            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
             'rscale': priors.UniformPrior(0, 10),
         },
         'intensity': {
-            'type': 'inclined_exp'
+            # For this test, use truth info
+            'type': 'inclined_exp',
+            'flux': 3.8e4, # counts
+            'hlr': 3.5,
         },
-        'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
+        'velocity': {
+            'model': 'centered'
+        },
+        'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
+        'run_options': {
+            'use_numba': False,
+            }
     }
 
-    li, le, dl = 654, 657, 1
-    lambdas = [(l, l+dl) for l in range(li, le, dl)]
+    # create dummy datacube for tests
+    data = np.zeros((100,10,10))
+    pix_scale = 1
+    bandpasses = [gs.Bandpass(
+        1., 'A', blue_limit=1e4, red_limit=2e4)
+                  for i in range(100)
+                  ]
+    datacube = DataCube(data, pix_scale=pix_scale, bandpasses=bandpasses)
 
-    Nx, Ny = pars['Nx'], pars['Ny']
-    Nspec = len(lambdas)
-    shape = (Nspec, Nx, Ny)
+    sampled_pars = list(true_pars)
+    pars = Pars(sampled_pars, mcmc_pars)
+    pars_order = pars.sampled.pars_order
 
-    print('Setting up test datacube and true Halpha image')
-    datacube, sed, vmap, true_im = setup_likelihood_test(
-        true_pars, pars, shape, lambdas
-        )
+    print('Creating LogPosterior object w/ default likelihood')
+    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
 
-    pars['sed'] = sed
+    print('Creating LogPosterior object w/ datacube likelihood')
+    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
 
-    outfile = os.path.join(outdir, 'true-im.png')
-    print(f'Saving true intensity profile in obs plane to {outfile}')
-    plt.imshow(true_im, origin='lower')
-    plt.colorbar()
-    plt.title('True Halpha profile in obs plane')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    outfile = os.path.join(outdir, 'vmap.png')
-    print(f'Saving true vamp in obs plane to {outfile}')
-    plt.imshow(vmap, origin='lower')
-    plt.colorbar(label='v / c')
-    plt.title('True velocity map in obs plane')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    outfile = os.path.join(outdir, 'datacube.fits')
-    print(f'Saving test datacube to {outfile}')
-    datacube.write(outfile)
-
-    outfile = os.path.join(outdir, 'datacube-slice.png')
-    print(f'Saving example datacube slice im to {outfile}')
-    lc = Nspec // 2
-    s = datacube.slices[lc]
-    plt.imshow(s._data, origin='lower')
-    plt.colorbar()
-    plt.title(f'Test datacube slice at lambda={lambdas[lc]}')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    theta = pars2theta(true_pars)
-
-    print('Computing log posterior for correct theta')
-    ptrue = log_posterior(theta, datacube, pars)[0]
-    chi2_true = -2.*ptrue / (Nx*Ny*Nspec - len(theta))
-    print(f'Posterior value = {ptrue:.2f}')
-
-    print('Computing log posterior for random scatter about correct theta')
-    N = 1000
-    p = []
-    chi2 = []
-    new_thetas = []
-    radius = 0.25
-    for i in range(N):
-        scale = radius * np.array(theta)
-        new_theta = theta + scale * np.random.rand(len(theta))
-        new_thetas.append(new_theta)
-        p.append(log_posterior(new_theta, datacube, pars)[0])
-        chi2.append(-2.*p[i] / (Nx*Ny*Nspec - len(new_theta)))
-    if N <= 10:
-        print(f'Posterior values:\n{p}')
-
-    # outfile = os.path.join(outdir, 'posterior-dist-ball.png')
-    outfile = os.path.join(outdir, 'posterior-dist-ball.png')
-    print('Plotting hist of reduced chi2 vs. chi2 at truth to {outfile}')
-    cmin = np.min(chi2)
-    cmax = np.max(chi2)
-    Nbins = 20
-    bins = np.linspace(cmin, cmax, num=Nbins, endpoint=True)
-    plt.hist(chi2, ec='k', bins=bins)
-    plt.axvline(chi2_true, ls='--', c='k', lw=2, label='Eval at true theta')
-    plt.legend()
-    plt.xlabel('Reduced Chi2')
-    plt.ylabel('Counts')
-    plt.yscale('log')
-    plt.title('Reduced chi2 evaluations for a random ball centered at truth\n '
-              f'with radius = {radius} * truth')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    outfile = os.path.join(outdir, 'theta-diff.png')
-    print('Plotting diff between true theta and MAP')
-    best = new_thetas[int(np.where(chi2 == np.min(chi2))[0])]
-    plt.plot(100. * (best-theta) / theta, 'o', c='k', markersize=5)
-    plt.axhline(0, c='k', ls='--', lw=2)
-    xx = range(0, len(best))
-    plt.fill_between(
-        xx, -10*np.ones(len(xx)), 10*np.ones(len(xx)), color='gray', alpha=0.25
-        )
-    my_xticks = len(best)*['']
-    for name, indx in PARS_ORDER.items():
-        my_xticks[indx] = name
-    plt.xticks(xx, my_xticks)
-    plt.xlabel('theta params')
-    plt.ylabel('Percent Error (MAP - true)')
-    plt.title('% Error in MAP vs. true sampled params')
-    plt.savefig(outfile, bbox_inches='tight')
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+    print('Calling Logposterior w/ random theta')
+    theta = np.random.rand(len(sampled_pars))
 
     return 0
 

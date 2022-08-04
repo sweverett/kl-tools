@@ -101,8 +101,8 @@ def main(args, pool):
             'rscale': priors.UniformPrior(0, 40),
             'x0': priors.GaussPrior(0, 2.5),
             'y0': priors.GaussPrior(0, 2.5),
-            'z': priors.GaussPrior(0.2466, .0025, clip_sigmas=3),
-            'R': priors.GaussPrior(3200, 15, clip_sigmas=3),
+            'z': priors.GaussPrior(0.2466, .00001, clip_sigmas=3),
+            'R': priors.GaussPrior(3200, 20)#, clip_sigmas=3),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
@@ -134,7 +134,7 @@ def main(args, pool):
             },
         # 'marginalize_intensity': True,
         # 'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
-        'psf': gs.Moffat(fwhm=.8, beta=1, flux=1.0), # fwhm in arcsec
+        'psf': gs.Moffat(fwhm=.8, beta=2.5, flux=1.0), # fwhm in arcsec
         'run_options': {
             'remove_continuum': True,
             'use_numba': False

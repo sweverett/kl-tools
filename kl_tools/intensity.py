@@ -295,6 +295,16 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # TODO: would be nice to generalize for chromatic
+        # PSFs in the future!
+        if 'psf' in basis_kwargs:
+            # always default an explicitly passed psf
+            self.psf = basis_kwargs['psf']
+        else:
+            # should return None if no PSF is stored
+            # in datacube pars
+            self.psf = datacube.get_psf()
+
         # One way to handle the emission line continuum is to build
         # a template function from the datacube
         try:

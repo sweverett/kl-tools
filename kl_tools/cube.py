@@ -322,6 +322,22 @@ class DataCube(DataVector):
         except KeyError:
             raise AttributeError('Emission lines never set for datacube!')
 
+    def get_psf(self, wavelength=None, wav_unit=None):
+        '''
+        Return the PSF of the datacube at the desired wavelength.
+        In many cases this may be constant, in which case a wavelength
+        does not have to be passed
+
+        wavelength: float
+            The wavelength of the PSF. Optional if PSF is achromatic
+        wav_unit: astropy.units.Unit
+            The unit of the passed wavelength. If not passed, will default
+            to using the unit of the stored PSF in CubePars
+        '''
+
+
+        raise NotImplementedError('finish this!')
+
     @property
     def data(self):
         return self._data

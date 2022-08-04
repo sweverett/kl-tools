@@ -525,7 +525,23 @@ class IntensityMapFitter(object):
         for n in range(self.basis.N):
             func, func_args = self.basis.get_basis_func(n)
             args = [x, y, *func_args]
-            self.design_mat[:,n] = func(*args)
+            # self.design_mat[:,n] = func(*args)
+
+            # ipdb.set_trace()
+            try:
+                psf = gs.Moffat(fwhm=0.8, flux=1, beta=2.5)
+                pix_scale = 0.2
+                bim = gs.Image(func(*args).real.reshape(self.ny, self.nx), scale=pix_scale)
+                bgs = gs.InterpolatedImage(bim)
+                conv = gs.Convolve(psf, bgs)
+                conv_bfunc = conv.drawImage(scale=pix_scale, nx=self.ny, ny=self.nx)
+                self.design_mat[:,n] = conv_bfunc.array.reshape(self.nx*self.ny)
+            except:
+                print(f'basis function {n} failed!')
+                self.design_mat[:,n] = func(*args)
+                # pass
+            # except:
+            #     ipdb.set_trace()
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -670,8 +686,20 @@ class IntensityMapFitter(object):
         # Initialize pseudo-inverse given the transformation parameters
         self._initialize_pseudo_inv(theta_pars)
 
-        # We will fit to the sum of all slices
+
         data = datacube.stack().reshape(nx*ny)
+        # TODO: generalize!
+        # if 'psf' in pars:
+        #     ipdb.set_trace()
+        #     data_im = gs.Image(data, scale=datacube.pix_scale)#, nx=datacube.Ny, ny=datacube.Nx)
+        #     data_gs = gs.InterpolatedImage(data_im)
+        #     inv_psf = gs.Deconvolve(pars['psf'])
+        #     deconv = gs.Convolve(inv_psf, data_gs)
+        #     deconv_im = deconv.drawImage(nx=ny, ny=nx, scale=datacube.pix_scale)
+        #     data = deconv_im.array.reshape(nx*ny)
+        # else:
+        #     # We will fit to the sum of all slices
+        #     data.reshape(nx*ny)
 
         # Find MLE basis coefficients
         mle_coeff = self._fit_mle_coeff(data, cov=cov)

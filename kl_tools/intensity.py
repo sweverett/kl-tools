@@ -573,34 +573,25 @@ class IntensityMapFitter(object):
 
         pix_scale = self.basis.pix_scale
 
-        # nx, ny = self.nx, self.ny
-        # nx, ny = self.ny, self.nx
+        nx, ny = self.nx, self.ny
 
         if self.basis.is_complex:
             real = bfunc.real
             imag = bfunc.imag
 
             if np.sum(real) != 0:
-                real_im = gs.Image(real.reshape(ny,nx), scale=pix_scale)
-                real_gs = gs.InterpolatedImage(real_im)
-                real_conv = gs.Convolve([self.psf, real_gs])
-                real_conv_b = real_conv.drawImage(
-                    scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
-                ).array.reshape(nx*ny)
+                real_conv_b = self._convolve_basis_func(real)
             else:
                 real_conv_b = np.zeros(nx*ny)
             if np.sum(imag) != 0:
-                imag_im = gs.Image(imag.reshape(ny,nx), scale=pix_scale)
-                imag_gs = gs.InterpolatedImage(imag_im)
-                imag_conv = gs.Convolve([self.psf, imag_gs])
-                imag_conv_b = imag_conv.drawImage(
-                    scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
-                ).array.reshape(nx*ny)
+                imag_conv_b = self._convolve_basis_func(imag)
             else:
                 imag_conv_b = np.zeros(nx*ny)
-
         else:
-            pass
+            if np.sum(bfunc) != 0:
+                conv_b = self._convolve_basis_func(bfunc)
+            else:
+                conv_b = np.zeros(nx*ny)
 
         return real_conv_b + 1j*imag_conv_b
 
@@ -610,18 +601,23 @@ class IntensityMapFitter(object):
         interpolated image, and then colvolve by the psf
 
         bfunc: np.array (1D)
-            A vector of a basis function evaluated on the pixel grid
+            A vector of a basis function evaluateon the pixel grid
         '''
 
         nx, ny = self.nx, self.ny
+        pix_scale = self.basis.pix_scale
 
-        # image (nx,ny) flipped to match the return of np.meshgrid
-        real_im = gs.Image(bfunc.reshape(ny,nx), scale=pix_scale)
-        real_gs = gs.InterpolatedImage(real_im)
-        real_conv = gs.Convolve([self.psf, real_gs])
-        real_conv_b = real_conv.drawImage(
-            scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
-        ).array.reshape(nx*ny)
+        im = gs.Image(bfunc.reshape(nx,ny), scale=pix_scale)
+        im_gs = gs.InterpolatedImage(im)
+        conv = gs.Convolve([self.psf, im_gs])
+        conv_func = conv.drawImage(
+            scale=pix_scale, nx=nx, ny=ny, method='no_pixel'
+        ).array
+
+        # needed to make the mapping between 1D and 2D to work...
+        conv_func = conv_func.reshape(nx*ny, order='F')
+
+        return conv_func
 
     # TODO: Add @njit when ready
     def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):

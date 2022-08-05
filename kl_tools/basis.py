@@ -15,7 +15,7 @@ import utils
 import likelihood
 from transformation import transform_coords
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 

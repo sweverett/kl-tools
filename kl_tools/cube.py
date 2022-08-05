@@ -322,6 +322,18 @@ class DataCube(DataVector):
         except KeyError:
             raise AttributeError('Emission lines never set for datacube!')
 
+    def set_psf(self, psf):
+        '''
+        TODO
+        '''
+
+        if not isinstance(psf, galsim.GSObject):
+            raise TypeError('psf must be a galsim.GSObject!')
+
+        self.pars['psf'] = psf
+
+        return
+
     def get_psf(self, wavelength=None, wav_unit=None):
         '''
         Return the PSF of the datacube at the desired wavelength.
@@ -335,8 +347,13 @@ class DataCube(DataVector):
             to using the unit of the stored PSF in CubePars
         '''
 
+        # TODO: Implement the rest!
 
-        raise NotImplementedError('finish this!')
+        if 'psf' in self.pars:
+            return self.pars['psf']
+        else:
+            # raise AttributeError('There is no PSF stored in datacube pars!')
+            return None
 
     @property
     def data(self):

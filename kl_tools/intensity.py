@@ -354,6 +354,7 @@ class BasisIntensityMap(IntensityMap):
         self.fitter = IntensityMapFitter(
             basis_type, nx, ny,
             continuum_template=self.continuum_template,
+            psf=self.psf,
             basis_kwargs=basis_kwargs
             )
 
@@ -434,7 +435,7 @@ class IntensityMapFitter(object):
     by some set of basis functions {phi_i}.
     '''
     def __init__(self, basis_type, nx, ny, continuum_template=None,
-                 basis_kwargs=None):
+                 psf=None, basis_kwargs=None):
         '''
         basis_type: str
             The name of the basis_type type used
@@ -444,6 +445,9 @@ class IntensityMapFitter(object):
             The number of pixels in the y-ayis
         continuum_template: numpy.ndarray
             A template array for the object continuum
+        psf: galsim.GSObject
+            A galsim object representing a PSF to convolve the
+            basis functions by
         basis_kwargs: dict
             Keyword args needed to build given basis type
         '''
@@ -459,6 +463,7 @@ class IntensityMapFitter(object):
         self.ny = ny
 
         self.continuum_template = continuum_template
+        self.psf = psf
 
         self.grid = utils.build_map_grid(nx, ny)
 
@@ -535,23 +540,14 @@ class IntensityMapFitter(object):
         for n in range(self.basis.N):
             func, func_args = self.basis.get_basis_func(n)
             args = [x, y, *func_args]
-            # self.design_mat[:,n] = func(*args)
 
-            # ipdb.set_trace()
-            try:
-                psf = gs.Moffat(fwhm=0.8, flux=1, beta=2.5)
-                pix_scale = 0.2
-                bim = gs.Image(func(*args).real.reshape(self.ny, self.nx), scale=pix_scale)
-                bgs = gs.InterpolatedImage(bim)
-                conv = gs.Convolve(psf, bgs)
-                conv_bfunc = conv.drawImage(scale=pix_scale, nx=self.ny, ny=self.nx)
-                self.design_mat[:,n] = conv_bfunc.array.reshape(self.nx*self.ny)
-            except:
-                print(f'basis function {n} failed!')
-                self.design_mat[:,n] = func(*args)
-                # pass
-            # except:
-            #     ipdb.set_trace()
+            # evaluate basis function on image grid
+            if self.psf is None:
+                bfunc = func(*args)
+            else:
+                bfunc = self.convolve_basis_func(func(*args))
+
+            self.design_mat[:,n] = bfunc
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -563,6 +559,69 @@ class IntensityMapFitter(object):
             self.design_mat[:,-1] = template
 
         return
+
+    def convolve_basis_func(self, bfunc):
+        '''
+        Convolve a given basis vector/function by the stored PSF
+
+        bfunc: np.array (1D)
+            A vector of a basis function evaluated on the pixel grid
+        '''
+
+        if self.psf is None:
+            return bfunc
+
+        pix_scale = self.basis.pix_scale
+
+        # nx, ny = self.nx, self.ny
+        # nx, ny = self.ny, self.nx
+
+        if self.basis.is_complex:
+            real = bfunc.real
+            imag = bfunc.imag
+
+            if np.sum(real) != 0:
+                real_im = gs.Image(real.reshape(ny,nx), scale=pix_scale)
+                real_gs = gs.InterpolatedImage(real_im)
+                real_conv = gs.Convolve([self.psf, real_gs])
+                real_conv_b = real_conv.drawImage(
+                    scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
+                ).array.reshape(nx*ny)
+            else:
+                real_conv_b = np.zeros(nx*ny)
+            if np.sum(imag) != 0:
+                imag_im = gs.Image(imag.reshape(ny,nx), scale=pix_scale)
+                imag_gs = gs.InterpolatedImage(imag_im)
+                imag_conv = gs.Convolve([self.psf, imag_gs])
+                imag_conv_b = imag_conv.drawImage(
+                    scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
+                ).array.reshape(nx*ny)
+            else:
+                imag_conv_b = np.zeros(nx*ny)
+
+        else:
+            pass
+
+        return real_conv_b + 1j*imag_conv_b
+
+    def _convolve_basis_func(self, bfunc):
+        '''
+        Handle the conversion of a basis vector to a galsim
+        interpolated image, and then colvolve by the psf
+
+        bfunc: np.array (1D)
+            A vector of a basis function evaluated on the pixel grid
+        '''
+
+        nx, ny = self.nx, self.ny
+
+        # image (nx,ny) flipped to match the return of np.meshgrid
+        real_im = gs.Image(bfunc.reshape(ny,nx), scale=pix_scale)
+        real_gs = gs.InterpolatedImage(real_im)
+        real_conv = gs.Convolve([self.psf, real_gs])
+        real_conv_b = real_conv.drawImage(
+            scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
+        ).array.reshape(nx*ny)
 
     # TODO: Add @njit when ready
     def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):
@@ -696,20 +755,7 @@ class IntensityMapFitter(object):
         # Initialize pseudo-inverse given the transformation parameters
         self._initialize_pseudo_inv(theta_pars)
 
-
         data = datacube.stack().reshape(nx*ny)
-        # TODO: generalize!
-        # if 'psf' in pars:
-        #     ipdb.set_trace()
-        #     data_im = gs.Image(data, scale=datacube.pix_scale)#, nx=datacube.Ny, ny=datacube.Nx)
-        #     data_gs = gs.InterpolatedImage(data_im)
-        #     inv_psf = gs.Deconvolve(pars['psf'])
-        #     deconv = gs.Convolve(inv_psf, data_gs)
-        #     deconv_im = deconv.drawImage(nx=ny, ny=nx, scale=datacube.pix_scale)
-        #     data = deconv_im.array.reshape(nx*ny)
-        # else:
-        #     # We will fit to the sum of all slices
-        #     data.reshape(nx*ny)
 
         # Find MLE basis coefficients
         mle_coeff = self._fit_mle_coeff(data, cov=cov)

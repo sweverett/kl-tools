@@ -675,16 +675,13 @@ class KLensZeusRunner(ZeusRunner):
         Nspec = datacube.Nspec
 
         # grab psf if present
-        try:
-            psf = self.pars.meta['psf']
-        except KeyError:
-            psf = None
+        psf = datacube.get_psf()
 
         fig, axs = plt.subplots(4, Nspec, sharex=True, sharey=True,)
         for i in range(Nspec):
             # first, data
             ax = axs[0,i]
-            data = datacube.slices[i]._data
+            data = datacube.data[i]
             im = ax.imshow(data, origin='lower')
             if i == 0:
                 ax.set_ylabel('Data')

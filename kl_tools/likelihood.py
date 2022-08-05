@@ -578,10 +578,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         sed_array = self._setup_sed(theta_pars, datacube)
 
-        if 'psf' in self.meta:
-            psf = self.meta['psf']
-        else:
-            psf = None
+        psf = datacube.get_psf()
 
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)
@@ -651,22 +648,39 @@ class DataCubeLikelihood(LogLikelihood):
 
         # TODO: could generalize in future, but for now assume
         #       a constant PSF for exposures
-        if (psf is not None) and (np.sum(model) > 0):
+        # if (psf is not None) and (np.sum(model) != 0):
+        if psf is not None:
+            # plt.subplot(131)
+            # plt.imshow(model, origin='lower')
+            # plt.colorbar()
+            # plt.title('pre-psf model')
             # This fails if the model has no flux, which
             # can happen for very wrong redshift samples
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
+            ipdb.set_trace()
             gal = gs.InterpolatedImage(model_im)
-            gal = gs.Convolve([gal, psf])
-            model = gal.drawImage(
+            conv = gs.Convolve([psf, gal])
+            model = conf.drawImage(
                 nx=ny, ny=nx, method='no_pixel'
                 ).array
+            # plt.subplot(132)
+            # plt.imshow(pmodel, origin='lower')
+            # plt.colorbar()
+            # plt.title('post-psf model')
+            # plt.subplot(133)
+            # plt.imshow(pmodel-model, origin='lower')
+            # plt.colorbar()
+            # plt.title('post-pre psf model')
+            # plt.show()
 
         # for now, continuum is modeled as lambda-independent
         # TODO: This assumes that the continuum template (if passed)
         #       is *post* psf-convolution
         if continuum is not None:
             model += continuum
+
+        ipdb.set_trace()
 
         return model
 

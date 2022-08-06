@@ -324,11 +324,15 @@ class DataCube(DataVector):
 
     def set_psf(self, psf):
         '''
-        TODO
+        psf: galsim.GSObject
+            A PSF model for the datacube
+
+        NOTE: This assumes the psf is achromatic for now!
         '''
 
-        if not isinstance(psf, galsim.GSObject):
-            raise TypeError('psf must be a galsim.GSObject!')
+        if psf is not None:
+            if not isinstance(psf, galsim.GSObject):
+                raise TypeError('psf must be a galsim.GSObject!')
 
         self.pars['psf'] = psf
 

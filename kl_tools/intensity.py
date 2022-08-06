@@ -538,16 +538,7 @@ class IntensityMapFitter(object):
             self.design_mat = np.zeros((Ndata, Nbasis))
 
         for n in range(self.basis.N):
-            func, func_args = self.basis.get_basis_func(n)
-            args = [x, y, *func_args]
-
-            # evaluate basis function on image grid
-            if self.psf is None:
-                bfunc = func(*args)
-            else:
-                bfunc = self.convolve_basis_func(func(*args))
-
-            self.design_mat[:,n] = bfunc
+            self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -559,65 +550,6 @@ class IntensityMapFitter(object):
             self.design_mat[:,-1] = template
 
         return
-
-    def convolve_basis_func(self, bfunc):
-        '''
-        Convolve a given basis vector/function by the stored PSF
-
-        bfunc: np.array (1D)
-            A vector of a basis function evaluated on the pixel grid
-        '''
-
-        if self.psf is None:
-            return bfunc
-
-        pix_scale = self.basis.pix_scale
-
-        nx, ny = self.nx, self.ny
-
-        if self.basis.is_complex:
-            real = bfunc.real
-            imag = bfunc.imag
-
-            if np.sum(real) != 0:
-                real_conv_b = self._convolve_basis_func(real)
-            else:
-                real_conv_b = np.zeros(nx*ny)
-            if np.sum(imag) != 0:
-                imag_conv_b = self._convolve_basis_func(imag)
-            else:
-                imag_conv_b = np.zeros(nx*ny)
-        else:
-            if np.sum(bfunc) != 0:
-                conv_b = self._convolve_basis_func(bfunc)
-            else:
-                conv_b = np.zeros(nx*ny)
-
-        return real_conv_b + 1j*imag_conv_b
-
-    def _convolve_basis_func(self, bfunc):
-        '''
-        Handle the conversion of a basis vector to a galsim
-        interpolated image, and then colvolve by the psf
-
-        bfunc: np.array (1D)
-            A vector of a basis function evaluateon the pixel grid
-        '''
-
-        nx, ny = self.nx, self.ny
-        pix_scale = self.basis.pix_scale
-
-        im = gs.Image(bfunc.reshape(nx,ny), scale=pix_scale)
-        im_gs = gs.InterpolatedImage(im)
-        conv = gs.Convolve([self.psf, im_gs])
-        conv_func = conv.drawImage(
-            scale=pix_scale, nx=nx, ny=ny, method='no_pixel'
-        ).array
-
-        # needed to make the mapping between 1D and 2D to work...
-        conv_func = conv_func.reshape(nx*ny, order='F')
-
-        return conv_func
 
     # TODO: Add @njit when ready
     def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):
@@ -870,6 +802,33 @@ class TransformedIntensityMapFitter(object):
         self.transform_pars = transform_pars
 
         return
+
+def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
+                 bmin=0.001, bmax=5):
+    '''
+    TODO: Finish!
+    Scan over beta values for the best fit to the
+    stacked datacube image
+
+    datacube: DataCube
+        The datacube to find the preferred beta scale for
+    basis_type: str
+        The type of basis to use for fitting for beta
+    betas: list, np.array
+        A list or array of beta values to use in finding
+        optimal value. Will create one if not passed
+
+    returns: float
+        The value of beta that minimizes the imap chi2
+    '''
+
+    if betas is None:
+        betas = np.linspace(bmin, bmax, Nbetas)
+
+    for beta in betas:
+        pass
+
+    return
 
 def main(args):
     '''

@@ -5,6 +5,7 @@ from abc import abstractmethod
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from argparse import ArgumentParser
+from copy import deepcopy
 import galsim as gs
 from galsim.angle import Angle, radians
 import astropy.constants as const
@@ -24,17 +25,13 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
-# TODO: In retrospect, it probably makes more sense to have theta_pars
-#       passed at construction time, so a basis is always defined only
-#       for a specific sample, as they are being constructed for each
-#       sample anyway
-
 class Basis(object):
     '''
     Base Basis class
     '''
 
-    def __init__(self, name, nx, ny, pix_scale, plane, beta):
+    def __init__(self, name, nx, ny, pix_scale, plane, beta,
+                 psf=None):
         '''
         name: str
             Name of basis
@@ -50,6 +47,8 @@ class Basis(object):
         beta: float
             Scale factor used to define basis functions. If
             None, then set automatically given (nx, ny)
+        psf: galsim.GSObject
+            A PSF model to convolve the basis by, if desired
         '''
 
         pars = {'nx':nx, 'ny':ny}
@@ -78,6 +77,11 @@ class Basis(object):
             self.beta = beta
         else:
             self._set_default_beta()
+
+        if psf is not None:
+            if not isinstance(psf, gs.GSObject):
+                raise TypeError('psf must be a galsim.GSObject!')
+        self.psf = psf
 
         # NOTE: Can't set the number of basis functions used yet,
         # depends on the implementation
@@ -139,16 +143,29 @@ class Basis(object):
 
         return
 
-    def get_basis_func(self, n):
+    def get_basis_func(self, n, x, y):
         '''
         Return the function call that will evaluate the nth basis
         function at (x,y) positions
+
+        x: numpy.ndarray
+            X positions to evaluate basis at
+        y: numpy.ndarray
+            Y positions to evaluate basis at
         '''
 
         if (n < 0) or (n >= self.N):
             raise ValueError(f'Basis functions range from 0 to {self.N-1}!')
 
-        return self._get_basis_func(n)
+        # grab root basis function before PSF convolution
+        func, func_args = self._get_basis_func(n)
+        args = [x, y, *func_args]
+        bfunc = func(*args)
+
+        if self.psf is None:
+            return bfunc
+        else:
+            return self.convolve_basis_func(bfunc)
 
     def render_im(self, theta_pars, coefficients, im_shape=None):
         '''
@@ -186,76 +203,78 @@ class Basis(object):
             im = np.zeros((nx, ny))
 
         for n in range(self.N):
-            func, func_args = self._get_basis_func(n)
-            args = [X, Y, *func_args]
-            im += coefficients[n] * func(*args)
+            bfunc = self.get_basis_func(n, X, Y)
+            im += coefficients[n] * bfunc
 
         if self.is_complex is True:
             im = im.real
 
         return im
 
+    def convolve_basis_func(self, bfunc):
+        '''
+        Convolve a given basis vector/function by the stored PSF
+
+        bfunc: np.ndarray
+            A vector of a basis function evaluated on the pixel grid
+        '''
+
+        if self.psf is None:
+            return bfunc
+
+        pix_scale = self.pix_scale
+
+        if self.is_complex:
+            real = bfunc.real
+            imag = bfunc.imag
+
+            real_conv_b = self._convolve_basis_func(real)
+            imag_conv_b = self._convolve_basis_func(imag)
+
+            conv_b = real_conv_b + 1j*imag_conv_b
+
+        else:
+            conv_b = self._convolve_basis_func(bfunc)
+
+        return conv_b
+
+    def _convolve_basis_func(self, bfunc):
+        '''
+        Handle the conversion of a basis vector to a galsim
+        interpolated image, and then colvolve by the psf
+
+        bfunc: np.array (1D)
+            A vector of a basis function evaluateon the pixel grid
+        '''
+
+        nx, ny = self.im_nx, self.im_ny
+        pix_scale = self.pix_scale
+        orig_shape = bfunc.shape
+
+        if len(orig_shape) == 1:
+            bfunc = bfunc.reshape(nx,ny)
+
+        im = gs.Image(bfunc, scale=pix_scale)
+
+        # the following kwarg options are needed to instantiate
+        # an interpolatd image w/ 0 total image flux
+        im_gs = gs.InterpolatedImage(
+            im, calculate_stepk=False, calculate_maxk=False
+            )
+        conv = gs.Convolve([self.psf, im_gs])
+        conv_func = conv.drawImage(
+            scale=pix_scale, nx=nx, ny=ny, method='no_pixel'
+        ).array
+
+        # needed to make the mapping between 1D and 2D to work...
+        if len(orig_shape) == 1:
+            conv_func = conv_func.reshape(nx*ny, order='F')
+
+        return conv_func
+
     @abstractmethod
     def _get_basis_func(self, n):
         pass
-
-# def guess_beta(self, datacube, bmin=None, bmax=None, n=None, pix_scale=None):
-#     '''
-#     Determines a good initial guess for beta given the stacked datacube.
-#     Will override any currently set beta value (usually the default)
-
-#     datacube: DataCube
-#         The datacube whose stacked image we fit beta to
-#     bmin: float
-#         The minimum beta value to consider
-#     bmax: float
-#         The maximum beta value to consider
-#     n: int
-#         The number of beta values to scan
-#     pix_scale: float
-#         The pixel scale of the datacube images (if not saved to the dc)
-#     '''
-
-#     if datacube.pix_scale is None:
-#         if pix_scale is None:
-#             raise ValueError('pix_scale must be set either in the datacube ' +
-#                              'if not explicitly!')
-#         else:
-#             if not isinstance(pix_scale, (int,float)):
-#                 raise TypeError('pix_scale must be an int or float!')
-#             if pix_scale <=0:
-#                 raise ValueError('pix_scale must be positive!')
-#     else:
-#         if pix_scale is not None:
-#             if datacubepix_scale != pix_scale:
-#                 raise ValueError('Passed pix_scale not consistent with ' +
-#                                  'datacube pix_scale!')
-#         pix_scale = datacube.pix_scale
-
-#     # if bmin is None:
-#     #     bmin = 
-
-#     bounds = {'bmin':bmin, 'bmax':bmax}
-#     for name, val in bounds.items():
-#         if val is not None:
-#             if val <= 0:
-#                 raise ValueError(f'{name} must be positive!')
-#             if val >= np.min(datacube.Nx, datacube.Ny):
-#                 raise ValueError(f'{name} must be smaller than the ' +
-#                              'datacube image size!')
-
-#     if bmin <= bmax:
-#         raise ValueError('bmin must be less than bmax!')
-
-
-#     betas = np.linspace(bmin, bmax, n)
-
-#     # get stacked datacube image to fit to
-#     image = datacube.stack()
-
-#     self.beta = beta
-
-#     return
 
 class PolarBasis(Basis):
     '''
@@ -308,13 +327,96 @@ class PolarBasis(Basis):
 
         return self.lm_grid_inv[n]
 
+    def n_to_NxNy(self, n):
+        '''
+        Return the (Nx, Ny) pair corresponding to the nth
+        basis function
+
+        Used for mapping (l,m) pairs to plot grid
+        '''
+
+        l, m = self.n_to_lm(n)
+
+        nx = l
+        ny = l + m
+
+        return nx, ny
+
+    def plot_basis_funcs(self, outfile=None, show=True, close=True,
+                         size=(16,7)):
+
+        N = self.N
+        nmax = self.Nmax
+        sqrt = int(np.ceil(np.sqrt(N)))
+
+        X, Y = utils.build_map_grid(self.im_nx, self.im_ny)
+
+        for component in ['real', 'imag']:
+            fig, axes = plt.subplots(
+                nrows=nmax+1, ncols=2*nmax+1, figsize=size,
+                sharex=True, sharey=True
+                )
+            for i in range(N):
+                l, m = self.n_to_lm(i)
+                nx, ny = self.n_to_NxNy(i)
+                ax = axes[nx, ny]
+                image = self.get_basis_func(i, X, Y)
+
+                try:
+                    if component == 'real':
+                        image = image.real
+                    elif component == 'imag':
+                        image = image.imag
+                except:
+                    pass
+
+                im = ax.imshow(image, origin='lower')
+
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes('right', size='5%', pad=0.05)
+                plt.colorbar(im, cax=cax)
+                ax.set_title(f'({l},{m})')
+
+            l = np.arange((nmax+1))
+            m = np.arange((2*nmax+1))
+
+            L, M = np.meshgrid(l, m, indexing='ij')
+
+            empty = np.where(M >= (2*L+1))
+
+            for nx, ny in zip(empty[0], empty[1]):
+                fig.delaxes(axes[nx,ny])
+
+            plt.tight_layout()
+            plt.subplots_adjust(hspace=0.25, wspace=1)
+            if self.psf is not None:
+                pstr = ' with PSF'
+            else:
+                pstr = ''
+            plt.suptitle(
+                f'First {N} {component} basis functions for {self.name}{pstr}',
+                y=0.95
+                )
+
+            if outfile is not None:
+                this_outfile = outfile.replace('.png', f'-{component}.png')
+                plt.savefig(this_outfile, bbox_inches='tight', dpi=300)
+
+            if show is True:
+                plt.show()
+
+            if close is True:
+                plt.close()
+
+        return
+
 class SersicletBasis(PolarBasis):
     '''
     See https://arxiv.org/abs/1106.6045
     '''
 
     def __init__(self, nx, ny, pix_scale, plane, index, beta=None,
-                 b=None, Nmax=None):
+                 b=None, Nmax=None, psf=None):
         '''
         nx: int
             Size of the image x-axis
@@ -335,10 +437,12 @@ class SersicletBasis(PolarBasis):
         Nmax: int
             Max radial order of sersiclets. If None, then
             set automatically given (nx, ny)
+        psf: galsim.GSObject
+            A PSF model to convolve the basis by, if desired
         '''
 
         super(SersicletBasis, self).__init__(
-            'sersiclet', nx, ny, pix_scale, plane, beta
+            'sersiclet', nx, ny, pix_scale, plane, beta, psf=psf
             )
 
         if Nmax is not None:
@@ -459,7 +563,7 @@ class ExpShapeletBasis(PolarBasis):
     '''
 
     def __init__(self, nx, ny, pix_scale, plane, beta=None,
-                 Nmax=None):
+                 Nmax=None, psf=None):
         '''
         nx: int
             Size of the image x-axis
@@ -476,10 +580,12 @@ class ExpShapeletBasis(PolarBasis):
         Nmax: int
             Max Nx+Ny order. If None, then
             set automatically given (nx, ny)
+        psf: galsim.GSObject
+            A PSF model to convolve the basis by, if desired
         '''
 
         super(ExpShapeletBasis, self).__init__(
-            'exp_shapelets', nx, ny, pix_scale, plane, beta
+            'exp_shapelets', nx, ny, pix_scale, plane, beta, psf=psf
             )
 
         if Nmax is not None:
@@ -599,7 +705,8 @@ class ExpShapeletBasis(PolarBasis):
         return norm * rad * ang
 
 class ShapeletBasis(Basis):
-    def __init__(self, nx, ny, pix_scale, plane, beta=None, Nmax=None):
+    def __init__(self, nx, ny, pix_scale, plane, beta=None, Nmax=None,
+                 psf=None):
         '''
         nx: int
             Size of the image x-axis
@@ -616,10 +723,12 @@ class ShapeletBasis(Basis):
         Nmax: int
             Maximum N=Nx+Ny to use for shapelets. If None, then
             set automatically given (nx, ny)
+        psf: galsim.GSObject
+            A PSF model to convolve the basis by, if desired
         '''
 
         super(ShapeletBasis, self).__init__(
-            'shapelet', nx, ny, pix_scale, plane, beta
+            'shapelet', nx, ny, pix_scale, plane, beta, psf=psf
             )
 
         if Nmax is not None:
@@ -772,15 +881,12 @@ class ShapeletBasis(Basis):
         for i in range(N):
             nx, ny = self.n_to_NxNy(i)
             ax = axes[nx, ny]
-            func, fargs = self.get_basis_func(i)
-            args = [X, Y, *fargs]
-            image = func(*args)
+            image = self.get_basis_func(i, X, Y)
             im = ax.imshow(image, origin='lower')
 
             divider = make_axes_locatable(ax)
             cax = divider.append_axes('right', size='5%', pad=0.05)
             plt.colorbar(im, cax=cax)
-            nx, ny = fargs[1], fargs[2]
             ax.set_title(f'({nx},{ny})')
 
         x = np.arange(nmax+1)
@@ -803,6 +909,64 @@ class ShapeletBasis(Basis):
             plt.close()
 
         return
+
+# def guess_beta(self, datacube, bmin=None, bmax=None, n=None, pix_scale=None):
+#     '''
+#     Determines a good initial guess for beta given the stacked datacube.
+#     Will override any currently set beta value (usually the default)
+
+#     datacube: DataCube
+#         The datacube whose stacked image we fit beta to
+#     bmin: float
+#         The minimum beta value to consider
+#     bmax: float
+#         The maximum beta value to consider
+#     n: int
+#         The number of beta values to scan
+#     pix_scale: float
+#         The pixel scale of the datacube images (if not saved to the dc)
+#     '''
+
+#     if datacube.pix_scale is None:
+#         if pix_scale is None:
+#             raise ValueError('pix_scale must be set either in the datacube ' +
+#                              'if not explicitly!')
+#         else:
+#             if not isinstance(pix_scale, (int,float)):
+#                 raise TypeError('pix_scale must be an int or float!')
+#             if pix_scale <=0:
+#                 raise ValueError('pix_scale must be positive!')
+#     else:
+#         if pix_scale is not None:
+#             if datacubepix_scale != pix_scale:
+#                 raise ValueError('Passed pix_scale not consistent with ' +
+#                                  'datacube pix_scale!')
+#         pix_scale = datacube.pix_scale
+
+#     # if bmin is None:
+#     #     bmin = 
+
+#     bounds = {'bmin':bmin, 'bmax':bmax}
+#     for name, val in bounds.items():
+#         if val is not None:
+#             if val <= 0:
+#                 raise ValueError(f'{name} must be positive!')
+#             if val >= np.min(datacube.Nx, datacube.Ny):
+#                 raise ValueError(f'{name} must be smaller than the ' +
+#                              'datacube image size!')
+
+#     if bmin <= bmax:
+#         raise ValueError('bmin must be less than bmax!')
+
+
+#     betas = np.linspace(bmin, bmax, n)
+
+#     # get stacked datacube image to fit to
+#     image = datacube.stack()
+
+#     self.beta = beta
+
+#     return
 
 def get_basis_types():
     return BASIS_TYPES
@@ -844,20 +1008,64 @@ def main(args):
     outdir = os.path.join(utils.TEST_DIR, 'basis')
     utils.make_dir(outdir)
 
-    print('Creating a SersicletBasis')
-
     nx, ny = 30,30
-    pix_scale = 0.1
+    pix_scale = 0.25
     nmax = 4 # To limit the plot size
-    shapelets = ShapeletBasis(nx, ny, pix_scale, 'disk', Nmax=nmax)
+
+    print('Creating a ShapeletBasis')
+    shapelets = ShapeletBasis(nx, ny, pix_scale, 'obs', Nmax=nmax)
 
     outfile = os.path.join(outdir, 'shapelet-basis-funcs.png')
     print(f'Saving plot of shapelet basis functions to {outfile}')
     shapelets.plot_basis_funcs(outfile=outfile, show=show)
 
-    print('Creating a ShapeletBasis')
+    print('Creating a SersicletBasis')
     index = 1
     sersiclets = SersicletBasis(nx, ny, pix_scale, 'obs', index, b=1, Nmax=nmax)
+
+    outfile = os.path.join(outdir, 'sersiclet-basis-funcs.png')
+    print(f'Saving plot of sersiclet basis functions to {outfile}')
+    sersiclets.plot_basis_funcs(outfile=outfile, show=show)
+
+    print('Creating a ExpShapeletBasis')
+    expShapelets = ExpShapeletBasis(nx, ny, pix_scale, 'obs', Nmax=nmax)
+
+    outfile = os.path.join(outdir, 'expShapelet-basis-funcs.png')
+    print(f'Saving plot of ExpShapelet basis functions to {outfile}')
+    expShapelets.plot_basis_funcs(outfile=outfile, show=show)
+
+    #-----------------------------------------------------------------
+    # Redo the above, but now with a PSF convolution on the basis
+
+    psf = gs.Gaussian(fwhm=0.8)
+
+    print('Creating a ShapeletBasis w/ PSF')
+    shapelets = ShapeletBasis(
+        nx, ny, pix_scale, 'obs', Nmax=nmax, psf=psf
+        )
+
+    outfile = os.path.join(outdir, 'shapelet-basis-funcs-psf.png')
+    print(f'Saving plot of psf shapelet basis functions to {outfile}')
+    shapelets.plot_basis_funcs(outfile=outfile, show=show)
+
+    print('Creating a SersicletBasis w/ PSF')
+    index = 1
+    sersiclets = SersicletBasis(
+        nx, ny, pix_scale, 'obs', index, b=1, Nmax=nmax, psf=psf
+        )
+
+    outfile = os.path.join(outdir, 'sersiclet-basis-funcs-psf.png')
+    print(f'Saving plot of psf sersiclet basis functions to {outfile}')
+    sersiclets.plot_basis_funcs(outfile=outfile, show=show)
+
+    print('Creating a ExpShapeletBasis w/ PSF')
+    expShapelets = ExpShapeletBasis(
+        nx, ny, pix_scale, 'obs', Nmax=nmax, psf=psf
+        )
+
+    outfile = os.path.join(outdir, 'expShapelet-basis-funcs-psf.png')
+    print(f'Saving plot of psf ExpShapelet basis functions to {outfile}')
+    expShapelets.plot_basis_funcs(outfile=outfile, show=show)
 
     return 0
 

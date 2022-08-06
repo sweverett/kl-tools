@@ -73,8 +73,8 @@ def main(args, pool):
         'rscale',
         'x0',
         'y0',
-        'z',
-        'R'
+        # 'z',
+        # 'R'
         #'beta'
         ]
 
@@ -101,8 +101,8 @@ def main(args, pool):
             'rscale': priors.UniformPrior(0, 40),
             'x0': priors.GaussPrior(0, 2.5),
             'y0': priors.GaussPrior(0, 2.5),
-            'z': priors.GaussPrior(0.2466, .00001, clip_sigmas=3),
-            'R': priors.GaussPrior(3200, 20)#, clip_sigmas=3),
+            # 'z': priors.GaussPrior(0.2466, .00001, clip_sigmas=3),
+            # 'R': priors.GaussPrior(3200, 20)#, clip_sigmas=3),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
@@ -119,22 +119,21 @@ def main(args, pool):
             # 'hlr': 'sampled', # pixels
             'type': 'basis',
             # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
-            'basis_type': 'exp_shapelets',
+            'basis_type': 'sersiclets',
+            # 'basis_type': 'exp_shapelets',
             'basis_kwargs': {
                 'use_continuum_template': True,
-                'Nmax': 7,
+                'Nmax': 10,
             #     # 'plane': 'disk',
                 'plane': 'obs',
-                'beta': 0.17,
+                # 'beta': 0.17,
+                'beta': 0.31,
                 # 'beta': 'sampled',
-            #     # 'index': 1,
-            #     # 'b': 1,
+                'index': 1,
+                'b': 1,
                 }
             },
         # 'marginalize_intensity': True,
-        'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
-        # 'psf': gs.Moffat(fwhm=.8, beta=2.5, flux=1.0), # fwhm in arcsec
         'run_options': {
             'remove_continuum': True,
             'use_numba': False
@@ -158,7 +157,9 @@ def main(args, pool):
     Nspec = datacube.Nspec
     lambdas = datacube.lambdas
 
-    datacube.set_psf(mcmc_pars['psf'])
+    psf = gs.Gaussian(fwhm=.7, flux=1.0) # fwhm in arcsec
+    # psf = gs.Moffat(fwhm=.8, beta=2.5, flux=1.0) # fwhm in arcsec
+    datacube.set_psf(psf)
 
     print(f'Strongest emission line has {Nspec} slices')
 

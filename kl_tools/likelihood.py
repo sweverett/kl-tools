@@ -750,7 +750,6 @@ def main(args):
         'velocity': {
             'model': 'centered'
         },
-        'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }
@@ -763,7 +762,11 @@ def main(args):
         1., 'A', blue_limit=1e4, red_limit=2e4)
                   for i in range(100)
                   ]
-    datacube = DataCube(data, pix_scale=pix_scale, bandpasses=bandpasses)
+    datacube = DataCube(
+        data, pix_scale=pix_scale, bandpasses=bandpasses
+        )
+
+    datacube.set_psf(gs.Gaussian(fwhm=0.8, flux=1.))
 
     sampled_pars = list(true_pars)
     pars = Pars(sampled_pars, mcmc_pars)

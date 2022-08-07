@@ -64,6 +64,10 @@ def main(args, pool):
         )
     utils.make_dir(outdir)
 
+    # for exp gal fits
+    true_flux = 1.8e4
+    true_hlr = 3.5
+
     true_pars = {
         'g1': 0.025,
         'g2': -0.0125,
@@ -75,9 +79,9 @@ def main(args, pool):
         'v0': 5,
         'vcirc': 200,
         'rscale': 3,
-        # 'beta': np.NaN
-        # 'flux': 1.8e4,
-        # 'hlr': 3.5,
+        # 'beta': np.NaN,
+        # 'flux': true_flux,
+        # 'hlr': true_hlr,
     }
 
     mcmc_pars = {
@@ -103,24 +107,24 @@ def main(args, pool):
         },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 3.8e4, # counts
-            'hlr': 3.5,
+            # 'type': 'inclined_exp',
+            # 'flux': true_flux, # counts
+            # 'hlr': true_hlr, # counts
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
-            # 'type': 'basis',
+            'type': 'basis',
             # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
+            'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 7,
+            'basis_kwargs': {
+                'Nmax': 8,
             #     # 'plane': 'disk',
-            #     'plane': 'obs',
-            #     # 'beta': 0.35,
+                'plane': 'obs',
+                'beta': 0.28,
             #     'beta': 'sampled',
-            #     # 'index': 1,
-            #     # 'b': 1,
-            #     }
+                'index': 1,
+                'b': 1,
+                }
         },
         'velocity': {
             'model': 'centered'
@@ -137,8 +141,8 @@ def main(args, pool):
         'Ny': 40, # pixels
         'pix_scale': 0.5, # arcsec / pixel
         # intensity meta pars
-        'true_flux': mcmc_pars['intensity']['flux'],
-        'true_hlr': mcmc_pars['intensity']['hlr'], # pixels
+        'true_flux': true_flux, # counts
+        'true_hlr': true_hlr, # pixels
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
         'v_unit': mcmc_pars['units']['v_unit'],
@@ -149,7 +153,7 @@ def main(args, pool):
         'z': 0.3,
         'R': 5000.,
         'sky_sigma': 0.5, # pixel counts for mock data vector
-        'psf': gs.Gaussian(fwhm=0.7)
+        'psf': gs.Gaussian(fwhm=1., flux=1.)
     }
 
     print('Setting up test datacube and true Halpha image')
@@ -158,6 +162,7 @@ def main(args, pool):
         )
     Nspec, Nx, Ny = datacube.shape
     lambdas = datacube.lambdas
+    datacube.set_psf(datacube_pars['psf'])
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')

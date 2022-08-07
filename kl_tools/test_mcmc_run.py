@@ -126,7 +126,6 @@ def main(args, pool):
             'model': 'centered'
         },
         # 'marginalize_intensity': True,
-        # 'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }
@@ -150,7 +149,7 @@ def main(args, pool):
         'z': 0.3,
         'R': 5000.,
         'sky_sigma': 0.5, # pixel counts for mock data vector
-        # 'psf': mcmc_pars['psf']
+        'psf': gs.Gaussian(fwhm=0.7)
     }
 
     print('Setting up test datacube and true Halpha image')

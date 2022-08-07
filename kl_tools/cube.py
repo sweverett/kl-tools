@@ -322,6 +322,43 @@ class DataCube(DataVector):
         except KeyError:
             raise AttributeError('Emission lines never set for datacube!')
 
+    def set_psf(self, psf):
+        '''
+        psf: galsim.GSObject
+            A PSF model for the datacube
+
+        NOTE: This assumes the psf is achromatic for now!
+        '''
+
+        if psf is not None:
+            if not isinstance(psf, galsim.GSObject):
+                raise TypeError('psf must be a galsim.GSObject!')
+
+        self.pars['psf'] = psf
+
+        return
+
+    def get_psf(self, wavelength=None, wav_unit=None):
+        '''
+        Return the PSF of the datacube at the desired wavelength.
+        In many cases this may be constant, in which case a wavelength
+        does not have to be passed
+
+        wavelength: float
+            The wavelength of the PSF. Optional if PSF is achromatic
+        wav_unit: astropy.units.Unit
+            The unit of the passed wavelength. If not passed, will default
+            to using the unit of the stored PSF in CubePars
+        '''
+
+        # TODO: Implement the rest!
+
+        if 'psf' in self.pars:
+            return self.pars['psf']
+        else:
+            # raise AttributeError('There is no PSF stored in datacube pars!')
+            return None
+
     @property
     def data(self):
         return self._data

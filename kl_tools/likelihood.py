@@ -578,10 +578,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         sed_array = self._setup_sed(theta_pars, datacube)
 
-        if 'psf' in self.meta:
-            psf = self.meta['psf']
-        else:
-            psf = None
+        psf = datacube.get_psf()
 
         for i in range(Nspec):
             zfactor = 1. / (1 + v_array)
@@ -651,14 +648,13 @@ class DataCubeLikelihood(LogLikelihood):
 
         # TODO: could generalize in future, but for now assume
         #       a constant PSF for exposures
-        if (psf is not None) and (np.sum(model) > 0):
-            # This fails if the model has no flux, which
-            # can happen for very wrong redshift samples
+        # if (psf is not None) and (np.sum(model) != 0):
+        if psf is not None:
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
             gal = gs.InterpolatedImage(model_im)
-            gal = gs.Convolve([gal, psf])
-            model = gal.drawImage(
+            conv = gs.Convolve([psf, gal])
+            model = conv.drawImage(
                 nx=ny, ny=nx, method='no_pixel'
                 ).array
 
@@ -754,7 +750,6 @@ def main(args):
         'velocity': {
             'model': 'centered'
         },
-        'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }
@@ -767,7 +762,11 @@ def main(args):
         1., 'A', blue_limit=1e4, red_limit=2e4)
                   for i in range(100)
                   ]
-    datacube = DataCube(data, pix_scale=pix_scale, bandpasses=bandpasses)
+    datacube = DataCube(
+        data, pix_scale=pix_scale, bandpasses=bandpasses
+        )
+
+    datacube.set_psf(gs.Gaussian(fwhm=0.8, flux=1.))
 
     sampled_pars = list(true_pars)
     pars = Pars(sampled_pars, mcmc_pars)

@@ -409,7 +409,7 @@ class MCMCRunner(object):
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
-                    show=True, close=True, outfile=None, size=(16,16),
+                    show=True, close=True, outfile=None, size=(20,20),
                     show_titles=True, title=None, use_derived=True,
                     title_fmt='.3f'):
         '''
@@ -437,7 +437,6 @@ class MCMCRunner(object):
             else:
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
-
 
         chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
 
@@ -675,16 +674,13 @@ class KLensZeusRunner(ZeusRunner):
         Nspec = datacube.Nspec
 
         # grab psf if present
-        try:
-            psf = self.pars.meta['psf']
-        except KeyError:
-            psf = None
+        psf = datacube.get_psf()
 
         fig, axs = plt.subplots(4, Nspec, sharex=True, sharey=True,)
         for i in range(Nspec):
             # first, data
             ax = axs[0,i]
-            data = datacube.slices[i]._data
+            data = datacube.data[i]
             im = ax.imshow(data, origin='lower')
             if i == 0:
                 ax.set_ylabel('Data')

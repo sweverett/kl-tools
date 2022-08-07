@@ -409,7 +409,7 @@ class MCMCRunner(object):
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
-                    show=True, close=True, outfile=None, size=(16,16),
+                    show=True, close=True, outfile=None, size=(20,20),
                     show_titles=True, title=None, use_derived=True,
                     title_fmt='.3f'):
         '''
@@ -437,7 +437,6 @@ class MCMCRunner(object):
             else:
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
-
 
         chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
 

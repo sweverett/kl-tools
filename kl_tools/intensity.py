@@ -581,27 +581,26 @@ class IntensityMapFitter(object):
             imag = bfunc.imag
 
             if np.sum(real) != 0:
-                real_im = gs.Image(real.reshape(ny,nx), scale=pix_scale)
+                real_im = gs.Image(real.reshape(self.nx,self.ny), scale=pix_scale)
                 real_gs = gs.InterpolatedImage(real_im)
                 real_conv = gs.Convolve([self.psf, real_gs])
                 real_conv_b = real_conv.drawImage(
-                    scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
-                ).array.reshape(nx*ny)
+                    scale=pix_scale, nx=self.ny, ny=self.nx, method='no_pixel'
+                ).array.reshape(self.nx*self.ny)
             else:
-                real_conv_b = np.zeros(nx*ny)
+                real_conv_b = np.zeros(self.nx*self.ny)
             if np.sum(imag) != 0:
-                imag_im = gs.Image(imag.reshape(ny,nx), scale=pix_scale)
+                imag_im = gs.Image(imag.reshape(self.nx,self.ny), scale=pix_scale)
                 imag_gs = gs.InterpolatedImage(imag_im)
                 imag_conv = gs.Convolve([self.psf, imag_gs])
                 imag_conv_b = imag_conv.drawImage(
-                    scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
-                ).array.reshape(nx*ny)
+                    scale=pix_scale, nx=self.ny, ny=self.nx, method='no_pixel'
+                ).array.reshape(self.nx*self.ny)
             else:
-                imag_conv_b = np.zeros(nx*ny)
+                imag_conv_b = np.zeros(self.nx*self.ny)
 
         else:
             pass
-
         return real_conv_b + 1j*imag_conv_b
 
     def _convolve_basis_func(self, bfunc):

@@ -133,7 +133,7 @@ def main(args, pool):
                 }
             },
         # 'marginalize_intensity': True,
-        # 'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
+        'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
         # 'psf': gs.Moffat(fwhm=.8, beta=2.5, flux=1.0), # fwhm in arcsec
         'run_options': {
             'remove_continuum': True,
@@ -158,7 +158,7 @@ def main(args, pool):
     Nspec = datacube.Nspec
     lambdas = datacube.lambdas
 
-    # datacube.set_psf(mcmc_pars['psf'])
+    datacube.set_psf(mcmc_pars['psf'])
 
     print(f'Strongest emission line has {Nspec} slices')
 

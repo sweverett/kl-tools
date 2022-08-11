@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 from astropy.units import Unit
+from copy import deepcopy
 
 import utils
 import intensity
@@ -59,7 +60,7 @@ def plot_components(psf_im, gal_im, obs_im, s=(18,4),
     else:
         plt.close()
 
-    return
+    return obs_im.array
 
 def main(args):
 
@@ -93,7 +94,7 @@ def main(args):
 
     print('Plotting galsim PSF & gal image')
     outfile = os.path.join(outdir, 'component-images-gs.png')
-    plot_components(
+    out_im = plot_components(
         psf_im, gal_im, obs_im, outfile=outfile, show=show,
         title='GSObjects only'
         )
@@ -146,6 +147,7 @@ def main(args):
         'flux': true_flux,
         'hlr': true_hlr,
     }
+    # ipdb.set_trace()
     imap = intensity.build_intensity_map(
         'inclined_exp', datacube, imap_kwargs
         )
@@ -159,22 +161,72 @@ def main(args):
     }
 
     render = imap.render(theta_pars, datacube, pars=None)
+    # Image will inherit render shape
     gal_im = gs.Image(render, scale=pix_scale)
     gal_gs = gs.InterpolatedImage(obs_im)
+
+    # quick plot of interpolated image
+    s = (18,4)
+    im_ratio = s[0] / s[1]
+    plt.subplot(131)
+    plt.imshow(render, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('KL imap.render()')
+
+    plt.subplot(132)
+    plt.imshow(gal_im.array, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('GalSim Image obj of imap.render()')
+
+    plt.subplot(133)
+    interp_im = gal_gs.drawImage(
+        scale=pix_scale, nx=Nx, ny=Ny, method='no_pixel'
+        ).array
+    plt.imshow(interp_im, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('GalSim InterpolatedImage.draw() of imap.render()')
+
+    plt.gcf().set_size_inches(s)
+
+    outfile = os.path.join(outdir, 'interpolated-image-compare.png')
+    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
 
     # ipdb.set_trace()
     psf = datacube.get_psf()
     psf_im = psf.drawImage(scale=pix_scale, nx=Nx, ny=Ny)
 
     obs = gs.Convolve([psf, gal_gs])
-    obs_im = obs.drawImage(scale=pix_scale, nx=Nx, ny=Ny)
+    # obs = deepcopy(gal_gs)
+    # no_pixel bc the interpolated image is already pixelated
+    obs_im = obs.drawImage(
+        scale=pix_scale, nx=Nx, ny=Ny, method='no_pixel'
+        )
 
     print('Plotting galsim PSF & gal image')
     outfile = os.path.join(outdir, 'component-images-imap.png')
-    plot_components(
+    out_im_dc = plot_components(
         psf_im, gal_im, obs_im, outfile=outfile, show=show,
         title='DataCube interpolated image render'
         )
+
+    #------------------------------------------------------------------
+    print('Starting kl render vs. galsim render test')
+    plt.imshow(out_im_dc-out_im, origin='lower')
+    plt.colorbar()
+    plt.title('DataCube image render - GalSim only image render')
+    plt.gcf().set_size_inches(9,8)
+
+    outfile = os.path.join(outdir, 'image-compare.png')
+    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
 
     return 0
 

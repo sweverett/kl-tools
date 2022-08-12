@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import zeus
 
 import utils
-from mcmc import KLensZeusRunner, KLensEmceeRunner
+from mcmc import build_mcmc_runner
 import priors
 from muse import MuseDataCube
 import likelihood
@@ -85,8 +85,8 @@ def main(args, pool):
             'r_unit': Unit('kpc')
             },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
+            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
             # 'g1': priors.UniformPrior(-.01, 0.01),
             # 'g2': priors.UniformPrior(-.01, 0.01),
             # 'theta_int': priors.UniformPrior(0., np.pi),
@@ -99,10 +99,10 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 40),
-            'x0': priors.GaussPrior(0, 5),
-            'y0': priors.GaussPrior(0, 5),
-            'z': priors.GaussPrior(0.2466, .005),
-            'R': priors.GaussPrior(3200, 50, clip_sigmas=3),
+            'x0': priors.GaussPrior(0, 2.5),
+            'y0': priors.GaussPrior(0, 2.5),
+            'z': priors.GaussPrior(0.2466, .00001, clip_sigmas=3),
+            'R': priors.GaussPrior(3200, 20)#, clip_sigmas=3),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
@@ -133,7 +133,8 @@ def main(args, pool):
                 }
             },
         # 'marginalize_intensity': True,
-        # 'psf': gs.Gaussian(fwhm=1), # fwhm in pixels
+        # 'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
+        'psf': gs.Moffat(fwhm=.8, beta=2.5, flux=1.0), # fwhm in arcsec
         'run_options': {
             'remove_continuum': True,
             'use_numba': False
@@ -194,22 +195,27 @@ def main(args, pool):
     ndims = log_posterior.ndims
     nwalkers = 2*ndims
 
-    if sampler == 'zeus':
-        print('Setting up KLensZeusRunner')
+    print(f'Setting up {sampler} MCMCRunner')
+    args = [nwalkers, ndims]
+    if sampler in ['zeus', 'emcee']:
+        args += [log_posterior, datacube, pars]
+        kwargs = {}
 
-        runner = KLensZeusRunner(
-            nwalkers, ndims, log_posterior, datacube, pars
-            )
+    elif sampler == 'poco':
+        kwargs = {
+            'datacube': datacube,
+            'pars': pars,
+            'loglike': log_posterior.log_likelihood,
+            'logprior': log_posterior.log_prior,
+        }
 
-    elif sampler == 'emcee':
-        print('Setting up KLensEmceeRunner')
+    runner = build_mcmc_runner(sampler, args, kwargs)
 
-        runner = KLensEmceeRunner(
-            nwalkers, ndims, log_posterior, datacube, pars
-            )
+    #-----------------------------------------------------------------
+    # Run MCMC
 
     print('Starting mcmc run')
-    runner.run(nsteps, pool)
+    runner.run(pool, nsteps=nsteps)
 
     runner.burn_in = nsteps // 2
 

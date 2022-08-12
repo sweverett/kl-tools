@@ -277,7 +277,7 @@ class LogLikelihood(LogBase):
 
         return log_det
 
-    def setup_vmap(self, theta_pars):
+    def setup_vmap(self, theta_pars, model_name):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
@@ -659,7 +659,8 @@ def get_likelihood_types():
 # NOTE: This is where you must register a new likelihood model
 LIKELIHOOD_TYPES = {
     'default': DataCubeLikelihood,
-    'datacube': DataCubeLikelihood
+    'datacube': DataCubeLikelihood,
+    #'grism': GrismLikelihood,
     }
 
 def build_likelihood_model(name, parameters, datavector):

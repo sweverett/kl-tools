@@ -63,12 +63,12 @@ class CubePars(parameters.MetaPars):
         '''
 
         # sometimes it is already set in the parameter dict
-        if 'bandpasses' in self.pars:
-            self._bandpasses = self.pars['bandpasses']
-            return self._bandpasses
+        #if 'bandpasses' in self.pars:
+        #    self._bandpasses = self.pars['bandpasses']
+        #    return self._bandpasses
 
-        if (self._bandpasses is not None) and (remake is False):
-            return self._bandpasses
+        #if (self._bandpasses is not None) and (remake is False):
+        #    return self._bandpasses
 
         bp = self.pars['bandpasses']
 
@@ -85,12 +85,12 @@ class CubePars(parameters.MetaPars):
             utils.check_fields(bp, bandpass_req, bandpass_opt)
 
             args = [
-                pars['bandpass'].pop('lambda_blue'),
-                pars['bandpass'].pop('lambda_red'),
-                pars['bandpass'].pop('dlambda')
+                pars['bandpasses'].pop('lambda_blue'),
+                pars['bandpasses'].pop('lambda_red'),
+                pars['bandpasses'].pop('dlambda')
                 ]
 
-            kwargs = pars['bandpass']
+            kwargs = pars['bandpasses']
 
             bandpasses = setup_simple_bandpasses(*args, **kwargs)
 

@@ -300,7 +300,7 @@ class LogLikelihood(LogBase):
         See setup_vmap()
         '''
 
-        vmodel = theta_pars
+        vmodel = theta_pars.copy()
 
         for name in ['r_unit', 'v_unit']:
             if name in meta_pars['units']:

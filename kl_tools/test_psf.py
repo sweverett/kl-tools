@@ -2,6 +2,7 @@ import numpy as np
 import galsim as gs
 import os
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
 from argparse import ArgumentParser
 from astropy.units import Unit
 from copy import deepcopy
@@ -62,6 +63,60 @@ def plot_components(psf_im, gal_im, obs_im, s=(18,4),
 
     return obs_im.array
 
+def plot_interpolated_im_compare(render, pix_scale, shape,
+                                 outfile=None, show=False, s=(16,8)):
+    '''
+    render: np.ndarray
+        Return of imap.render()
+    '''
+
+    Nx, Ny = shape[0], shape[1]
+
+    # Image will inherit render shape
+    gal_im = gs.Image(render, scale=pix_scale)
+    gal_int_im = gs.InterpolatedImage(gal_im)
+
+    im_ratio = s[0] / s[1]
+    plt.subplot(231)
+    plt.imshow(render, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('KL imap.render()')
+
+    plt.subplot(232)
+    plt.imshow(gal_im.array, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('GalSim Image obj of imap.render()')
+
+    plt.subplot(233)
+    interp_im = gal_int_im.drawImage(
+        scale=pix_scale, nx=Nx, ny=Ny, method='no_pixel'
+        ).array
+    plt.imshow(interp_im, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('GalSim InterpolatedImage.draw() of imap.render()')
+
+    plt.subplot(235)
+    plt.imshow(gal_im.array-render, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('GalSim Image - imap.render()')
+
+    plt.subplot(236)
+    plt.imshow(interp_im-render, origin='lower')
+    plt.colorbar(fraction=0.047*im_ratio)
+    plt.title('GalSim InterpolatedImage.draw() - imap.render()')
+
+    plt.gcf().set_size_inches(s)
+
+    if outfile is not None:
+        plt.savefig(outfile, bbox_inches='tight', dpi=300)
+
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    return
+
 def main(args):
 
     show = args.show
@@ -70,7 +125,8 @@ def main(args):
     utils.make_dir(outdir)
 
     pix_scale = 0.25
-    Nx, Ny = 100, 100
+    # Nx, Ny = 100, 100
+    Nx, Ny = 101, 101
 
     #------------------------------------------------------------------
     print('Starting full galsim rendering test')
@@ -161,47 +217,24 @@ def main(args):
     }
 
     render = imap.render(theta_pars, datacube, pars=None)
+
+    # quick plot of render vs. interpolated image
+    outfile = os.path.join(outdir, 'render-vs-interpolated-im.png')
+    plot_interpolated_im_compare(
+        render, pix_scale, (Nx, Ny), outfile=outfile, show=show
+        )
+
     # Image will inherit render shape
     gal_im = gs.Image(render, scale=pix_scale)
-    gal_gs = gs.InterpolatedImage(obs_im)
+    gal_int_im = gs.InterpolatedImage(gal_im)
+    # interp_im = gal_int_im.drawImage(
+    #     scale=pix_scale, nx=Nx, ny=Ny, method='no_pixel'
+    #     ).array
 
-    # quick plot of interpolated image
-    s = (18,4)
-    im_ratio = s[0] / s[1]
-    plt.subplot(131)
-    plt.imshow(render, origin='lower')
-    plt.colorbar(fraction=0.047*im_ratio)
-    plt.title('KL imap.render()')
-
-    plt.subplot(132)
-    plt.imshow(gal_im.array, origin='lower')
-    plt.colorbar(fraction=0.047*im_ratio)
-    plt.title('GalSim Image obj of imap.render()')
-
-    plt.subplot(133)
-    interp_im = gal_gs.drawImage(
-        scale=pix_scale, nx=Nx, ny=Ny, method='no_pixel'
-        ).array
-    plt.imshow(interp_im, origin='lower')
-    plt.colorbar(fraction=0.047*im_ratio)
-    plt.title('GalSim InterpolatedImage.draw() of imap.render()')
-
-    plt.gcf().set_size_inches(s)
-
-    outfile = os.path.join(outdir, 'interpolated-image-compare.png')
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
-
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    # ipdb.set_trace()
     psf = datacube.get_psf()
     psf_im = psf.drawImage(scale=pix_scale, nx=Nx, ny=Ny)
 
-    obs = gs.Convolve([psf, gal_gs])
-    # obs = deepcopy(gal_gs)
+    obs = gs.Convolve([psf, gal_int_im])
     # no_pixel bc the interpolated image is already pixelated
     obs_im = obs.drawImage(
         scale=pix_scale, nx=Nx, ny=Ny, method='no_pixel'
@@ -216,12 +249,33 @@ def main(args):
 
     #------------------------------------------------------------------
     print('Starting kl render vs. galsim render test')
-    plt.imshow(out_im_dc-out_im, origin='lower')
+    plt.imshow(
+        out_im_dc-out_im, origin='lower', norm=colors.CenteredNorm(),
+        cmap='RdBu'
+        )
     plt.colorbar()
     plt.title('DataCube image render - GalSim only image render')
     plt.gcf().set_size_inches(9,8)
 
     outfile = os.path.join(outdir, 'image-compare.png')
+    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    plt.imshow(
+        100*(out_im_dc-out_im)/out_im, origin='lower',
+        cmap='RdBu',
+        vmin=-10,
+        vmax=10
+        )
+    cbar = plt.colorbar()
+    cbar.ax.set_ylabel('% Error', rotation=270)
+    plt.title('DataCube image render - GalSim only image render ()')
+    plt.gcf().set_size_inches(9,8)
+
+    outfile = os.path.join(outdir, 'image-compare-perr.png')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
     if show is True:
         plt.show()

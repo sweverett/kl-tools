@@ -107,24 +107,24 @@ def main(args, pool):
         },
         'intensity': {
             # For this test, use truth info
-            # 'type': 'inclined_exp',
-            # 'flux': true_flux, # counts
-            # 'hlr': true_hlr, # counts
+            'type': 'inclined_exp',
+            'flux': true_flux, # counts
+            'hlr': true_hlr, # counts
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
-            'type': 'basis',
+            # 'type': 'basis',
             # 'basis_type': 'shapelets',
-            'basis_type': 'sersiclets',
+            # 'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                'Nmax': 8,
-            #     # 'plane': 'disk',
-                'plane': 'obs',
-                'beta': 0.28,
-            #     'beta': 'sampled',
-                'index': 1,
-                'b': 1,
-                }
+            # 'basis_kwargs': {
+            #     'Nmax': 12,
+            # #     # 'plane': 'disk',
+            #     'plane': 'obs',
+            #     'beta': 0.28,
+            # #     'beta': 'sampled',
+            #     'index': 1,
+            #     'b': 1,
+            #     }
         },
         'velocity': {
             'model': 'centered'

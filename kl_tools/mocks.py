@@ -25,8 +25,11 @@ def setup_likelihood_test(true_pars, meta):
         for datacube construction
 
         Needed fields in meta:
-        [Nx, Ny, pix_scale, sky_sigma, true_flux, true_hlr, r_unit,
+        [Nx, Ny, pix_scale, true_flux, true_hlr, r_unit,
          v_unit, v_model]
+
+        Need one of the following in meta:
+        [sky_sigma, s2n]
     '''
 
     # setup mock emission line, w/ halpha & CWI defaults
@@ -42,10 +45,20 @@ def setup_likelihood_test(true_pars, meta):
         z = meta['z']
     else:
         z = 0.3
-    width = 1 # nm
+    width = 3 # nm
     lines = [setup_simple_emission_line(
         wavelength, Unit('nm'), R, z, width
         )]
+
+    if ('sky_sigma' not in meta) and ('s2n' not in meta):
+        raise KeyError('Must pass one of sky_sigma or s2n!')
+
+    if ('sky_sigma' in meta) and ('s2n' in meta):
+        raise KeyError('Can only pass one of sky_sigma and s2n!')
+
+    if 's2n' in meta:
+        sky_sigma = meta['true_flux'] / meta['s2n']
+        meta['sky_sigma'] = sky_sigma
 
     # setup mock bandpasses
     throughput = 1.
@@ -189,7 +202,7 @@ def setup_simple_CWI_datacube(Nx=30, Ny=30):
     halpha = 656.28 # nm
     R = 5000.
     z = 0.3
-    width = 10 # nm
+    width = 1 # nm
     lines = [setup_simple_emission_line(
         halpha, Unit('nm'), R, z, width
         )]

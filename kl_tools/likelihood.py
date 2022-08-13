@@ -655,7 +655,7 @@ class DataCubeLikelihood(LogLikelihood):
             gal = gs.InterpolatedImage(model_im)
             conv = gs.Convolve([psf, gal])
             model = conv.drawImage(
-                nx=ny, ny=nx, method='no_pixel'
+                nx=ny, ny=nx, method='no_pixel', scale=pix_scale
                 ).array
 
         # for now, continuum is modeled as lambda-independent

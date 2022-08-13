@@ -1,6 +1,7 @@
 import numpy as np
 import os, sys
 import yaml
+import matplotlib.colors as colors
 import pdb, pudb
 
 class ForkedPdb(pdb.Pdb):
@@ -17,6 +18,24 @@ class ForkedPdb(pdb.Pdb):
             sys.stdin = _stdin
 
         return
+
+class MidpointNormalize(colors.Normalize):
+    '''
+    Normalise the colorbar so that diverging bars work there way either side from a prescribed midpoint value)
+
+    e.g. im=ax1.imshow(array, norm=MidpointNormalize(midpoint=0.,vmin=-100, vmax=100))
+    '''
+
+    def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
+        self.midpoint = midpoint
+        colors.Normalize.__init__(self, vmin, vmax, clip)
+
+        return
+
+    def __call__(self, value, clip=None):
+        # Ignoring masked values and edge cases
+        x, y = [self.vmin, self.midpoint, self.vmax], [0, 0.5, 1]
+        return np.ma.masked_array(np.interp(value, x, y), np.isnan(value))
 
 def read_yaml(yaml_file):
     with open(yaml_file, 'r') as stream:

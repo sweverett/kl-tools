@@ -31,7 +31,7 @@ def parse_args():
     return parser.parse_args()
 
 def plot_vmap_residuals(theta_pars, datacube, loglike, dc_vmap_array,
-                        s=(22,5), outfile=None, show=False):
+                        norm=True, s=(22,5), outfile=None, show=False):
 
     Nx, Ny = datacube.Nx, datacube.Ny
     Nspec = datacube.Nspec
@@ -42,7 +42,7 @@ def plot_vmap_residuals(theta_pars, datacube, loglike, dc_vmap_array,
     vmap = loglike.setup_vmap(theta_pars)
 
     v_array = vmap(
-        'obs', X, Y, normalized=True, use_numba=False
+        'obs', X, Y, normalized=norm, use_numba=False
         )
 
     plt.subplot(131)
@@ -56,7 +56,10 @@ def plot_vmap_residuals(theta_pars, datacube, loglike, dc_vmap_array,
     plt.title('True Model')
 
     plt.subplot(133)
-    plt.imshow(dc_vmap_array-v_array, origin='lower')
+    plt.imshow(dc_vmap_array-v_array, origin='lower',
+               cmap='RdBu',
+               norm=utils.MidpointNormalize(midpoint=0)
+               )
     plt.colorbar(fraction=0.047)
     plt.title('Datacube - Model')
 
@@ -209,10 +212,10 @@ def main(args):
     }
 
     if psf is True:
-        datacube_pars['psf'] = gs.Gaussian(fwhm=3., flux=1.)
+        datacube_pars['psf'] = gs.Gaussian(fwhm=1., flux=1.)
 
     print('Setting up test datacube and true Halpha image')
-    datacube, vmap, true_im = mocks.setup_likelihood_test(
+    datacube, dc_vmap, true_im = mocks.setup_likelihood_test(
         true_pars, datacube_pars
         )
     Nspec, Nx, Ny = datacube.shape
@@ -227,7 +230,7 @@ def main(args):
 
     outfile = os.path.join(outdir, 'vmap.png')
     print(f'Saving true vamp in obs plane to {outfile}')
-    plt.imshow(vmap, origin='lower')
+    plt.imshow(dc_vmap, origin='lower')
     plt.colorbar(label='v')
     plt.title('True velocity map in obs plane')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
@@ -314,7 +317,7 @@ def main(args):
     # normalize datacube vmap
     norm = 1. / const.c.to(mcmc_pars['units']['v_unit']).value
     plot_vmap_residuals(
-        true_pars, datacube, log_likelihood, norm*vmap,
+        true_pars, datacube, log_likelihood, norm*dc_vmap,
         outfile=outfile, show=show
         )
 
@@ -376,9 +379,29 @@ def main(args):
 
     if show is True:
         plt.show()
-
     else:
         plt.close()
+
+    #-----------------------------------------------------------------
+    # Check how v0 offsets affect vmap residuals
+
+    theta_pars = true_pars.copy()
+
+    print('Making plots of vmap residuals while varying rscale')
+    utils.make_dir(os.path.join(outdir, 'rscale'))
+    rscales = np.linspace(2.5, 3.5, 11, endpoint=True)
+    for rscale in rscales:
+        theta_pars['rscale'] = rscale
+        theta = pars.pars2theta(theta_pars)
+
+        outfile = os.path.join(outdir, 'rscale', f'{rscale}-rscale-vmap-residuals.png')
+        print(f'Saving rscale={rscale} vmap residuals to {outfile}')
+
+        # norm = const.c.to(mcmc_pars['units']['v_unit']).value
+        plot_vmap_residuals(
+            theta_pars, datacube, log_likelihood, dc_vmap, norm=False,
+            outfile=outfile, show=show
+        )
 
     return 0
 

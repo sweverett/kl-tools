@@ -249,11 +249,14 @@ def main(args):
 
     #------------------------------------------------------------------
     print('Starting kl render vs. galsim render test')
+    ext = .00005
     plt.imshow(
-        out_im_dc-out_im, origin='lower', norm=colors.CenteredNorm(),
+        1*(out_im_dc-out_im), origin='lower',
+        # norm=utils.MidpointNormalize(vmin=-ext, vmax=ext, midpoint=0),
+        norm=utils.MidpointNormalize(midpoint=0),
         cmap='RdBu'
         )
-    plt.colorbar()
+    cbar = plt.colorbar()
     plt.title('DataCube image render - GalSim only image render')
     plt.gcf().set_size_inches(9,8)
 
@@ -264,11 +267,11 @@ def main(args):
     else:
         plt.close()
 
+    ext = .01
     plt.imshow(
         100*(out_im_dc-out_im)/out_im, origin='lower',
+        norm=utils.MidpointNormalize(midpoint=0, vmin=-ext, vmax=ext),
         cmap='RdBu',
-        vmin=-10,
-        vmax=10
         )
     cbar = plt.colorbar()
     cbar.ax.set_ylabel('% Error', rotation=270)

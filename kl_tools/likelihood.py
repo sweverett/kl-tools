@@ -721,13 +721,44 @@ class GrismLikelihood(LogLikelihood):
         Nspec = len(np.arange(_lrange[0], _lrange[1], _dl))
         Nx = self.meta['model_dimension']['Nx']
         Ny = self.meta['model_dimension']['Ny']
+        # init with an empty modelcube object
         self.modelcube = grism.GrismModelCube(self.parameters, 
             datacube=np.zeros([Nspec, Nx, Ny]))
         self.modelcube.set_obs_methods(datavector.get_config_list())
 
         return
 
-    def _log_likelihood(self, theta, datavector, model):
+    def __call__(self, theta, datavector):
+        '''
+        Do setup and type / sanity checking here
+        before calling the abstract method _loglikelihood,
+        which will have a different implementation for each class
+
+        theta: list
+            Sampled parameters. Order defined in self.pars_order
+        datavector: DataCube, etc.
+            Arbitrary data vector that subclasses from DataVector.
+            If DataCube, truncated to desired lambda bounds
+        '''
+
+        # unpack sampled params
+        theta_pars = self.theta2pars(theta)
+
+        # setup model corresponding to cube.DataCube type
+        #model = self._setup_model(theta_pars, datavector)
+        self._setup_model(theta_pars, datavector)
+
+        # if we are computing the marginalized posterior over intensity
+        # map parameters, then we need to scale this likelihood by a
+        # determinant factor
+        if self.marginalize_intensity is True:
+            log_det = self._compute_log_det(self.imap)
+        else:
+            log_det = 1.
+
+        return (-0.5 * log_det) + self._log_likelihood(theta, datavector)
+
+    def _log_likelihood(self, theta, datavector):
         '''
         theta: list
             Sampled parameters, order defined by pars_order
@@ -746,7 +777,7 @@ class GrismLikelihood(LogLikelihood):
         # will be fast enough with numba anyway
         for i in range(datavector.Nobs):
 
-            _img = model.observe(datavector.get_config(idx=i))
+            _img = self.modelcube.observe(i, force_noise_free=True)
             diff = (datavector.get_data(i) - _img)
             chi2 = diff**2/inv_cov[i]
 
@@ -797,11 +828,12 @@ class GrismLikelihood(LogLikelihood):
         _pars['run_options']['imap_return_gal'] = True
         i_array, gal = imap.render(theta_pars, datavector, _pars)
 
-        model_datacube = self._construct_model_datacube(
-            theta_pars, v_array, i_array, gal
-            )
+        self._construct_model_datacube(theta_pars, v_array, i_array, gal)
+        #model_datacube = self._construct_model_datacube(
+        #    theta_pars, v_array, i_array, gal
+        #    )
 
-        return model_datacube
+        #return model_datacube
 
     def setup_imap(self, theta_pars, datavector):
         '''
@@ -879,10 +911,11 @@ class GrismLikelihood(LogLikelihood):
                         i_array[np.newaxis, :, :] /\
                         (1+v_array[np.newaxis, :, :]) 
 
-        model_datacube = grism.GrismModelCube(self.parameters,
-            datacube=dc_array, gal=gal, sed=sed)
+        self.modelcube.set_data(dc_array, gal, sed)
+        #model_datacube = grism.GrismModelCube(self.parameters,
+        #    datacube=dc_array, gal=gal, sed=sed)
 
-        return model_datacube
+        #return model_datacube
 
     def _setup_inv_cov_list(self, datavector):
         '''

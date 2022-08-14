@@ -369,6 +369,8 @@ class BasisIntensityMap(IntensityMap):
                     remove_continuum = False
                 else:
                     remove_continuum = True
+            else:
+                remove_continuum = False
 
         except KeyError:
             remove_continuum = False

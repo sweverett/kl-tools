@@ -14,6 +14,7 @@ from velocity import VelocityMap
 import transformation as transform
 import likelihood, cube, priors, utils, basis, parameters
 from muse import MuseDataCube
+import mocks
 
 import ipdb
 
@@ -22,6 +23,9 @@ def parse_args():
 
     parser.add_argument('Nbeta', type=int,
                         help='The number of betas to scan')
+    parser.add_argument('-dc_type', type=str, default='sim',
+                        choices=['sim', 'muse'],
+                        help='Which type of datacube to test')
     parser.add_argument('-ncores', type=int, default=1,
                         help='The number of cpu cores to use')
     parser.add_argument('-bmin', type=float, default=0.001,
@@ -95,6 +99,7 @@ def stack(chi_list):
 def main(args):
 
     Nbeta = args.Nbeta
+    dc_type = args.dc_type
     ncores = args.ncores
     plane = args.plane
     bmin = args.bmin
@@ -119,16 +124,21 @@ def main(args):
         'beta'
         ]
 
+    if dc_type == 'sim':
+        remove_cont = False
+    elif dc_type == 'muse':
+        remove_cont = True
+
     meta_pars = {
         'units': {
             'v_unit': u.Unit('km/s'),
             'r_unit': u.Unit('kpc')
         },
         'velocity': {
-            'model': 'offset'
+            'model': 'centered'
         },
         'run_options': {
-            'remove_continuum': True,
+            'remove_continuum': remove_cont,
             'use_numba': False
             }
     }
@@ -136,9 +146,9 @@ def main(args):
     #-------------------------------------------------------------
     # setup imap basis pars
 
-    pars_shapelet = meta_pars.copy()
-    pars_sersiclet = meta_pars.copy()
-    pars_exp_shapelet = meta_pars.copy()
+    pars_shapelet = deepcopy(meta_pars)
+    pars_sersiclet = deepcopy(meta_pars)
+    pars_exp_shapelet = deepcopy(meta_pars)
 
     nmax_cart  = 14
     nmax_polar = 12
@@ -146,7 +156,7 @@ def main(args):
         'type': 'basis',
         'basis_type': 'shapelets',
         'basis_kwargs': {
-            'use_continuum_template': True,
+            'use_continuum_template': remove_cont,
             'Nmax': nmax_cart,
         }
     }
@@ -154,7 +164,7 @@ def main(args):
         'type': 'basis',
         'basis_type': 'sersiclets',
         'basis_kwargs': {
-            'use_continuum_template': True,
+            'use_continuum_template': remove_cont,
             'Nmax': nmax_polar,
             'index': 1,
             'b': 1,
@@ -164,7 +174,7 @@ def main(args):
         'type': 'basis',
         'basis_type': 'exp_shapelets',
         'basis_kwargs': {
-            'use_continuum_template': True,
+            'use_continuum_template': remove_cont,
             'Nmax': nmax_polar,
         }
     }
@@ -177,32 +187,75 @@ def main(args):
     pars_sersiclet = parameters.MCMCPars(pars_sersiclet)
     pars_exp_shapelet = parameters.MCMCPars(pars_exp_shapelet)
 
-    # Setup MUSE DataCube
-    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
-
-    cubefile = os.path.join(cube_dir, '102021103_objcube.fits')
-    specfile = os.path.join(cube_dir, 'spectrum_102021103.fits')
-    catfile = os.path.join(cube_dir, 'MW_1-24_main_table.fits')
-    linefile = os.path.join(cube_dir, 'MW_1-24_emline_table.fits')
-
     #-------------------------------------------------------------
-    # setup muse datacube
+    # setup datacube
 
-    print(f'Setting up MUSE datacube from file {cubefile}')
-    datacube = MuseDataCube(
-        cubefile, specfile, catfile, linefile
-    )
+    psf = gs.Gaussian(fwhm=0.8, flux=1.)
 
-    # default, but we'll make it explicit:
-    datacube.set_line(line_choice='strongest')
+    if dc_type == 'sim':
+        print('Setting up test datacube and true Halpha image')
+        true_pars = {
+            'g1': 0.025,
+            'g2': -0.0125,
+            'theta_int': np.pi / 6,
+            'sini': 0.7,
+            'v0': 5,
+            'vcirc': 200,
+            'rscale': 3.5,
+        }
+
+        true_flux = 1.8e4
+        true_hlr = 3.5
+        datacube_pars = {
+            # image meta pars
+            'Nx': 40, # pixels
+            'Ny': 40, # pixels
+            'pix_scale': 0.5, # arcsec / pixel
+            # intensity meta pars
+            'true_flux': true_flux, # counts
+            'true_hlr': true_hlr, # pixels
+            # velocty meta pars
+            'v_model': meta_pars['velocity']['model'],
+            'v_unit': meta_pars['units']['v_unit'],
+            'r_unit': meta_pars['units']['r_unit'],
+            # emission line meta pars
+            'wavelength': 656.28, # nm; halpha
+            'lam_unit': 'nm',
+            'z': 0.3,
+            'R': 5000.,
+            'sky_sigma': 0.5, # pixel counts for mock data vector
+            'psf': psf,
+        }
+
+        datacube, vmap, true_im = mocks.setup_likelihood_test(
+            true_pars, datacube_pars
+            )
+
+        sky = datacube_pars['sky_sigma']
+
+    elif dc_type == 'muse':
+        cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+        cubefile = os.path.join(cube_dir, '102021103_objcube.fits')
+        specfile = os.path.join(cube_dir, 'spectrum_102021103.fits')
+        catfile = os.path.join(cube_dir, 'MW_1-24_main_table.fits')
+        linefile = os.path.join(cube_dir, 'MW_1-24_emline_table.fits')
+
+        print(f'Setting up MUSE datacube from file {cubefile}')
+        datacube = MuseDataCube(
+            cubefile, specfile, catfile, linefile
+        )
+
+        # default, but we'll make it explicit:
+        datacube.set_line(line_choice='strongest')
+
+        # quick sky estimation
+        data = datacube.stack()
+        sky = np.std(data[:16,:16])
+
     Nspec = datacube.Nspec
     lambdas = datacube.lambdas
 
-    psf = gs.Gaussian(fwhm=0.7, flux=1.)
     datacube.set_psf(psf)
-
-    data = datacube.stack()
-    sky = np.std(data[:16,:16])
 
     #-------------------------------------------------------------
     # scan over beta values for each imap basis type
@@ -216,21 +269,27 @@ def main(args):
     pars_sersiclet_b = deepcopy(pars_sersiclet)
     pars_exp_shapelet_b = deepcopy(pars_exp_shapelet)
 
-    with Pool(ncores) as pool:
-        out = stack(pool.starmap(fit_one_beta,
-                                 [(i,
-                                   beta,
-                                   theta,
-                                   datacube,
-                                   pars_shapelet_b,
-                                   pars_sersiclet_b,
-                                   pars_exp_shapelet_b,
-                                   sky,
-                                   vb
-                                   )
-                                  for i, beta in enumerate(betas)]
-                                 )
-                    )
+    if ncores > 1:
+        with Pool(ncores) as pool:
+            out = stack(pool.starmap(fit_one_beta,
+                                     [(i,
+                                       beta,
+                                       theta,
+                                       datacube,
+                                       pars_shapelet_b,
+                                       pars_sersiclet_b,
+                                       pars_exp_shapelet_b,
+                                       sky,
+                                       vb
+                                       )
+                                      for i, beta in enumerate(betas)]
+                                     )
+                        )
+    else:
+        out = stack([fit_one_beta(
+            i, beta, theta, datacube, pars_shapelet_b, pars_sersiclet_b,
+            pars_exp_shapelet_b, sky, vb
+            ) for i, beta in enumerate(betas)])
 
     chi2_shapelet = out[0]
     chi2_sersiclet = out[1]
@@ -278,7 +337,8 @@ def main(args):
     del mle_shapelet
     del mle_sersiclet
     del mle_exp_shapelet
-    plt.title(rf'{plane}-basis $\chi^2$ dependence on $\beta$; N={nfuncs}')
+    plt.title(rf'{dc_type} {plane}-basis $\chi^2$ dependence on $\beta$; ' +\
+              'N={nfuncs}')
 
     plt.gcf().patch.set_facecolor('w')
     plt.gcf().set_size_inches(8,6)
@@ -299,9 +359,13 @@ def main(args):
     data = datacube.stack()
     Npix = data.shape[0] * data.shape[1]
 
-    pars_shapelet['beta'] = shapelet_min
-    pars_sersiclet['beta'] = sersiclet_min
-    pars_exp_shapelet['beta'] = exp_shapelet_min
+    min_pars_shapelet = deepcopy(pars_shapelet)
+    min_pars_sersiclet = deepcopy(pars_sersiclet)
+    min_pars_exp_shapelet = deepcopy(pars_exp_shapelet)
+
+    min_pars_shapelet['intensity']['basis_kwargs']['beta'] = shapelet_min
+    min_pars_sersiclet['intensity']['basis_kwargs']['beta'] = sersiclet_min
+    min_pars_exp_shapelet['intensity']['basis_kwargs']['beta'] = exp_shapelet_min
 
     if vb is True:
         print(f'min shapelet beta: {shapelet_min}')
@@ -309,13 +373,13 @@ def main(args):
         print(f'min exp_shapelet beta: {exp_shapelet_min}')
 
     shapelet, mle_shapelet, imap_shapelet = make_basis_imap(
-        theta, datacube, pars_shapelet
+        theta, datacube, min_pars_shapelet
     )
     sersiclet, mle_sersiclet, imap_sersiclet = make_basis_imap(
-        theta, datacube, pars_sersiclet
+        theta, datacube, min_pars_sersiclet
     )
     exp_shapelet, mle_exp_shapelet, imap_exp_shapelet = make_basis_imap(
-        theta, datacube, pars_exp_shapelet
+        theta, datacube, min_pars_exp_shapelet
     )
 
     plt.subplot(241)

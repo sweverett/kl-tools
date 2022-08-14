@@ -45,7 +45,7 @@ def setup_likelihood_test(true_pars, meta):
         z = meta['z']
     else:
         z = 0.3
-    width = 3 # nm
+    width = 1 # nm
     lines = [setup_simple_emission_line(
         wavelength, Unit('nm'), R, z, width
         )]

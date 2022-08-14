@@ -56,6 +56,7 @@ class IntensityMap(object):
         # vs the continuum
         self.image = None
         self.continuum = None
+        self.gal = None
 
         # some intensity maps will not change per sample, but in general
         # they might
@@ -87,14 +88,19 @@ class IntensityMap(object):
         # only render if it has not been computed yet, or if
         # explicitly asked
         if (self.image is None) or (redo is True):
+            print("redo!")
             self._render(theta_pars, datacube, pars)
 
+        _RG_ = pars.get("run_options", {}).get("imap_return_gal", False)
         if im_type == 'emission':
-            return self.image
+            print("emission!")
+            return self.image if not _RG_ else self.image, self.gal
         elif im_type == 'continuum':
-            return self.continuum
+            print("continuum!")
+            return self.continuum if not _RG_ else self.continuum, self.gal
         elif im_type == 'both':
-            return self.image, self.continuum
+            print("both!")
+            return self.image, self.continuum if not _RG_ else self.image, self.continuum, self.gal
         else:
             raise ValueError('im_type can only be one of ' +\
                              'emission, continuum, or both!')
@@ -145,7 +151,7 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux, hlr,
+    def __init__(self, datavector, flux, hlr,
         theory_Nx = None, theory_Ny = None, scale = None):
 
         '''
@@ -157,10 +163,11 @@ class InclinedExponential(IntensityMap):
         hlr: float
             Object half-light radius (in pixels)
         '''
-        if datavector is not None:
-            nx, ny = datavector.Nx, datavector.Ny
-        else:
+        if theory_Nx is not None and theory_Ny is not None:
             nx, ny = theory_Nx, theory_Ny
+        else:
+            nx, ny = datavector.Nx, datavector.Ny
+
         super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
 
         pars = {'flux': flux, 'hlr': hlr}
@@ -170,19 +177,19 @@ class InclinedExponential(IntensityMap):
 
         self.flux = flux
         self.hlr = hlr
-        self.pix_scale = datacube.pix_scale if datacube is not None else scale
+        self.pix_scale = scale if scale is not None else atavector.pix_scale
 
         # same as default, but to make it explicit
         self.is_static = False
 
         return
 
-    def _render(self, theta_pars, datacube, pars):
+    def _render(self, theta_pars, datavector, pars):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
-        datacube: DataCube
+        datavector: DataCube
             Truncated data cube of emission line
         pars: dict
             A dictionary of any additional parameters needed
@@ -224,12 +231,14 @@ class InclinedExponential(IntensityMap):
             print('imap generation failed!')
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
-        
-        self.image = gal.drawImage(
+        self.gal = gal
+
+        self.image = self.gal.drawImage(
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
+        print(pars)
         if pars.get('run_options', {}).get('imap_return_gal', False):
-            return self.image, gal
+            return self.image, self.gal
         else:
             return self.image
 
@@ -411,8 +420,8 @@ def build_intensity_map(name, datavector, kwargs):
     '''
     name: str
         Name of intensity map type
-    datacube: DataCube
-        The datacube whose stacked image the intensity map
+    datavector: any class that subclass from DataVector
+        The datavector whose stacked image the intensity map
         will represent
     kwargs: dict
         Keyword args to pass to intensity constructor

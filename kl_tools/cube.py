@@ -86,12 +86,12 @@ class CubePars(parameters.MetaPars):
             utils.check_fields(bp, bandpass_req, bandpass_opt)
 
             args = [
-                pars['bandpasses'].pop('lambda_blue'),
-                pars['bandpasses'].pop('lambda_red'),
-                pars['bandpasses'].pop('dlambda')
+                self.pars['bandpasses'].pop('lambda_blue'),
+                self.pars['bandpasses'].pop('lambda_red'),
+                self.pars['bandpasses'].pop('dlambda')
                 ]
 
-            kwargs = pars['bandpasses']
+            kwargs = self.pars['bandpasses']
 
             bandpasses = setup_simple_bandpasses(*args, **kwargs)
 

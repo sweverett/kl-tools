@@ -20,6 +20,7 @@ from argparse import ArgumentParser
 import utils
 import parameters
 from emission import EmissionLine, LINE_LAMBDAS, SED
+import kltools_grism_module as m
 
 import ipdb
 
@@ -86,7 +87,7 @@ class GrismPars(parameters.MetaPars):
             # we'll be lazy and just check the first entry
             if isinstance(bp[0], str):
                 bandpasses = [gs.Bandpass(_bp, wave_type='nm') for _bp in bp]
-            elif isinstance(bp[0], galsim.Bandpass):
+            elif isinstance(bp[0], gs.Bandpass):
                 bandpasses = bp
             else:
                 raise TypeError('bandpass list must be filled with ' +\
@@ -199,6 +200,7 @@ class GrismModelCube(cube.DataCube):
             _bp = gs.Bandpass(config.get('bandpass'), 
                 wave_type=config.get('wave_type', 'nm'))
             _bandpasses.append(_bp)
+            _bp_list = _bp(np.array(self.lambdas))
             if config.get('type')!='grism':
                 _disperse_helper.append(None)
             else:
@@ -208,7 +210,7 @@ class GrismModelCube(cube.DataCube):
                 config['model_Ny'] = self.Ny
                 config['model_Nlam'] = self.Nspec
                 config['model_scale'] = self.pix_scale
-                _helper = m.DisperseHelper(config, self.lambdas, _bp)
+                _helper = m.DisperseHelper(config, np.array(self.lambdas), _bp_list)
                 _disperse_helper.append(_helper)
         self.disperse_helper = _disperse_helper
         self.bandpass_list = _bandpasses
@@ -481,24 +483,24 @@ class GrismDataVector(cube.DataVector):
         '''
         _h = self.data_header[idx]
         config = {
-            'inst_name': _h['inst_name'],
-            'type': _h['type'],
-            'bandpass': _h['bandpass'],
-            'Nx': _h['Nx'],
-            'Ny': _h['Ny'],
-            'pix_scale': _h['pix_scale'],
-            'diameter': _h['diameter'],
-            'exp_time': _h['exp_time'],
-            'gain': _h['gain'],
-            'noise_type': _h['noise_type'],
-            'sky_level': _h['sky_level'],
-            'read_noise': _h['read_noise'],
-            'apply_to_data': _h['apply_to_data'],
-            'psf_type': _h['psf_type'],
-            'psf_fwhm': _h['psf_fwhm'],
-            'R_spec': _h['R_spec'],
-            'disp_ang': _h['disp_ang'],
-            'offset': _h['offset'],
+            'inst_name': _h.get('inst_name', 'none'),
+            'type': _h.get('type', 'photometry'),
+            'bandpass': _h.get('bandpass', 'none'),
+            'Nx': _h.get('Nx', 0),
+            'Ny': _h.get('Ny', 0),
+            'pix_scale': _h.get('pix_scale', 0.0),
+            'diameter': _h.get('diameter', 0.0),
+            'exp_time': _h.get('exp_time', 0.0),
+            'gain': _h.get('gain', 1.0),
+            'noise_type': _h.get('noise_type', 'none'),
+            'sky_level': _h.get('sky_level', 0.0),
+            'read_noise': _h.get('read_noise', 0.0),
+            'apply_to_data': _h.get('apply_to_data', False),
+            'psf_type': _h.get('psf_type', 'none'),
+            'psf_fwhm': _h.get('psf_fwhm', 0.0),
+            'R_spec': _h.get('R_spec', 'none'),
+            'disp_ang': _h.get('disp_ang', 'none'),
+            'offset': _h.get('offset', 'none'),
         }
         return config
 
@@ -569,7 +571,7 @@ class GrismSED(SED):
         '''
         Initialize SED class object with parameters dictionary
         '''
-        self.pars = Spectrum._default_pars.copy()
+        self.pars = GrismSED._default_pars.copy()
         self.updatePars(pars)
         continuum = self._addContinuum()
         emission = self._addEmissionLines()
@@ -594,8 +596,8 @@ class GrismSED(SED):
             raise OSError(f'Can not find template file {template}!')
         # build GalSim SED object out of template file
         _template = np.genfromtxt(template)
-        _table = galsim.LookupTable(x=_template[:,0], f=_template[:,1],)
-        SED = galsim.SED(_table, 
+        _table = gs.LookupTable(x=_template[:,0], f=_template[:,1],)
+        SED = gs.SED(_table, 
                          wave_type=self.pars['wave_type'], 
                          flux_type=self.pars['flux_type'],
                          redshift=self.pars['z'],
@@ -605,7 +607,7 @@ class GrismSED(SED):
         # erg/s/cm2/nm -> photons/s/cm2/nm
         # TODO: add more flexible normalization parametrization
         norm = self.pars['obs_cont_norm'][1]*self.pars['obs_cont_norm'][0]/\
-            (Spectrum._h*Spectrum._c)
+            (GrismSED._h*GrismSED._c)
         return SED.withFluxDensity(target_flux_density=norm, 
                                    wavelength=self.pars['obs_cont_norm'][0])
     
@@ -619,11 +621,11 @@ class GrismSED(SED):
                              0.1)
         flux_grid = np.zeros(lam_grid.size)
         # Set emission lines: (specie, observer frame flux)
-        all_lines = Spectrum._valid_lines.keys()
+        all_lines = GrismSED._valid_lines.keys()
         norm = -1
         for line, flux in self.pars['lines'].items():
             # sanity check
-            rest_lambda = np.atleast_1d(Spectrum._valid_lines[line])
+            rest_lambda = np.atleast_1d(GrismSED._valid_lines[line])
             flux = np.atleast_1d(flux)
             line_sigma_int = np.atleast_1d(self.pars['line_sigma_int'][line])
             if rest_lambda is None:
@@ -644,11 +646,11 @@ class GrismSED(SED):
                 # only one emission line needed
                 if(norm<0):
                     norm_lam = cen*(1+self.pars['z'])
-                    norm = flux[i]*norm_lam/(Spectrum._h*Spectrum._c)/\
+                    norm = flux[i]*norm_lam/(GrismSED._h*GrismSED._c)/\
                                 np.sqrt(2*np.pi*_lw_sq*(1+self.pars['z'])**2)
             
-        _table = galsim.LookupTable(x=lam_grid, f=flux_grid,)
-        SED = galsim.SED(_table,
+        _table = gs.LookupTable(x=lam_grid, f=flux_grid,)
+        SED = gs.SED(_table,
                          wave_type='nm',
                          flux_type='flambda',
                          redshift=self.pars['z'],)

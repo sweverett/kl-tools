@@ -278,7 +278,7 @@ class LogLikelihood(LogBase):
 
         return log_det
 
-    def setup_vmap(self, theta_pars, model_name):
+    def setup_vmap(self, theta_pars):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity

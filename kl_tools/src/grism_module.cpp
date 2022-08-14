@@ -201,7 +201,7 @@ disperse_helper::disperse_helper(const py::dict &config,
     Ny = py::int_(config["Ny"]);
     pix_scale = py::float_(config["pix_scale"]);
     R_spec = py::float_(config["R_spec"]);
-    disp_ang = py::float_(config["disp_angle"]);
+    disp_ang = py::float_(config["disp_ang"]);
     offset = py::float_(config["offset"]);
     diameter = py::float_(config["diameter"]);
     exp_time = py::float_(config["exp_time"]);
@@ -220,7 +220,7 @@ void disperse_helper::set_disperse_helper(const py::dict &config,
     Ny = py::int_(config["Ny"]);
     pix_scale = py::float_(config["pix_scale"]);
     R_spec = py::float_(config["R_spec"]);
-    disp_ang = py::float_(config["disp_angle"]);
+    disp_ang = py::float_(config["disp_ang"]);
     offset = py::float_(config["offset"]);
     diameter = py::float_(config["diameter"]);
     exp_time = py::float_(config["exp_time"]);

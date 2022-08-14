@@ -3,6 +3,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.table import Table, join, hstack
 import os
+import sys
 import pickle
 import fitsio
 from astropy.table import Table
@@ -13,10 +14,12 @@ import pathlib
 import re
 import astropy.wcs as wcs
 import astropy.units as u
+import astropy.constants as constants
 from argparse import ArgumentParser
 
 import utils
-from emission import EmissionLine, LINE_LAMBDAS
+import parameters
+from emission import EmissionLine, LINE_LAMBDAS, SED
 
 import ipdb
 
@@ -153,7 +156,7 @@ class GrismModelCube(cube.DataCube):
 
     '''
 
-    def __init__(self, pars, datacube, imap, sed):
+    def __init__(self, pars, datacube=None, gal=None, sed=None):
         ''' Initialize a GrismDataCube object
 
         Note that the interface is not finalize and is submit to changes
@@ -171,6 +174,7 @@ class GrismModelCube(cube.DataCube):
         # build CubePars
         _cubepars_dict = {}
         _cubepars_dict['pix_scale'] = pars.meta['model_dimension']['scale']
+        # unity bandpass
         _cubepars_dict['bandpasses'] = {
             'lambda_blue': pars.meta['model_dimension']['lambda_range'][0],
             'lambda_red': pars.meta['model_dimension']['lambda_range'][1],
@@ -182,11 +186,36 @@ class GrismModelCube(cube.DataCube):
         # init parent DataCube class, with 3D datacube and CubePars
         super(GrismModelCube, self).__init__(datacube, pars=cubepars)
         # also gs.Chromatic object for broadband image
-        self.imap_img = imap_img
+        self.gal = gal
         self.sed = sed
+        self.set_obs_method = False
         return
 
-    def observe(self, config, add_noise = False, force_noise_free=True):
+    def set_obs_methods(self, config_list):
+        self.config_list = config_list
+        _disperse_helper = []
+        _bandpasses = []
+        for config in config_list:
+            _bp = gs.Bandpass(config.get('bandpass'), 
+                wave_type=config.get('wave_type', 'nm'))
+            _bandpasses.append(_bp)
+            if config.get('type')!='grism':
+                _disperse_helper.append(None)
+            else:
+                # set the grism disperse helper
+                # add model information
+                config['model_Nx'] = self.Nx
+                config['model_Ny'] = self.Ny
+                config['model_Nlam'] = self.Nspec
+                config['model_scale'] = self.pix_scale
+                _helper = m.DisperseHelper(config, self.lambdas, _bp)
+                _disperse_helper.append(_helper)
+        self.disperse_helper = _disperse_helper
+        self.bandpass_list = _bandpasses
+        self.set_obs_method = True
+        return 
+
+    def observe(self, index, force_noise_free=True):
         ''' Simulate observed image given `observe_parmas` which specifies all
         the information you need.
 
@@ -195,38 +224,34 @@ class GrismModelCube(cube.DataCube):
         Roman grism simulation convention, but in the short-term, it will just
         be a dictionary.
         '''
-        _type = config.get('type', 'none').lower()
+        _type = self.config_list[index].get('type', 'none').lower()
         if _type == 'grism':
-            return self._get_grism_data(config, add_noise=add_noise)
+            return self._get_grism_data(index, 
+                force_noise_free=force_noise_free)
         elif _type == 'photometry':
-            return self._get_photometry_data(config, add_noise=add_noise)
+            return self._get_photometry_data(index, 
+                force_noise_free=force_noise_free)
         else:
             print(f'{_type} not supported by GrismModelCube!')
             exit(-1)
 
-    def _get_photometry_data(self, config, 
-        add_noise = False, force_noise_free = True):
+    def _get_photometry_data(self, index, force_noise_free = True):
         print(f'WARNING: have not test normalization yet')
         # self._data is in units of [photons / (s cm2)]
         # No, get chomatic directly, from GrismModelCube
-        image = gs.Image(self.imap_img, copy=True)
-        gal = gs.InterpolatedImage(image, scale=self.pars['pix_scale'])
-        gal_chromatic = gal * self.sed
-
+        gal_chromatic = self.gal * self.sed
+        config = self.config_list[index]
         # convolve with PSF
-        if config.get('psf_type', 'none').lower()!='none':
-            psf = self._build_PSF_model(
-                config,
-                lam=config['bandpass'].calculateEffectiveWavelength()
-                )
-            _gal_chromatic = gs.Convolve([gal_chromatic, psf])
+        psf = self._build_PSF_model(config)
+        if psf is not None:
+            gal_chromatic = gs.Convolve([gal_chromatic, psf])
         photometry_img = gal_chromatic.drawImage(
                                 nx=config['Nx'], ny=config['Ny'], 
                                 scale=config['pix_scale'], method='auto',
                                 area=config['area'], 
                                 exptime=config['exp_time'],
                                 gain=config['gain'],
-                                bandpass=config['bandpass'])
+                                bandpass=self.bandpass_list[index])
         # apply noise
         if force_noise_free:
             return photometry_img.array, None
@@ -245,20 +270,20 @@ class GrismModelCube(cube.DataCube):
                 #print("[ImageGenerator][debug]: noise free")
                 return photometry_img.array, noise_img.array
 
-    def _get_grism_data(self, config, 
-            add_noise=False, force_noise_free=True):
+    def _get_grism_data(self, index, force_noise_free=True):
         # prepare datacube, lambdas, bandpass, output and config dict
-        bp = gs.Bandpass(config.get('bandpass'), 
-                        wave_type=config.get('wave_type', 'nm'))
-        bp_array = bp[self.lambdas]
-        config['model_Nx'] = self.Nx
-        config['model_Ny'] = self.Ny
-        config['model_Nlam'] = self.Nspec
-        config['model_scale'] = self.pix_scale
+        config = self.config_list[index]
+        bp_array = self.bandpass_list[index][self.lambdas]
+        # add model information
+        #config['model_Nx'] = self.Nx
+        #config['model_Ny'] = self.Ny
+        #config['model_Nlam'] = self.Nspec
+        #config['model_scale'] = self.pix_scale
         grism_img_array = np.zeros([config['Ny'], config['Nx']], 
             dtype=np.float64, order='C')
         # call c++ routine to disperse
-        m.cpp_stack(self._data, self.lambdas, bp_array, grism_img_array, config)
+        self.disperse_helper[index].getDispersedImage(self._data, 
+            grism_img_array, config)
         # wrap with noise & psf
         grism_img = gs.Image(
             grism_img_array,
@@ -291,10 +316,17 @@ class GrismModelCube(cube.DataCube):
                 #print("[GrismGenerator][debug]: noise free")
                 return grism_img.array, noise_img.array
 
-    def set_data(self, data):
-        assert data.shape == self._data.shape, f'data shape {data.shape} is'+\
-            f'inconsistent with {self._data.shape}!'
+    def set_data(self, datacube, gal, sed):
+        ''' update the data contained in the GrismModelCube
+
+        This can be used for a quick method to get observed image
+        '''
+        _ds = datacube.shape
+        assert _ds == self._data.shape, f'data shape {_ds}'+\
+            f' is inconsistent with {self._data.shape}!'
         self._data = data
+        self.gal = gal 
+        self.sed = sed
 
     def stack(self, axis=0):
         return np.sum(self._data, axis=axis)
@@ -366,11 +398,41 @@ class GrismDataVector(cube.DataVector):
     Class that defines grism data set, which generally has multiple grism and 
     broadband image files.
 
+    The data structure of this class is
+
+    - self.header: dict; info about the data set overall
+        keywords:
+            - NEXTENSION: number of observations
+
+    - self.data: list of np.ndarray; the data image
+
+    - self.noise: list of np.ndarray; the noise image
+
+    - self.data_header: list of dict; the info about each data observation
+        keywords:
+            - inst_name
+            - type
+            - bandpass
+            - Nx
+            - Ny
+            - pix_scale
+            - diameter
+            - exp_time
+            - gain
+            - noise_type
+            - sky_level
+            - read_noise
+            - apply_to_data
+            - psf_type
+            - psf_fwhm
+            - R_spec
+            - disp_ang
+            - offset
     '''
 
     def __init__(self, 
         file=None,
-        header = None, data = None, data_header = None, noise = None,
+        header = None, data_header = None, data = None, noise = None,
         ):
         ''' Initialize the `GrismDataVector` class object
         either from a fits file, or from a series of input parameters
@@ -384,26 +446,12 @@ class GrismDataVector(cube.DataVector):
                 self.from_fits(file)
         else:
             self.header = header
-            ''' dict of meta params for the list of data
-                as an example, {
-                    'NEXTENSIONS': 3, etc
-                }
-            '''
-            # list of np.ndarray
             self.data = data
-            # list of dict for each data extension
             self.data_header = data_header
-            '''
-                as an example, {
-                    'NAXIS_X_val': 123,
-                    'NAXIS_Y_val': 234, 
-                    'PIXSCALE': 0.1,
-                    ''
-                }
-            '''
-            # list of np.ndarray
             self.noise = noise
+        self.Nobs = self.header['NEXTENSION']
 
+        return
 
     def get_inv_cov_list(self):
         inv_cov_list = [self.get_inv_cov(i) for i in range(len(self.noise))]
@@ -453,6 +501,162 @@ class GrismDataVector(cube.DataVector):
             'offset': _h['offset'],
         }
         return config
+
+    def get_config_list(self):
+        config_list = [self.get_config(i) for i in range(len(self.noise))]
+        return config_list
+
+    def stack(self):
+        i = 0
+        while i < len(self.data):
+            if self.data_header[i]['type'] == 'photometry':
+                return self.data[i]
+        return None
+
+
+class GrismSED(SED):
+    '''
+    This class describe the obs-frame SED template of a source galaxy, includ-
+    ing emission lines and continuum components.
+    This is mostly a wrapper of the galsim.SED class object
+    
+    Note that this class should only capture the intrinsic properties of
+    the galaxy SED, like
+        - redshift
+        - continuum and emission line flux density
+        - emission line width
+        - [dust?]
+    Other extrinsic properties, like
+        - sky background
+        - system bandpass
+        - spectral resolution and dispersion
+        - exposure time
+        - collecting area
+        - pixelization
+        - noise
+    will be implemented in mock observation module
+    '''
+    ### settings for the whole class
+    # default parameters
+    _default_pars = {
+        'template': '../../data/Simulation/GSB2.spec',
+        'wave_type': 'Ang',
+        'flux_type': 'flambda',
+        'z': 0.0,
+        'spectral_range': (50, 50000), # nm
+        # obs-frame continuum normalization (nm, erg/s/cm2/nm)
+        'obs_cont_norm': (400, 0.),
+        # spectral resolution at 1 micron, assuming dispersion per pixel
+        #'resolution': 3000,
+        # a dict of line names and obs-frame flux values (erg/s/cm2)
+        'lines': {'Halpha': 1e-15},
+        # intrinsic linewidth in nm
+        'line_sigma_int': {'Halpha': 0.5,},
+        #'line_hlr': (0.5, Unit('arcsec')),
+        'thin': -1,
+    }
+    # units conversion
+    _h = constants.h.to('erg s').value
+    _c = constants.c.to('nm/s').value
+    # build-in emission line species and info
+    _valid_lines = {
+        'Halpha': 656.461,
+        'OII': [372.7092, 372.9875],
+        'OIII': [496.0295, 500.8240],
+    }
+    
+    def __init__(self, pars):
+        '''
+        Initialize SED class object with parameters dictionary
+        '''
+        self.pars = Spectrum._default_pars.copy()
+        self.updatePars(pars)
+        continuum = self._addContinuum()
+        emission = self._addEmissionLines()
+        self.spectrum = continuum + emission
+        if self.pars['thin'] > 0:
+            self.spectrum = self.spectrum.thin(rel_err=self.pars['thin'])
+        
+        
+    def updatePars(self, pars):
+        '''
+        Update parameters
+        '''
+        for key, val in pars.items():
+            self.pars[key] = val
+
+    def _addContinuum(self):
+        '''
+        Build and return continuum GalSim SED object
+        '''
+        template = self.pars['template']
+        if not os.path.isfile(template):
+            raise OSError(f'Can not find template file {template}!')
+        # build GalSim SED object out of template file
+        _template = np.genfromtxt(template)
+        _table = galsim.LookupTable(x=_template[:,0], f=_template[:,1],)
+        SED = galsim.SED(_table, 
+                         wave_type=self.pars['wave_type'], 
+                         flux_type=self.pars['flux_type'],
+                         redshift=self.pars['z'],
+                         _blue_limit=self.pars['spectral_range'][0],
+                         _red_limit=self.pars['spectral_range'][1])
+        # normalize the SED object at observer frame
+        # erg/s/cm2/nm -> photons/s/cm2/nm
+        # TODO: add more flexible normalization parametrization
+        norm = self.pars['obs_cont_norm'][1]*self.pars['obs_cont_norm'][0]/\
+            (Spectrum._h*Spectrum._c)
+        return SED.withFluxDensity(target_flux_density=norm, 
+                                   wavelength=self.pars['obs_cont_norm'][0])
+    
+    def _addEmissionLines(self):
+        '''
+        Build and return Gaussian emission lines GalSim SED object
+        '''
+        # init LookupTable for rest-frame SED
+        lam_grid = np.arange(self.pars['spectral_range'][0]/(1+self.pars['z']),
+                             self.pars['spectral_range'][1]/(1+self.pars['z']), 
+                             0.1)
+        flux_grid = np.zeros(lam_grid.size)
+        # Set emission lines: (specie, observer frame flux)
+        all_lines = Spectrum._valid_lines.keys()
+        norm = -1
+        for line, flux in self.pars['lines'].items():
+            # sanity check
+            rest_lambda = np.atleast_1d(Spectrum._valid_lines[line])
+            flux = np.atleast_1d(flux)
+            line_sigma_int = np.atleast_1d(self.pars['line_sigma_int'][line])
+            if rest_lambda is None:
+                raise ValueError(f'{line} is not a valid emission line! '+\
+                        f'For now, line must be one of {all_lines}')
+            else:
+                assert rest_lambda.size == flux.size, f'{line} has'+\
+                f' {rest_lambda.size} lines but {flux.size} flux are provided!'
+            # build rest-frame f_lambda SED [erg s-1 cm-2 nm-1]
+            # then, redshift the SED. The line width will increase automatically
+            for i,cen in enumerate(rest_lambda):
+                _lw_sq = line_sigma_int[i]**2
+                # erg/s/cm2 -> erg/s/cm2/nm
+                _norm = flux[i]/np.sqrt(2*np.pi*_lw_sq)
+                flux_grid += _norm * np.exp(-(lam_grid-cen)**2/(2*_lw_sq))
+                # also, calculate normalization factor for obs-frame spectrum
+                # convert flux units: erg/s/cm2/nm -> photons/s/cm2/nm
+                # only one emission line needed
+                if(norm<0):
+                    norm_lam = cen*(1+self.pars['z'])
+                    norm = flux[i]*norm_lam/(Spectrum._h*Spectrum._c)/\
+                                np.sqrt(2*np.pi*_lw_sq*(1+self.pars['z'])**2)
+            
+        _table = galsim.LookupTable(x=lam_grid, f=flux_grid,)
+        SED = galsim.SED(_table,
+                         wave_type='nm',
+                         flux_type='flambda',
+                         redshift=self.pars['z'],)
+        # normalize to observer-frame flux
+        SED = SED.withFluxDensity(target_flux_density=norm, 
+                                  wavelength=norm_lam)
+        return SED
+
 
 def main(args):
 

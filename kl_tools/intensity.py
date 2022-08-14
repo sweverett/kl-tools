@@ -145,9 +145,11 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux, hlr):
+    def __init__(self, datacube, flux, hlr,
+        theory_Nx = None, theory_Ny = None, scale = None):
+
         '''
-        datacube: DataCube
+        datavector: DataCube
             While this implementation will not use the datacube
             image explicitly (other than shape info), most will
         flux: float
@@ -155,8 +157,10 @@ class InclinedExponential(IntensityMap):
         hlr: float
             Object half-light radius (in pixels)
         '''
-
-        nx, ny = datacube.Nx, datacube.Ny
+        if datavector is not None:
+            nx, ny = datavector.Nx, datavector.Ny
+        else:
+            nx, ny = theory_Nx, theory_Ny
         super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
 
         pars = {'flux': flux, 'hlr': hlr}
@@ -166,8 +170,7 @@ class InclinedExponential(IntensityMap):
 
         self.flux = flux
         self.hlr = hlr
-
-        self.pix_scale = datacube.pix_scale
+        self.pix_scale = datacube.pix_scale if datacube is not None else scale
 
         # same as default, but to make it explicit
         self.is_static = False
@@ -188,8 +191,15 @@ class InclinedExponential(IntensityMap):
         return: np.ndarray
             The rendered intensity map
         '''
-
-        inc = Angle(np.arcsin(theta_pars['sini']), radians)
+        # pars has higher priority than theta_pas, such that when 
+        # we want to fix parameters of g1,g2,sini,theta_int, we can
+        # set key:fixed_val in the pars.
+        sini = pars.get('sini', theta_pars['sini'])
+        g1 = pars.get('g1', theta_pars['g1'])
+        g2 = pars.get('g2', theta_pars['g2'])
+        theta_int = pars.get('theta_int', theta_pars['theta_int'])
+        
+        inc = Angle(np.arcsin(sini), radians)
 
         gal = gs.InclinedExponential(
             inc, flux=self.flux, half_light_radius=self.hlr
@@ -204,24 +214,24 @@ class InclinedExponential(IntensityMap):
         #         knots = gs.RandomKnots(**knot_pars)
         #         gal = gal + knots
 
-        rot_angle = Angle(theta_pars['theta_int'], radians)
+        rot_angle = Angle(theta_int, radians)
         gal = gal.rotate(rot_angle)
 
         # TODO: still don't understand why this sometimes randomly fails
         try:
-            g1 = theta_pars['g1']
-            g2 = theta_pars['g2']
             gal = gal.shear(g1=g1, g2=g2)
         except Exception as e:
             print('imap generation failed!')
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
-
+        
         self.image = gal.drawImage(
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
-
-        return self.image
+        if pars.get('run_options', {}).get('imap_return_gal', False):
+            return self.image, gal
+        else:
+            return self.image
 
     def plot_fit(self, datacube, show=True, close=True, outfile=None,
                  size=(9,9), vmin=None, vmax=None):
@@ -397,7 +407,7 @@ INTENSITY_TYPES = {
     'inclined_exp': InclinedExponential,
     }
 
-def build_intensity_map(name, datacube, kwargs):
+def build_intensity_map(name, datavector, kwargs):
     '''
     name: str
         Name of intensity map type
@@ -412,7 +422,7 @@ def build_intensity_map(name, datacube, kwargs):
 
     if name in INTENSITY_TYPES.keys():
         # User-defined input construction
-        intensity = INTENSITY_TYPES[name](datacube, **kwargs)
+        intensity = INTENSITY_TYPES[name](datavector, **kwargs)
     else:
         raise ValueError(f'{name} is not a registered intensity!')
 

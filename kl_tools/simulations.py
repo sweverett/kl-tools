@@ -4,6 +4,19 @@ from astropy.io import fits
 import astropy.units as u
 import astropy.constants as const
 from astropy import cosmology
+from scipy.spatial.transform import Rotation
+import h5py
+
+import requests
+from io import BytesIO
+import os
+import pathlib
+
+import utils
+from muse import MuseDataCube
+
+import ipdb
+
 cosmo = cosmology.Planck18_arXiv_v2
 
 
@@ -11,7 +24,29 @@ verbose = False
 baseURL = 'http://www.tng-project.org/api/'
 headers = {"api-key":"b703779c1f099efed6f47b91607b1bb1"}
 
-rbase = get(baseUrl)
+
+def get(path, params=None):
+    # make HTTP GET request to path
+    headers = {"api-key":"b703779c1f099efed6f47b91607b1bb1"}
+    r = requests.get(path, params=params, headers=headers)
+    
+    # raise exception if response code is not HTTP SUCCESS (200)
+    r.raise_for_status()
+    
+    if r.headers['content-type'] == 'application/json':
+        return r.json() # parse json responses automatically
+        
+    if 'content-disposition' in r.headers:
+        filename = r.headers['content-disposition'].split("filename=")[1]
+        with open(filename, 'wb') as f:
+            f.write(r.content)
+        return filename # return the filename string
+
+    return r
+
+
+
+rbase = get(baseURL)
 use_sim = 'TNG50-1'
 names = [sim['name'] for sim in rbase['simulations']]
 i = names.index(use_sim)
@@ -19,7 +54,9 @@ sim = get( rbase['simulations'][i]['url'] )
 snaps = get( sim['snapshots'] )
 snap = get( snaps[-1]['url'] )
 
-subs = get( snap['subhalos'], {'limit':50000, 'order_by':'-mass_stars'} )
+subs = get( snap['subhalos'], {'limit':500, 'order_by':'-mass_stars'} )
+
+
 
 
 class Simulation():
@@ -28,11 +65,10 @@ class Simulation():
 
 
 class TNGsimulation(Simulation):
-    def __init__(self):
-        pass
+    def __init__(self, datacube = None):
 
-    def set_redshift(self,z=0.1):
-        self.z = z
+        pass
+        
     
     @classmethod
     def from_datacube(cls, datacube, **kwargs):
@@ -43,8 +79,13 @@ class TNGsimulation(Simulation):
         '''
         pars = {}
         sim = Simulation(pars)
-        self._datacube = datacube
-        self._lambda1d = np.array( [(bp.red_limit + bp.blue_limit)/2. for bp in datacube.bandpasses] )
+        
+        lambda1d = np.array( [(bp.red_limit + bp.blue_limit)/2. for bp in datacube.bandpasses] )
+        
+        sim = TNGsimulation()
+        sim._datacube = datacube
+        sim._lambda1d = lambda1d * u.nm
+        sim.redshift = datacube.pars['z'].value[0]
         return sim
 
     def _calculate_gas_temperature(self,h5data):
@@ -70,14 +111,14 @@ class TNGsimulation(Simulation):
         alpha = 2.6e-13 * (T/1e4)**(-0.7)  * u.cm**3 / u.s 
         Xe = h5data['PartType0']['ElectronAbundance'][:]
         XH = 0.76
-        nH =  (h5data['PartType0']['Density']*1e10 * u.M_sun / u.kpc**3 * h**2 / const.m_e).to(1/u.cm**3)
+        nH =  (h5data['PartType0']['Density'][:]*1e10 * u.M_sun / u.kpc**3 * h**2 / const.m_e).to(1/u.cm**3)
         ne = Xe * nH
-        V = (h5data['PartType0']['Mass']* 1e10 * u.M_sun/h) / ( h5data['PartType0']['Density'] * 1e10 * u.M_sun/h / (u.kpc / h)***3)
+        V = (h5data['PartType0']['Masses'][:]* 1e10 * u.M_sun/h) / ( h5data['PartType0']['Density'][:] * 1e10 * u.M_sun/h / (u.kpc / h)**3)
         # Number of recombinations in this volume element
         nr = alpha * ne * nH * V
 
         # What's the flux from this particle at the observer?
-        dL = cosmo.luminosity_distance(z)
+        dL = cosmo.luminosity_distance(self.redshift)
         photon_flux = ( nr / (4 * np.pi * dL**2) ).to(1/u.cm**2/u.s)
 
         return photon_flux
@@ -88,45 +129,100 @@ class TNGsimulation(Simulation):
         # Maybe an age correction.
         # Normalize a solar spectrum:
         norm = 1 * u.Watt / u.m**2 / u.nm / const.M_sun
-        spec_norm = norm * (h5data['PartType4']['Masses']*u.M_sun)
-        return spec_norm
-
-    def _linespec(self,h5data,line_flux, line_center = 6563. * u.Angstrom, resolution = 5000):
-        '''
-        resolution -- spectral resolution at line center; unitless, means Lambda/Delta Lambda
-        '''
-
-        sigma * line_center / resolution
-        # Calculate the velocity offset of each particle.
-        dv = h5data['PartType0']['Velocities'][:,0] * np.sqrt(1/1+self.z) * u.km/u.s
-        # get physical velocities from TNG by multiplying by sqrt(a)
-        # https://www.tng-project.org/data/docs/specifications/#parttype0
-        dlam = line_center *  dv / const.c
+        spec_norm = norm * (h5data['PartType4']['Masses'][:]*u.M_sun)
+        return spec_norm        
         
-        line_spectra = line_flux/np.sqrt(2*np.pi*sigma**2) * np.exp(-(self._lambda1 - (line_center + dlam))**2/sigma/2.)
-        return line_spectra
-        
-        
-    def _getIllustrisTNGData(self,subhaloid=100, line_center = 6563*u.Angstrom):
+    def _getIllustrisTNGData(self,subhaloid=100, line_center = 6563*u.Angstrom, cachefile = None):
         '''
         For a chosen haloid and snapshot, get the ingredients necessary to build a simulated datacube.
         This means stellar continuum (flat across our SED) and a line that traces the gas.
-        '''
 
-        sub = get( subs['results'][subhaloid]['url'] )        
-        url = f"http://www.tng-project.org/api/{use_sim}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
-        r = requests.get(url,headers=headers)
-        f = BytesIO(r.content)
-        h = h5py.File(f,mode='r')
-        Temp = 
-        # Assign an emission-line flux and star particle continuum level to each star and gas particle
+        This sets internal attributes that hold the TNG data. If a cachefile is provided, it will look there first, and use data if that file exists.
+        The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
+        '''
+        if cachefile == None:
+            sub = get( subs['results'][subhaloid]['url'] )        
+            url = f"http://www.tng-project.org/api/{use_sim}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
+            r = requests.get(url,headers=headers)
+            f = BytesIO(r.content)
+            h = h5py.File(f,mode='r')
         
+            # Assign an emission-line flux and star particle continuum level to each star and gas particle
+
+        else:
+            h = h5py.File(cachefile,mode='r')
+            self._cachefile = cachefile
+            
         self._particleData = h
         self._particleTemp = self._calculate_gas_temperature(h)
         self._starFlux = self._star_particle_flux(h)
         self._line_flux = self._gas_line_flux(h)
         
-        # Once we have these data, we then need to generate an SED for each star and gas particle!
-        particle_spec = self._linespec(h,self._line_flux, line_center = line_center)
         
         
+    def _generateSpectra(self,line_center = 6563*u.Angstrom, resolution = 5000):
+
+        # What are the dimensions of the datacube?
+
+        # What is the position of the sources relative to the field center?
+        dx = (self._particleData['PartType0']['Coordinates'][:,0] - np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/cosmo.h
+        dy = (self._particleData['PartType0']['Coordinates'][:,1] - np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/cosmo.h
+        dz = (self._particleData['PartType0']['Coordinates'][:,2] - np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/cosmo.h
+
+        # TODO: add an optional rotation matrix operation.
+        RR = Rotation.from_euler('z',45,degrees=True)
+
+        sigma = line_center / resolution
+        # Calculate the velocity offset of each particle.
+        dv = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1/1+self.redshift) * u.km/u.s
+        # get physical velocities from TNG by multiplying by sqrt(a)
+        # https://www.tng-project.org/data/docs/specifications/#parttype0
+        dlam = line_center *  dv / const.c
+        delta_lambda = self._lambda1d[1:] - self._lambda1d[:-1]
+        line_spectra = self._line_flux[:,np.newaxis]/np.sqrt(2*np.pi*sigma**2) * np.exp((-(self._lambda1d - (line_center + dlam)[:,np.newaxis])**2/sigma**2/2.).value)
+        # Now put these on the pixel grid.
+        du = (dx*u.kpc / cosmo.angular_diameter_distance(self.redshift)).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / self._datacube.pars['pix_scale']
+        dv = (dy*u.kpc / cosmo.angular_diameter_distance(self.redshift)).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / self._datacube.pars['pix_scale']
+
+        # TODO: This is where we should apply a shear.
+        
+        # Round each one to the pixel center
+        du_int = (np.round(du)).astype(int)
+        dv_int = (np.round(dv)).astype(int)
+        self.simcube = np.zeros_like(self._datacube.data)
+        for i in range(self.simcube.shape[1]):
+            for j in range(self.simcube.shape[2]):
+                these = (du_int == i) & (dv_int == j)
+                self.simcube[:,i,j] = np.sum(line_spectra[these,:],axis=0)
+        ipdb.set_trace()
+                
+    def getSpectrum(self,subhaloid):
+        self._getIllustrisTNGData(subhaloid)
+        spectrum = self._generateSpectra(self._particleData)
+        
+
+if __name__ == '__main__':
+    
+    
+    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')    
+    cubefile = os.path.join(cube_dir, '102021103_objcube.fits')
+    specfile = os.path.join(cube_dir, 'spectrum_102021103.fits')
+    catfile = os.path.join(cube_dir, 'MW_1-24_main_table.fits')
+    linefile = os.path.join(cube_dir, 'MW_1-24_emline_table.fits')
+    
+    print(f'Setting up MUSE datacube from file {cubefile}')
+    datacube = MuseDataCube(cubefile, specfile, catfile, linefile)
+    
+    # default, but we'll make it explicit:
+    datacube.set_line(line_choice='strongest')
+    # Then make a simulation object from this datacube.
+    TNGsim = TNGsimulation.from_datacube(datacube)
+    # Finally, go and get the data!
+    cachepath = pathlib.Path("tngcache.h5py")
+    if cachepath.exists():
+        TNGsim._getIllustrisTNGData(cachefile=cachepath)
+    else:
+        TNGsim._getIllustrisTNGData()
+    TNGsim._generateSpectra()
+    ipdb.set_trace()
+    

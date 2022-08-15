@@ -1,7 +1,7 @@
 import numpy as np
 import os, sys
 import yaml
-import pdb, pudb
+import pdb
 
 class ForkedPdb(pdb.Pdb):
     """A Pdb subclass that may be used

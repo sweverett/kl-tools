@@ -88,18 +88,14 @@ class IntensityMap(object):
         # only render if it has not been computed yet, or if
         # explicitly asked
         if (self.image is None) or (redo is True):
-            print("redo!")
             self._render(theta_pars, datacube, pars)
 
         _RG_ = pars.get("run_options", {}).get("imap_return_gal", False)
         if im_type == 'emission':
-            print("emission!")
             return self.image if not _RG_ else self.image, self.gal
         elif im_type == 'continuum':
-            print("continuum!")
             return self.continuum if not _RG_ else self.continuum, self.gal
         elif im_type == 'both':
-            print("both!")
             return self.image, self.continuum if not _RG_ else self.image, self.continuum, self.gal
         else:
             raise ValueError('im_type can only be one of ' +\
@@ -236,7 +232,6 @@ class InclinedExponential(IntensityMap):
         self.image = self.gal.drawImage(
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
-        print(pars)
         if pars.get('run_options', {}).get('imap_return_gal', False):
             return self.image, self.gal
         else:

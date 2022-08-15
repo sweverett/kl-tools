@@ -82,7 +82,6 @@ class CubePars(parameters.MetaPars):
             # already checked it is a list or dict
             bandpass_req = ['lambda_blue', 'lambda_red', 'dlambda']
             bandpass_opt = ['throughput', 'zp', 'unit']
-            #print(bp.keys())
             utils.check_fields(bp, bandpass_req, bandpass_opt)
 
             args = [

@@ -122,13 +122,13 @@ class CMakeBuild(build_ext):
 # The information here can also be placed in setup.cfg - better separation of
 # logic and declaration, and simpler if you include description/version in a file.
 setup(
-    name="kltools_grism_module",
+    name="kltools_grism_module_2",
     version="0.0.2",
     author="Jiachuan Xu",
     author_email="jiachuanxu@email.arizona.edu",
     description="A test project using pybind11 and CMake for kltools",
     long_description="",
-    ext_modules=[CMakeExtension("kltools_grism_module")],
+    ext_modules=[CMakeExtension("kltools_grism_module_2")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
     extras_require={"test": ["pytest>=6.0"]},

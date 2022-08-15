@@ -16,11 +16,12 @@ import astropy.wcs as wcs
 import astropy.units as u
 import astropy.constants as constants
 from argparse import ArgumentParser
+from time import time
 
 import utils
 import parameters
 from emission import EmissionLine, LINE_LAMBDAS, SED
-import kltools_grism_module as m
+import kltools_grism_module_2 as m
 
 import ipdb
 
@@ -239,22 +240,25 @@ class GrismModelCube(cube.DataCube):
 
     def _get_photometry_data(self, index, force_noise_free = True):
         print(f'WARNING: have not test normalization yet')
+        start_time = time()*1000
         # self._data is in units of [photons / (s cm2)]
         # No, get chomatic directly, from GrismModelCube
-        gal_chromatic = self.gal * self.sed
+        gal_chromatic = self.gal * self.sed.spectrum
         config = self.config_list[index]
         # convolve with PSF
-        psf = self._build_PSF_model(config)
+        psf = self._build_PSF_model(config, 
+              lam=self.bandpass_list[index].calculateEffectiveWavelength())
         if psf is not None:
             gal_chromatic = gs.Convolve([gal_chromatic, psf])
         photometry_img = gal_chromatic.drawImage(
                                 nx=config['Nx'], ny=config['Ny'], 
                                 scale=config['pix_scale'], method='auto',
-                                area=config['area'], 
+                                area=np.pi*(config['diameter']/2.0)**2, 
                                 exptime=config['exp_time'],
                                 gain=config['gain'],
                                 bandpass=self.bandpass_list[index])
         # apply noise
+        print("----- photometry image | %.2f ms -----" % (time()*1000 - start_time))
         if force_noise_free:
             return photometry_img.array, None
         else:
@@ -273,33 +277,26 @@ class GrismModelCube(cube.DataCube):
                 return photometry_img.array, noise_img.array
 
     def _get_grism_data(self, index, force_noise_free=True):
-        # prepare datacube, lambdas, bandpass, output and config dict
+        # prepare datacube and output
         config = self.config_list[index]
-        bp_array = self.bandpass_list[index][self.lambdas]
-        # add model information
-        #config['model_Nx'] = self.Nx
-        #config['model_Ny'] = self.Ny
-        #config['model_Nlam'] = self.Nspec
-        #config['model_scale'] = self.pix_scale
         grism_img_array = np.zeros([config['Ny'], config['Nx']], 
             dtype=np.float64, order='C')
         # call c++ routine to disperse
-        self.disperse_helper[index].getDispersedImage(self._data, 
-            grism_img_array, config)
+        start_time = time()*1000
+        self.disperse_helper[index].getDispersedImage(self._data, grism_img_array)
         # wrap with noise & psf
         grism_img = gs.Image(
             grism_img_array,
             dtype = np.float64, scale=config['pix_scale'], 
             )
-        #print("----- wrap image | %s seconds -----" % (time() - start_time))
         # convolve with achromatic psf, if required
-        psf = self._build_PSF_model(config)
+        psf = self._build_PSF_model(config, lam_mean=np.mean(self.lambdas))
         if psf is not None:
             _gal = gs.InterpolatedImage(grism_img, scale=config['pix_scale'])
             grism_gal = gs.Convolve([_gal, psf])
             grism_img = grism_gal.drawImage(nx=config['Nx'], ny=config['Ny'], 
                                             scale=config['pix_scale'])
-        #print("----- convolv PSF | %s seconds -----" % (time() - start_time))
+        print("----- disperse image | %.2f ms -----" % (time()*1000 - start_time))
         # apply noise
         if force_noise_free:
             return grism_img.array, None
@@ -326,7 +323,7 @@ class GrismModelCube(cube.DataCube):
         _ds = datacube.shape
         assert _ds == self._data.shape, f'data shape {_ds}'+\
             f' is inconsistent with {self._data.shape}!'
-        self._data = data
+        self._data = datacube
         self.gal = gal 
         self.sed = sed
 
@@ -348,15 +345,19 @@ class GrismModelCube(cube.DataCube):
 
         '''
         _type = config.get('psf_type', 'none').lower()
-        if _type != 'None':
+        if _type != 'none':
             if _type == 'airy':
                 lam = kwargs.get('lam', 1000) # nm
-                scale = kwargs.get('scale_unit', gs.arcsec)
-                return gs.Airy(lam=lam, diam=self.diameter/100,
-                                scale_unit=scale)
+                scale_unit = kwargs.get('scale_unit', gs.arcsec)
+                return gs.Airy(lam=lam, diam=config['diameter']/100,
+                                scale_unit=scale_unit)
             elif _type == 'airy_mean':
-                return gs.Airy(config['psf_fwhm']/1.028993969962188, 
-                    scale_unit=scale)
+                scale_unit = kwargs.get('scale_unit', gs.arcsec)
+                #return gs.Airy(config['psf_fwhm']/1.028993969962188, 
+                #               scale_unit=scale_unit)
+                lam = kwargs.get("lam_mean", 1000) # nm
+                return gs.Airy(lam=lam, diam=config['diameter']/100,
+                                scale_unit=scale_unit)
             elif _type == 'moffat':
                 beta = config.get('psf_beta', 2.5)
                 fwhm = config.get('psf_fwhm', 0.5)

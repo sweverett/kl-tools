@@ -741,12 +741,16 @@ class GrismLikelihood(LogLikelihood):
             If DataCube, truncated to desired lambda bounds
         '''
 
+        start_time = time()*1000
+
         # unpack sampled params
         theta_pars = self.theta2pars(theta)
 
         # setup model corresponding to cube.DataCube type
         #model = self._setup_model(theta_pars, datavector)
         self._setup_model(theta_pars, datavector)
+
+        print("---- build model | %.2f ms -----" % (time()*1000 - start_time))
 
         # if we are computing the marginalized posterior over intensity
         # map parameters, then we need to scale this likelihood by a
@@ -768,6 +772,7 @@ class GrismLikelihood(LogLikelihood):
             The model datacube object, truncated to desired lambda bounds
         '''
 
+        start_time = time()*1000
         # a (Nspec, Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
         inv_cov = self._setup_inv_cov_list(datavector)
 
@@ -777,12 +782,13 @@ class GrismLikelihood(LogLikelihood):
         # will be fast enough with numba anyway
         for i in range(datavector.Nobs):
 
-            _img = self.modelcube.observe(i, force_noise_free=True)
+            _img, _noise = self.modelcube.observe(i, force_noise_free=True)
             diff = (datavector.get_data(i) - _img)
-            chi2 = diff**2/inv_cov[i]
+            chi2 = np.sum(diff**2/inv_cov[i])
 
             loglike += -0.5*chi2
 
+        print("---- calculate dchi2 | %.2f ms -----" % (time()*1000 - start_time))
         # NOTE: Actually slower due to extra matrix evals...
         # diff_2 = (datacube.data - model.data).reshape(Nspec, Nx*Ny)
         # chi2_2 = diff_2.dot(inv_cov.dot(diff_2.T))
@@ -801,9 +807,10 @@ class GrismLikelihood(LogLikelihood):
         '''
         Nx = self.meta['model_dimension']['Nx']
         Ny = self.meta['model_dimension']['Ny']
+        model_scale = self.meta['model_dimension']['scale']
 
         # create grid of pixel centers in image coords
-        X, Y = utils.build_map_grid(Nx, Ny)
+        X, Y = utils.build_map_grid(Nx, Ny, indexing='xy', scale=model_scale)
 
         # create 2D velocity & intensity maps given sampled transformation
         # parameters
@@ -822,19 +829,14 @@ class GrismLikelihood(LogLikelihood):
         v_array = vmap(
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
-
+        self.v_array = v_array
         # get both the emission line and continuum image
         _pars = self.meta.copy_with_sampled_pars(theta_pars)
         _pars['run_options']['imap_return_gal'] = True
         i_array, gal = imap.render(theta_pars, datavector, _pars)
-
+        self.i_array = i_array
         self._construct_model_datacube(theta_pars, v_array, i_array, gal)
-        #model_datacube = self._construct_model_datacube(
-        #    theta_pars, v_array, i_array, gal
-        #    )
-
-        #return model_datacube
-
+        
     def setup_imap(self, theta_pars, datavector):
         '''
         theta_pars: dict

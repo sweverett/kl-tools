@@ -6,6 +6,7 @@ from astropy.units import Unit
 import astropy.constants as const
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
+from copy import deepcopy
 
 import velocity
 from likelihood import LogPosterior
@@ -22,6 +23,9 @@ def parse_args():
     parser.add_argument('-N', type=int, default=200,
                         help='Number of grid points')
     parser.add_argument('-run_name', type=str, default=None,
+                        help='Name of likelihood slice run')
+    parser.add_argument('-imap', type=str, default='exp',
+                        choices=['exp', 'basis'],
                         help='Name of likelihood slice run')
     parser.add_argument('--psf', action='store_true',
                         help='Set to use PSF')
@@ -125,6 +129,7 @@ def main(args):
 
     N = args.N
     run_name = args.run_name
+    imap = args.imap
     psf = args.psf
     show = args.show
 
@@ -155,33 +160,37 @@ def main(args):
         # 'hlr': true_hlr,
     }
 
+    if imap == 'exp':
+        intensity_dict = {
+            # For this test, use truth info
+            'type': 'inclined_exp',
+            'flux': true_flux, # counts
+            'hlr': true_hlr, # counts
+            }
+    elif imap == 'basis':
+        intensity_dict = {
+            'type': 'basis',
+            # 'basis_type': 'shapelets',
+            # 'basis_type': 'sersiclets',
+            'basis_type': 'exp_shapelets',
+            'basis_kwargs': {
+                'Nmax': 12,
+                # 'plane': 'disk',
+                'plane': 'obs',
+                'beta': 0.2 # n12-exp_shapelet
+            #     'beta': 0.28,
+            #     'index': 1,
+            #     'b': 1,
+                }
+            }
+
     mcmc_pars = {
         'units': {
             'v_unit': Unit('km / s'),
             'r_unit': Unit('kpc'),
         },
         'priors': {},
-        'intensity': {
-            # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': true_flux, # counts
-            'hlr': true_hlr, # counts
-            # 'flux': 'sampled', # counts
-            # 'hlr': 'sampled', # pixels
-            # 'type': 'basis',
-            # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
-            # 'basis_type': 'exp_shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 12,
-            # #     # 'plane': 'disk',
-            #     'plane': 'obs',
-            #     'beta': 0.28,
-            # #     'beta': 'sampled',
-            #     'index': 1,
-            #     'b': 1,
-            #     }
-        },
+        'intensity': intensity_dict,
         'velocity': {
             'model': 'centered'
         },
@@ -340,7 +349,7 @@ def main(args):
         print(f'Starting loop over {par}: {par_range}')
 
         # fresh copy
-        theta_pars = true_pars.copy()
+        theta_pars = deepcopy(true_pars)
 
         # Now update w/ test param
         left, right, dx = par_range
@@ -383,19 +392,21 @@ def main(args):
         plt.close()
 
     #-----------------------------------------------------------------
-    # Check how v0 offsets affect vmap residuals
+    # Check how a given par offsets affect vmap residuals
 
     theta_pars = true_pars.copy()
 
-    print('Making plots of vmap residuals while varying rscale')
-    utils.make_dir(os.path.join(outdir, 'rscale'))
-    rscales = np.linspace(2.5, 3.5, 11, endpoint=True)
-    for rscale in rscales:
-        theta_pars['rscale'] = rscale
+    var = 'g1'
+    print(f'Making plots of vmap residuals while varying {var}')
+    utils.make_dir(os.path.join(outdir, var))
+    vmin, vmax = test_pars[var][0], test_pars[var][1]
+    vals = np.linspace(vmin, vmax, 11, endpoint=True)
+    for val in vals:
+        theta_pars[var] = val
         theta = pars.pars2theta(theta_pars)
 
-        outfile = os.path.join(outdir, 'rscale', f'{rscale}-rscale-vmap-residuals.png')
-        print(f'Saving rscale={rscale} vmap residuals to {outfile}')
+        outfile = os.path.join(outdir, var, f'{val:.4f}-{var}-vmap-residuals.png')
+        print(f'Saving {var}={val:.4f} vmap residuals to {outfile}')
 
         # norm = const.c.to(mcmc_pars['units']['v_unit']).value
         plot_vmap_residuals(
@@ -406,6 +417,7 @@ def main(args):
     return 0
 
 if __name__ == '__main__':
+
     args = parse_args()
 
     print('Starting tests')

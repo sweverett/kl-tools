@@ -108,7 +108,7 @@ class TransformableImage(object):
                 func = _nb_eval_in_obs_plane
             else:
                 func = self._eval_in_obs_plane
-        if plane == 'cen':
+        elif plane == 'cen':
             if use_numba is True:
                 func = _nb_eval_in_cen_plane
             else:

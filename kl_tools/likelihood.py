@@ -580,20 +580,14 @@ class DataCubeLikelihood(LogLikelihood):
 
         psf = datacube.get_psf()
 
-        for i in range(Nspec):
-            zfactor = 1. / (1 + v_array)
+        # get kinematic redshift correct per imap image pixel
+        zfactor = 1. / (1 + v_array)
 
-            obs_array = self._compute_slice_model(
+        for i in range(Nspec):
+            data[i,:,:] = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array, cont_array,
                 psf=psf, pix_scale=datacube.pix_scale
             )
-
-            # NB: here you could do something fancier, such as a
-            # wavelength-dependent PSF
-            # obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
-            # obs_im = ...
-
-            data[i,:,:] = obs_array
 
         model_datacube = DataCube(
             data=data, pars=datacube.pars

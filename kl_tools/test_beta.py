@@ -150,8 +150,8 @@ def main(args):
     pars_sersiclet = deepcopy(meta_pars)
     pars_exp_shapelet = deepcopy(meta_pars)
 
-    nmax_cart  = 14
-    nmax_polar = 12
+    nmax_cart  = 22
+    nmax_polar = 20
     pars_shapelet['intensity'] = {
         'type': 'basis',
         'basis_type': 'shapelets',

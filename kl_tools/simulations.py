@@ -81,11 +81,13 @@ class TNGsimulation(Simulation):
         sim = Simulation(pars)
         
         lambda1d = np.array( [(bp.red_limit + bp.blue_limit)/2. for bp in datacube.bandpasses] )
+        dlambda1d = np.array( [(bp.red_limit - bp.blue_limit) for bp in datacube.bandpasses] )
         
         sim = TNGsimulation()
         sim._datacube = datacube
         sim._lambda1d = lambda1d * u.nm
         sim.redshift = datacube.pars['z'].value[0]
+        
         return sim
 
     def _calculate_gas_temperature(self,h5data):
@@ -128,9 +130,16 @@ class TNGsimulation(Simulation):
         # This should just return continuum proportional to stellar mass.
         # Maybe an age correction.
         # Normalize a solar spectrum:
-        norm = 1 * u.Watt / u.m**2 / u.nm / const.M_sun
+        norm = 1 * u.Watt / u.m**2 / u.nm / const.M_sun * u.AU**2
         spec_norm = norm * (h5data['PartType4']['Masses'][:]*u.M_sun)
-        return spec_norm        
+
+        # Then, using our line center, convert to photons per spaxel.
+        Ephot = const.h*const.c/(6563.*u.Angstrom) * 1/u.photon
+        photon_density = ( spec_norm.to(u.erg/u.s/u.nm) / Ephot ).to( u.photon/u.s/u.nm)
+
+        photons = photon_density * np.array( [(bp.red_limit - bp.blue_limit) for bp in datacube.bandpasses] )
+        
+        return photon_density.to(u.photon/u.s).value
         
     def _getIllustrisTNGData(self,subhaloid=100, line_center = 6563*u.Angstrom, cachefile = None):
         '''
@@ -140,16 +149,21 @@ class TNGsimulation(Simulation):
         This sets internal attributes that hold the TNG data. If a cachefile is provided, it will look there first, and use data if that file exists.
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
+        
         if cachefile == None:
+            print(f"downloading data from TNG remote server. Will store results locally at {cachefile} ")
             sub = get( subs['results'][subhaloid]['url'] )        
             url = f"http://www.tng-project.org/api/{use_sim}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
             r = requests.get(url,headers=headers)
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
-        
+            with open(cachefie,'wb') as g:
+                g.write(r.content)
+            
             # Assign an emission-line flux and star particle continuum level to each star and gas particle
 
         else:
+            print(f"using locally cached file {cachefile}")
             h = h5py.File(cachefile,mode='r')
             self._cachefile = cachefile
             
@@ -160,18 +174,18 @@ class TNGsimulation(Simulation):
         
         
         
-    def _generateSpectra(self,line_center = 6563*u.Angstrom, resolution = 5000):
+    def _generateSpectra(self,line_center = 6563*u.Angstrom, resolution = 5000,rescale_positions = 3.):
 
         # What are the dimensions of the datacube?
 
         # What is the position of the sources relative to the field center?
-        dx = (self._particleData['PartType0']['Coordinates'][:,0] - np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/cosmo.h
-        dy = (self._particleData['PartType0']['Coordinates'][:,1] - np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/cosmo.h
-        dz = (self._particleData['PartType0']['Coordinates'][:,2] - np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/cosmo.h
+        # Center on the star particles, since that's how we'll really define galaxies.
+        dx = (self._particleData['PartType0']['Coordinates'][:,0] - np.median(self._particleData['PartType4']['Coordinates'][:,0]))/cosmo.h / rescale_positions
+        dy = (self._particleData['PartType0']['Coordinates'][:,1] - np.median(self._particleData['PartType4']['Coordinates'][:,1]))/cosmo.h / rescale_positions
+        dz = (self._particleData['PartType0']['Coordinates'][:,2] - np.median(self._particleData['PartType4']['Coordinates'][:,2]))/cosmo.h / rescale_positions
 
         # TODO: add an optional rotation matrix operation.
         RR = Rotation.from_euler('z',45,degrees=True)
-
         sigma = line_center / resolution
         # Calculate the velocity offset of each particle.
         dv = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1/1+self.redshift) * u.km/u.s
@@ -183,17 +197,24 @@ class TNGsimulation(Simulation):
         # Now put these on the pixel grid.
         du = (dx*u.kpc / cosmo.angular_diameter_distance(self.redshift)).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / self._datacube.pars['pix_scale']
         dv = (dy*u.kpc / cosmo.angular_diameter_distance(self.redshift)).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / self._datacube.pars['pix_scale']
-
-        # TODO: This is where we should apply a shear.
         
-        # Round each one to the pixel center
-        du_int = (np.round(du)).astype(int)
-        dv_int = (np.round(dv)).astype(int)
+        # TODO: This is where we should apply a shear.
+
+
+        # Loop over slices. In each slice, make a 2D histogram of the spectra.
+
+        # Choose a pixelization:
         self.simcube = np.zeros_like(self._datacube.data)
-        for i in range(self.simcube.shape[1]):
-            for j in range(self.simcube.shape[2]):
-                these = (du_int == i) & (dv_int == j)
-                self.simcube[:,i,j] = np.sum(line_spectra[these,:],axis=0)
+        xbins = np.linspace(-self.simcube.shape[1]/2,self.simcube.shape[1]/2.,self.simcube.shape[1]+1)
+        ybins = np.linspace(-self.simcube.shape[2]/2,self.simcube.shape[2]/2.,self.simcube.shape[2]+1)
+        
+        xcen,ycen = np.mean(xbins),np.mean(ybins)
+        for islice in range(self.simcube.shape[0]):
+            gas_slice2D,_,_ = np.histogram2d(du-xcen,dv-ycen,bins=(xbins,ybins),weights=line_spectra[:,islice])
+            star_slice2D,_,_ = np.histogram2d(du-xcen,dv-ycen,bins=(xbins,ybins),weights=self._starFlux)
+            slice2D = gas_slice2D + star_slice2D
+            self.simcube[islice,:,:] = slice2D
+        
         ipdb.set_trace()
                 
     def getSpectrum(self,subhaloid):
@@ -218,11 +239,14 @@ if __name__ == '__main__':
     # Then make a simulation object from this datacube.
     TNGsim = TNGsimulation.from_datacube(datacube)
     # Finally, go and get the data!
-    cachepath = pathlib.Path("tngcache.h5py")
+    cachepath = pathlib.Path("tng_cutout.hdf5")
+    # Choose the line center from the provided datacube.
+    empars = datacube.pars['emission_lines'][0]
+    line_center = empars.line_pars['value'] * (1 + empars.line_pars['z']) * u.Angstrom #empars.line_pars['unit']
     if cachepath.exists():
-        TNGsim._getIllustrisTNGData(cachefile=cachepath)
+        TNGsim._getIllustrisTNGData(cachefile=cachepath, line_center = line_center)
     else:
-        TNGsim._getIllustrisTNGData()
-    TNGsim._generateSpectra()
+        TNGsim._getIllustrisTNGData(line_center = line_center)
+    TNGsim._generateSpectra(line_center = line_center)
     ipdb.set_trace()
     

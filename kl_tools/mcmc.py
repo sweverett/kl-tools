@@ -266,8 +266,6 @@ class MCMCRunner(object):
                       'degrade perfomance for parallel processing.')
 
         with pool:
-            pt = type(pool)
-            print(f'Pool: {pool}')
 
             if isinstance(pool, schwimmbad.MPIPool):
                 if not pool.is_master():
@@ -275,7 +273,7 @@ class MCMCRunner(object):
                     sys.exit(0)
 
             self.sampler = self._initialize_sampler(pool=pool)
-
+            #print(f'Run sampler now {pool.is_master()}')
             self._run_sampler(start, nsteps=nsteps, progress=progress)
 
         self.has_run = True
@@ -297,7 +295,11 @@ class MCMCRunner(object):
         if nsteps is None:
             raise Exception('nsteps should be set except for a few ' +\
                             'specific samplers!')
-
+        #print(f'Run _run_sampler now')
+        #print(f'start = {start}')
+        #print(f'nsteps = {nsteps}')
+        #(p, loglike, state) = self.sampler.sample(start, iterations=1)
+        #print(p, loglike, state)
         self.sampler.run_mcmc(
             start, nsteps, progress=progress
             )

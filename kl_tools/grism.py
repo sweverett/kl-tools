@@ -17,11 +17,12 @@ import astropy.units as u
 import astropy.constants as constants
 from argparse import ArgumentParser
 from time import time
+from mpi4py import MPI
 
 import utils
 import parameters
 from emission import EmissionLine, LINE_LAMBDAS, SED
-import kltools_grism_module_2 as m
+#import kltools_grism_module_2 as m
 
 import ipdb
 
@@ -194,16 +195,20 @@ class GrismModelCube(cube.DataCube):
         return
 
     def set_obs_methods(self, config_list):
+        
+        #if not self.set_obs_method:
         self.config_list = config_list
-        _disperse_helper = []
+        _disperse_helper_index_map = []
+        _grism_count = 0
         _bandpasses = []
         for config in config_list:
             _bp = gs.Bandpass(config.get('bandpass'), 
                 wave_type=config.get('wave_type', 'nm'))
             _bandpasses.append(_bp)
             _bp_list = _bp(np.array(self.lambdas))
+            
             if config.get('type')!='grism':
-                _disperse_helper.append(None)
+                _disperse_helper_index_map.append(-1)
             else:
                 # set the grism disperse helper
                 # add model information
@@ -211,9 +216,13 @@ class GrismModelCube(cube.DataCube):
                 config['model_Ny'] = self.Ny
                 config['model_Nlam'] = self.Nspec
                 config['model_scale'] = self.pix_scale
-                _helper = m.DisperseHelper(config, np.array(self.lambdas), _bp_list)
-                _disperse_helper.append(_helper)
-        self.disperse_helper = _disperse_helper
+                #_helper = m.DisperseHelper(config, np.array(self.lambdas), _bp_list)
+                #if rank==0:
+                #if True:
+                #    m.add_disperser(config, np.array(self.lambdas), _bp_list)
+                _disperse_helper_index_map.append(_grism_count)
+                _grism_count += 1
+        self.disperse_helper_index_map = _disperse_helper_index_map
         self.bandpass_list = _bandpasses
         self.set_obs_method = True
         return 
@@ -239,8 +248,8 @@ class GrismModelCube(cube.DataCube):
             exit(-1)
 
     def _get_photometry_data(self, index, force_noise_free = True):
-        print(f'WARNING: have not test normalization yet')
-        start_time = time()*1000
+        #print(f'WARNING: have not test normalization yet')
+        #start_time = time()*1000
         # self._data is in units of [photons / (s cm2)]
         # No, get chomatic directly, from GrismModelCube
         gal_chromatic = self.gal * self.sed.spectrum
@@ -258,7 +267,7 @@ class GrismModelCube(cube.DataCube):
                                 gain=config['gain'],
                                 bandpass=self.bandpass_list[index])
         # apply noise
-        print("----- photometry image | %.2f ms -----" % (time()*1000 - start_time))
+        #print("----- photometry image | %.2f ms -----" % (time()*1000 - start_time))
         if force_noise_free:
             return photometry_img.array, None
         else:
@@ -279,11 +288,13 @@ class GrismModelCube(cube.DataCube):
     def _get_grism_data(self, index, force_noise_free=True):
         # prepare datacube and output
         config = self.config_list[index]
-        grism_img_array = np.zeros([config['Ny'], config['Nx']], 
+        grism_img_array = np.ones([config['Ny'], config['Nx']], 
             dtype=np.float64, order='C')
         # call c++ routine to disperse
-        start_time = time()*1000
-        self.disperse_helper[index].getDispersedImage(self._data, grism_img_array)
+        #start_time = time()*1000
+        #m.get_dispersed_image(self.disperse_helper_index_map[index],
+        #    self._data, grism_img_array)
+        #self.disperse_helper[index].getDispersedImage(self._data, grism_img_array)
         # wrap with noise & psf
         grism_img = gs.Image(
             grism_img_array,
@@ -296,7 +307,7 @@ class GrismModelCube(cube.DataCube):
             grism_gal = gs.Convolve([_gal, psf])
             grism_img = grism_gal.drawImage(nx=config['Nx'], ny=config['Ny'], 
                                             scale=config['pix_scale'])
-        print("----- disperse image | %.2f ms -----" % (time()*1000 - start_time))
+        #print("----- disperse image | %.2f ms -----" % (time()*1000 - start_time))
         # apply noise
         if force_noise_free:
             return grism_img.array, None
@@ -329,6 +340,276 @@ class GrismModelCube(cube.DataCube):
 
     def stack(self, axis=0):
         return np.sum(self._data, axis=axis)
+
+    def _build_PSF_model(self, config, **kwargs):
+        ''' Generate PSF model
+
+        Inputs:
+        =======
+        kwargs: keyword arguments for building psf model
+            - lam: wavelength in nm
+            - scale: pixel scale
+
+        Outputs:
+        ========
+        psf_model: GalSim PSF object
+
+        '''
+        _type = config.get('psf_type', 'none').lower()
+        if _type != 'none':
+            if _type == 'airy':
+                lam = kwargs.get('lam', 1000) # nm
+                scale_unit = kwargs.get('scale_unit', gs.arcsec)
+                return gs.Airy(lam=lam, diam=config['diameter']/100,
+                                scale_unit=scale_unit)
+            elif _type == 'airy_mean':
+                scale_unit = kwargs.get('scale_unit', gs.arcsec)
+                #return gs.Airy(config['psf_fwhm']/1.028993969962188, 
+                #               scale_unit=scale_unit)
+                lam = kwargs.get("lam_mean", 1000) # nm
+                return gs.Airy(lam=lam, diam=config['diameter']/100,
+                                scale_unit=scale_unit)
+            elif _type == 'moffat':
+                beta = config.get('psf_beta', 2.5)
+                fwhm = config.get('psf_fwhm', 0.5)
+                return gs.Moffat(beta=beta, fwhm=fwhm)
+            else:
+                raise ValueError(f'{psf_type} has not been implemented yet!')
+        else:
+            return None
+
+    def _getNoise(self, config):
+        ''' Generate image noise based on parameter settings
+
+        Outputs:
+        ========
+        noise: GalSim Noise object
+        '''
+        random_seed = config.get('random_seed', int(time()))
+        rng = gs.BaseDeviate(random_seed+1)
+
+        _type = config.get('noise_type', 'ccd').lower()
+        if _type == 'ccd':
+            sky_level = config.get('sky_level', 0.65*1.2)
+            read_noise = config.get('read_noise', 8.5)
+            gain = config.get('gain', 1.0)
+            exp_time = config.get('exp_time', 1.0)
+            noise = gs.CCDNoise(rng=rng, gain=self.gain, 
+                                read_noise=read_noise, 
+                                sky_level=sky_level*exp_time/gain)
+        elif _type == 'gauss':
+            sigma = config.get('noise_sigma', 1.0)
+            noise = gs.GaussianNoise(rng=rng, sigma=sigma)
+        elif _type == 'poisson':
+            sky_level = config.get('sky_level', 0.65*1.2)
+            noise = gs.PoissonNoise(rng=rng, sky_level=sky_level)
+        else:
+            raise ValueError(f'{self.noise_type} not implemented yet!')
+        return noise
+
+class GrismModelCube_lite(cube.DataVector):
+    ''' Subclass DataCube for Grism modeling.
+
+    Note: cube.DataCube interface
+
+    methods:
+    ========
+        - __init__(data, pars=None, weights=None, masks=None,
+                 pix_scale=None, bandpasses=None)
+                the `data` is gonna to be returned by setup_model method is likelihood class
+        - _check_shape_params()
+        - get_sed(line_index=None, line_pars_update=None)
+        - stack()
+        - _set_maps(maps, map_type)
+        - copy()
+        - get_inv_cov_list()
+        - write(outfile)
+
+        - [NEW] observe(self, observe_params) # in the long run, observe_params gonna to be very close to roman grism pipeline convention. 
+    attributes:
+    ===========
+        - 
+
+    To fit into the cube.DataCube interface, what you need:
+
+    '''
+
+    def __init__(self, pars, gal=None, sed=None):
+        ''' Initialize a GrismDataCube object
+
+        Note that the interface is not finalize and is submit to changes
+
+        pars: Pars
+            parameters that hold meta parameter information needed
+        datacube: np.ndarray, (Nspec, Nx, Ny)
+            3D array of theoretical data cube
+        imap: np.ndarray, 2D
+            the intensity profile of the galaxy
+        sed: galsim.SED object
+            the SED of the galaxy
+        '''
+
+        # build CubePars
+        _cubepars_dict = {}
+        _cubepars_dict['pix_scale'] = pars.meta['model_dimension']['scale']
+        # unity bandpass
+        _cubepars_dict['bandpasses'] = {
+            'lambda_blue': pars.meta['model_dimension']['lambda_range'][0],
+            'lambda_red': pars.meta['model_dimension']['lambda_range'][1],
+            'dlambda': pars.meta['model_dimension']['lambda_res'],
+            'throughput': 1.0,
+            'unit': pars.meta['model_dimension']['lambda_unit'],
+        }
+        cubepars = cube.CubePars(_cubepars_dict)
+        # init parent DataCube class, with 3D datacube and CubePars
+        #super(GrismModelCube, self).__init__(datacube, pars=cubepars)
+        # also gs.Chromatic object for broadband image
+        self.gal = gal
+        self.sed = sed
+        self.set_obs_method = False
+        return
+
+    def set_obs_methods(self, config_list):
+        
+        #if not self.set_obs_method:
+        self.config_list = config_list
+        _disperse_helper_index_map = []
+        _grism_count = 0
+        _bandpasses = []
+        for config in config_list:
+            _bp = gs.Bandpass(config.get('bandpass'), 
+                wave_type=config.get('wave_type', 'nm'))
+            _bandpasses.append(_bp)
+            _bp_list = _bp(np.array(self.lambdas))
+            
+            if config.get('type')!='grism':
+                _disperse_helper_index_map.append(-1)
+            else:
+                # set the grism disperse helper
+                # add model information
+                config['model_Nx'] = self.Nx
+                config['model_Ny'] = self.Ny
+                config['model_Nlam'] = self.Nspec
+                config['model_scale'] = self.pix_scale
+                #_helper = m.DisperseHelper(config, np.array(self.lambdas), _bp_list)
+                #if rank==0:
+                #if True:
+                #    m.add_disperser(config, np.array(self.lambdas), _bp_list)
+                _disperse_helper_index_map.append(_grism_count)
+                _grism_count += 1
+        self.disperse_helper_index_map = _disperse_helper_index_map
+        self.bandpass_list = _bandpasses
+        self.set_obs_method = True
+        return 
+
+    def observe(self, index, force_noise_free=True):
+        ''' Simulate observed image given `observe_parmas` which specifies all
+        the information you need.
+
+        `config` is returned by `GrismDataVector` object.
+        In the long run, `observe_params` gonna to be very close to Anahita's 
+        Roman grism simulation convention, but in the short-term, it will just
+        be a dictionary.
+        '''
+        _type = self.config_list[index].get('type', 'none').lower()
+        if _type == 'grism':
+            return self._get_grism_data(index, 
+                force_noise_free=force_noise_free)
+        elif _type == 'photometry':
+            return self._get_photometry_data(index, 
+                force_noise_free=force_noise_free)
+        else:
+            print(f'{_type} not supported by GrismModelCube!')
+            exit(-1)
+
+    def _get_photometry_data(self, index, force_noise_free = True):
+        #print(f'WARNING: have not test normalization yet')
+        #start_time = time()*1000
+        # self._data is in units of [photons / (s cm2)]
+        # No, get chomatic directly, from GrismModelCube
+        gal_chromatic = self.gal * self.sed.spectrum
+        config = self.config_list[index]
+        # convolve with PSF
+        psf = self._build_PSF_model(config, 
+              lam=self.bandpass_list[index].calculateEffectiveWavelength())
+        if psf is not None:
+            gal_chromatic = gs.Convolve([gal_chromatic, psf])
+        photometry_img = gal_chromatic.drawImage(
+                                nx=config['Nx'], ny=config['Ny'], 
+                                scale=config['pix_scale'], method='auto',
+                                area=np.pi*(config['diameter']/2.0)**2, 
+                                exptime=config['exp_time'],
+                                gain=config['gain'],
+                                bandpass=self.bandpass_list[index])
+        # apply noise
+        #print("----- photometry image | %.2f ms -----" % (time()*1000 - start_time))
+        if force_noise_free:
+            return photometry_img.array, None
+        else:
+            noise = self._getNoise(config)
+            photometry_img_withNoise = photometry_img.copy()
+            photometry_img_withNoise.addNoise(noise)
+            noise_img = photometry_img_withNoise - photometry_img
+            assert (photometry_img_withNoise.array is not None), \
+                    "Null photometry data"
+            assert (photometry_img.array is not None), "Null photometry data"
+            if config.get('apply_to_data', True):
+                #print("[ImageGenerator][debug]: add noise")
+                return photometry_img_withNoise.array, noise_img.array
+            else:
+                #print("[ImageGenerator][debug]: noise free")
+                return photometry_img.array, noise_img.array
+
+    def _get_grism_data(self, index, force_noise_free=True):
+        # prepare datacube and output
+        config = self.config_list[index]
+        grism_img_array = np.ones([config['Ny'], config['Nx']], 
+            dtype=np.float64, order='C')
+        # call c++ routine to disperse
+        #start_time = time()*1000
+        m.get_dispersed_image(self.disperse_helper_index_map[index], grism_img_array)
+        #self.disperse_helper[index].getDispersedImage(self._data, grism_img_array)
+        # wrap with noise & psf
+        grism_img = gs.Image(
+            grism_img_array,
+            dtype = np.float64, scale=config['pix_scale'], 
+            )
+        # convolve with achromatic psf, if required
+        psf = self._build_PSF_model(config, lam_mean=np.mean(self.lambdas))
+        if psf is not None:
+            _gal = gs.InterpolatedImage(grism_img, scale=config['pix_scale'])
+            grism_gal = gs.Convolve([_gal, psf])
+            grism_img = grism_gal.drawImage(nx=config['Nx'], ny=config['Ny'], 
+                                            scale=config['pix_scale'])
+        #print("----- disperse image | %.2f ms -----" % (time()*1000 - start_time))
+        # apply noise
+        if force_noise_free:
+            return grism_img.array, None
+        else:
+            noise = self._getNoise(config)
+            grism_img_withNoise = grism_img.copy()
+            grism_img_withNoise.addNoise(noise)
+            noise_img = grism_img_withNoise - grism_img
+            assert (grism_img_withNoise.array is not None), "Null grism data"
+            assert (grism_img.array is not None), "Null grism data"
+            #print("----- %s seconds -----" % (time() - start_time))
+            if self.apply_to_data:
+                #print("[GrismGenerator][debug]: add noise")
+                return grism_img_withNoise.array, noise_img.array
+            else:
+                #print("[GrismGenerator][debug]: noise free")
+                return grism_img.array, noise_img.array
+
+    def set_data(self, gal, sed):
+        ''' update the data contained in the GrismModelCube
+
+        This can be used for a quick method to get observed image
+        '''
+        self.gal = gal 
+        self.sed = sed
+
+    def stack(self, axis=0):
+        pass 
 
     def _build_PSF_model(self, config, **kwargs):
         ''' Generate PSF model
@@ -452,7 +733,7 @@ class GrismDataVector(cube.DataVector):
             self.data = data
             self.data_header = data_header
             self.noise = noise
-        self.Nobs = self.header['NEXTENSION']
+        self.Nobs = self.header['OBSNUM']
 
         return
 
@@ -468,10 +749,26 @@ class GrismDataVector(cube.DataVector):
         '''
         return self.data[idx]
 
+    def get_noise(self, idx=0):
+        ''' Return the idx noise image in the data set
+        '''
+        return self.noise[idx]
+
     def from_fits(self, file=None):
         ''' Read `GrismDataVector` from a fits file
         '''
-        hdu = fitsio
+        hdul = fits.open(file)
+        self.header = hdul[0].header
+        self.Nobs = self.header['OBSNUM']
+        self.data = []
+        self.data_header = []
+        self.noise = []
+        for i in range(self.Nobs):
+            self.data.append(hdul[1+2*i].data)
+            self.data_header.append(hdul[1+2*i].header)
+            self.noise.append(hdul[2+2*i].data)
+            
+        hdul.close()
 
     def get_config(self, idx=0):
         ''' Get the configuration of the idx image
@@ -484,23 +781,23 @@ class GrismDataVector(cube.DataVector):
         '''
         _h = self.data_header[idx]
         config = {
-            'inst_name': _h.get('inst_name', 'none'),
+            'inst_name': _h.get('instname', 'none'),
             'type': _h.get('type', 'photometry'),
             'bandpass': _h.get('bandpass', 'none'),
             'Nx': _h.get('Nx', 0),
             'Ny': _h.get('Ny', 0),
-            'pix_scale': _h.get('pix_scale', 0.0),
+            'pix_scale': _h.get('pixscale', 0.0),
             'diameter': _h.get('diameter', 0.0),
-            'exp_time': _h.get('exp_time', 0.0),
+            'exp_time': _h.get('exptime', 0.0),
             'gain': _h.get('gain', 1.0),
-            'noise_type': _h.get('noise_type', 'none'),
-            'sky_level': _h.get('sky_level', 0.0),
-            'read_noise': _h.get('read_noise', 0.0),
-            'apply_to_data': _h.get('apply_to_data', False),
-            'psf_type': _h.get('psf_type', 'none'),
-            'psf_fwhm': _h.get('psf_fwhm', 0.0),
-            'R_spec': _h.get('R_spec', 'none'),
-            'disp_ang': _h.get('disp_ang', 'none'),
+            'noise_type': _h.get('noisetyp', 'none'),
+            'sky_level': _h.get('skylevel', 0.0),
+            'read_noise': _h.get('rdnoise', 0.0),
+            'apply_to_data': _h.get('addnoise', False),
+            'psf_type': _h.get('psftype', 'none'),
+            'psf_fwhm': _h.get('psffwhm', 0.0),
+            'R_spec': _h.get('Rspec', 'none'),
+            'disp_ang': _h.get('dispang', 'none'),
             'offset': _h.get('offset', 'none'),
         }
         return config

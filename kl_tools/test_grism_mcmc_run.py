@@ -6,7 +6,7 @@ os.environ['NUMEXPR_NUM_THREADS'] = '1'
 os.environ['OMP_NUM_THREADS'] = '1'
 
 import numpy as np
-import sys
+import sys, copy
 import pickle
 import schwimmbad
 import mpi4py
@@ -23,8 +23,9 @@ import priors
 from muse import MuseDataCube
 import likelihood
 from parameters import Pars
-from likelihood import LogPosterior
+from likelihood import LogPosterior, GrismLikelihood
 from velocity import VelocityMap
+from grism import GrismDataVector
 
 import ipdb
 
@@ -63,6 +64,7 @@ def main(args, pool):
         )
     utils.make_dir(outdir)
 
+    ### Initialization
     sampled_pars = [
         'g1',
         'g2',
@@ -72,215 +74,89 @@ def main(args, pool):
         'vcirc',
         'rscale',
         ]
-
-    # additional args needed for prior / likelihood evaluation
+    sampled_pars_value = [0.0, 0.0, -1.04, 0.86, 0.0, 300.0, 0.5]
+    sampled_pars_value_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_value)}
     meta_pars = {
+        'g1': 'sampled',
+        'g1': 'sampled',
+        'theta_int': 'sampled',
+        'sini': 'sampled',
         'units': {
             'v_unit': Unit('km/s'),
-            'r_unit': Unit('kpc')
+            'r_unit': Unit('arcsec')
             },
         'priors': {
             'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-            'theta_int': priors.UniformPrior(0., 2.*np.pi),
-            # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
+            'theta_int': priors.UniformPrior(-np.pi, np.pi),
             'sini': priors.UniformPrior(0, 1.),
-            'v0': priors.UniformPrior(0, 20),
-            # 'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
-            'vcirc': priors.UniformPrior(0, 800),
-            # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
-            # 'vcirc': priors.UniformPrior(190, 210),
-            'rscale': priors.UniformPrior(0, 40),
-            #'x0': priors.GaussPrior(0, 5),
-            #'y0': priors.GaussPrior(0, 5),
-            #'z': priors.GaussPrior(0.2466, .005),
-            #'R': priors.GaussPrior(3200, 50, clip_sigmas=3),
-            # 'beta': priors.UniformPrior(0, .2),
-            # 'hlr': priors.UniformPrior(0, 8),
-            # 'flux': priors.UniformPrior(5e3, 7e4),
+            'v0': priors.GaussPrior(0.0, 30, clip_sigmas=5),
+            #'vcirc': priors.UniformPrior(0, 800),
+            'vcirc': priors.GaussPrior(300.0, 30, clip_sigmas=5),
+            'rscale': priors.UniformPrior(0, 4),
             },
         'velocity': {
-            'model': 'default'
+            'model': 'default',
+            'v0': 'sampled',
+            'vcirc': 'sampled',
+            'rscale': 'sampled',
         },
         'intensity': {
             # For this test, use truth info
             'type': 'inclined_exp',
             'flux': 1.0, # counts
             'hlr': 0.5,
-            # 'flux': 'sampled', # counts
-            # 'hlr': 'sampled', # pixels
-            # 'type': 'inclined_exp',
-            # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
-            #'basis_type': 'exp_shapelets',
-            #'basis_kwargs': {
-            #    'use_continuum_template': True,
-            #    'Nmax': 7,
-            #     # 'plane': 'disk',
-            #    'plane': 'obs',
-            #    'beta': 0.17,
-                # 'beta': 'sampled',
-            #     # 'index': 1,
-            #     # 'b': 1,
-            #    }
             },
         # 'marginalize_intensity': True,
         'psf': gs.Gaussian(fwhm=0.13),
         'run_options': {
             #'remove_continuum': True,
             'use_numba': False
-            }
+            },
+        'model_dimension':{
+            'Nx': 100,
+            'Ny': 100,
+            'scale': 0.0325, # arcsec
+            'lambda_range': [1236.6, 1325.1], # 1190-1370
+            'lambda_res': 0.5, # nm
+            'lambda_unit': 'nm',
+        },
+        'sed':{
+            'template': '../data/Simulation/GSB2.spec',
+            'wave_type': 'Ang',
+            'flux_type': 'flambda',
+            'z': 0.9513,
+            'wave_range': [500., 3000.], # nm
+            # obs-frame continuum normalization (nm, erg/s/cm2/nm)
+            'obs_cont_norm': [614, 2.6e-17],
+            # a dict of line names and obs-frame flux values (erg/s/cm2)
+            'lines':{
+                'Halpha': 1.25e-16,
+                'OII': [1.0e-15, 1.2e-15],
+                'OIII': [1.0e-15, 1.2e-15],
+            },
+            # intrinsic linewidth in nm
+            'line_sigma_int':{
+                'Halpha': 0.5,
+                'OII': [0.2, 0.2],
+                'OIII': [0.2, 0.2],
+            },
+        },
     }
+    pars = Pars(sampled_pars, meta_pars)
 
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
-    ### replace these information with dict
-    # SED is provided by the `specfile` for muse version. For grism,
-    # we may consider 1d reduced spectrum as an initial guess. But how would you like to summarize the information? Go with dict now...
-    cubefile = os.path.join(cube_dir, '')
-    #specfile = os.path.join(cube_dir, '')
-    specpars = {
-        'template' : '../data/Simulation/GSB2.spec',
-        'wave_type' : 'Ang',
-        'flux_type' : 'flambda',
-        'z' : 0.9513,
-        'wave_range' : [500., 3000.], # nm
-        # obs-frame continuum normalization (nm, erg/s/cm2/nm)
-        'obs_cont_norm' : [614, 2.6e-17],
-        # a dict of line names and obs-frame flux values (erg/s/cm2)
-        'lines': {
-            'Halpha' : 1.25e-16,
-            'OII' : [1.0e-15, 1.2e-15],
-            'OIII' : [1.0e-15, 1.2e-15],
-        }
-        # intrinsic linewidth in nm
-        'line_sigma_int' :{
-            'Halpha' : 0.5,
-            'OII' : [0.2, 0.2],
-            'OIII' : [0.2, 0.2],
-        }
-    }
-    #catfile = os.path.join(cube_dir, '')
-    # observation parameters
-    # TODO: encode these pars into datavector fits header etc.
-    obspars = {
-        'number_of_observations': 3,
-        'obs_1' : {
-            # HST WFC3/IR G141 observation, roll angle 1
-            'inst_name': 'HST/WFC3',
-            'type' : 'grism',
-            'bandpass': '../data/Bandpass/HST/WFC3_IR_G141_1st.dat',
-            'Nx': 38,
-            'Ny': 38,
-            'pixel_scale': 0.065, # arcsec
-            'R_spec': 215, # at 1 micron
-            # can be 'airy'/'moffat'/'kolmogorov'/'vonkarman'/'opticalpsf'
-            'psf_type': 'airy_mean',
-            # pass the needed params to build PSF model here
-            # in case of airy, we don't need any params
-            'psf_kwargs':{
-                'fwhm': 0.13, # arcsec
-            },
-            'disp_ang': 0.0, # radian
-            'offset': -550.96322, # pix (-275.48161224045805 )
-            'diameter': 240, # cm
-            'exp_time': 5000., # seconds
-            'gain': 1., # electron per ADU
-            'noise':{
-                'type': 'ccd',
-                'sky_level': 0.1, # 1.0 electron per sec per pix
-                'read_noise': 20, # 20 electron per pix per readout, x2
-                'apply_to_data': False,
-            }
-        }
-        'obs_2': {# HST WFC3/IR G141 observation, roll angle 2
-            'inst_name': 'HST/WFC3',
-            'type': 'grism',
-            'bandpass': '../data/Bandpass/HST/WFC3_IR_G141_1st.dat',
-            'Nx': 38,              # number of pixels
-            'Ny': 38,
-            'pixel_scale': 0.065,      # arcsec
-            'R_spec':  215,          # at 1 micron
-            'psf_type': 'airy_mean',
-            'psf_kwargs':{ 
-                'fwhm': 0.13,     # arcsec
-            },
-            'disp_ang': 1.57,  # radian
-            'offset': -550.96322, #pix
-            'diameter': 240, # cm
-            'exp_time': 5000., # seconds
-            'gain': 1.,
-            'noise':{
-                'type': 'ccd',
-                'sky_level': 0.1,
-                'read_noise': 20,
-                'apply_to_data': False,
-            }
-        },
-        'obs_3': { # HST WFC3/IR image observation, F125W
-            'inst_name': 'HST/WFC3',
-            'type': 'photometry',
-            'bandpass': '../data/Bandpass/HST/WFC3_IR_F125W.dat',
-            'Nx': 38, # number of pixels
-            'Ny': 38,
-            'pixel_scale': 0.065, # arcsec
-            'psf_type': 'airy',
-            'psf_kwargs':{
-                'fwhm': 0.13, # arcsec
-            },
-            'diameter': 240, # cm
-            'exp_time': 800.0, # seconds
-            'gain': 1.0,
-            'noise':{
-                'type': 'ccd',
-                'sky_level': 0.1,
-                'read_noise': 20,
-                'apply_to_data': False,
-            },
-        },
-    }
-    #linefile = os.path.join(cube_dir, '')
-
-    print(f'Setting up Grism datacube from file {cubefile}')
-    datacube = GrismDataCube(
-        cubefile, #specfile, catfile, linefile
-        )
-
-    # default, but we'll make it explicit:
-    datacube.set_line(line_choice='strongest')
-    Nspec = datacube.Nspec
-    lambdas = datacube.lambdas
-
-    print(f'Strongest emission line has {Nspec} slices')
-
-    outfile = os.path.join(outdir, 'datacube-slices.png')
-    print(f'Saving example theorycube slice images to {outfile}')
-    sqrt = int(np.ceil(np.sqrt(Nspec)))
-    slice_indices = range(Nspec)
-
-    k = 1
-    for i in slice_indices:
-        plt.subplot(sqrt, sqrt, k)
-        plt.imshow(datacube.slices[i]._data, origin='lower')
-        plt.colorbar()
-        l, r = lambdas[i]
-        plt.title(f'lambda=({l:.1f}, {r:.1f})')
-        k += 1
-    plt.gcf().set_size_inches(12,12)
-    plt.tight_layout()
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+    ### Loading data vector 
+    datafile = "/home/jiachuan/kl-tools_spencer/data/simudata_1_noisy.fits"
+    datavector = GrismDataVector(file=datafile)
 
     #-----------------------------------------------------------------
     # Setup sampled posterior
 
-    pars = Pars(sampled_pars, meta_pars)
     pars_order = pars.sampled.pars_order
 
-    log_posterior = LogPosterior(pars, datacube, likelihood='grism')
+    log_posterior = LogPosterior(pars, datavector, likelihood='grism_test')
 
     #-----------------------------------------------------------------
     # Setup sampler
@@ -292,18 +168,18 @@ def main(args, pool):
         print('Setting up KLensZeusRunner')
 
         runner = KLensZeusRunner(
-            nwalkers, ndims, log_posterior, datacube, pars
+            nwalkers, ndims, log_posterior, datavector, pars
             )
 
     elif sampler == 'emcee':
         print('Setting up KLensEmceeRunner')
 
         runner = KLensEmceeRunner(
-            nwalkers, ndims, log_posterior, datacube, pars
+            nwalkers, ndims, log_posterior, datavector, pars
             )
 
-    print('Starting mcmc run')
-    runner.run(nsteps, pool)
+    print('>>>>>>>>>> Starting mcmc run <<<<<<<<<<')
+    runner.run(pool, nsteps, vb=True)
 
     runner.burn_in = nsteps // 2
 
@@ -325,7 +201,8 @@ def main(args, pool):
         print(f'Pickling runner to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
-
+    
+    exit(0)
     outfile = os.path.join(outdir, 'chains.png')
     print(f'Saving chain plots to {outfile}')
     runner.plot_chains(
@@ -400,19 +277,19 @@ def main(args, pool):
 
     return 0
 
+def _callback_():
+    print("Worker exit!!!!!")
+
 if __name__ == '__main__':
     args = parser.parse_args()
-
     pool = schwimmbad.choose_pool(
         mpi=args.mpi, processes=args.ncores
         )
 
     if isinstance(pool, MPIPool):
         if not pool.is_master():
-            pool.wait()
+            pool.wait(callback=_callback_)
             sys.exit(0)
-
-    print('Starting tests')
     rc = main(args, pool)
 
     if rc == 0:

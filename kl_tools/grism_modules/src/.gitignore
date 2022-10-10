@@ -1,0 +1,5 @@
+.idea/
+cmake-build-debug/
+build/
+kltools_grism_module_2.egg-info/
+dist/

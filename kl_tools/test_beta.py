@@ -223,7 +223,8 @@ def main(args):
             'lam_unit': 'nm',
             'z': 0.3,
             'R': 5000.,
-            'sky_sigma': 0.5, # pixel counts for mock data vector
+            # 'sky_sigma': 0.5, # pixel counts for mock data vector
+            's2n': 100000,
             'psf': psf,
         }
 
@@ -231,7 +232,7 @@ def main(args):
             true_pars, datacube_pars
             )
 
-        sky = datacube_pars['sky_sigma']
+        sky = true_flux / datacube_pars['s2n']
 
     elif dc_type == 'muse':
         cube_dir = os.path.join(utils.TEST_DIR, 'test_data')

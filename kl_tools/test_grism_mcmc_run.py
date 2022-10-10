@@ -7,6 +7,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 
 import numpy as np
 import sys, copy
+sys.path.insert(0, './grism_modules')
 import pickle
 import schwimmbad
 import mpi4py

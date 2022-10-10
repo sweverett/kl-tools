@@ -20,7 +20,7 @@ from parameters import Pars, MetaPars
 from velocity import VelocityMap
 from cube import DataVector, DataCube
 import likelihood
-import grism
+import grism_modules/grism as grism
 
 import ipdb
 

@@ -1,0 +1,4 @@
+# ninja log v5
+1	124	1665437545887939686	build.ninja	52efd7e668590b5e
+0	3678	1665437566607926550	CMakeFiles/kltools_grism_module_2.dir/grism_module.cpp.o	7ece5946e7ed898e
+3680	3834	1665437566767926449	kltools_grism_module_2.cpython-38-x86_64-linux-gnu.so	b3f0b21c5db9b7e5

@@ -1,6 +1,8 @@
 from abc import abstractmethod
 import numpy as np
 import os
+import sys
+sys.path.insert(0, './grism_modules')
 from copy import deepcopy
 from time import time
 from scipy.interpolate import interp1d
@@ -24,7 +26,7 @@ from parameters import Pars, MetaPars
 # import parameters
 from velocity import VelocityMap
 from cube import DataVector, DataCube
-import grism
+import grism as grism
 import kltools_grism_module_2 as m
 m.set_mpi_info(_mpi_size, _mpi_rank)
 

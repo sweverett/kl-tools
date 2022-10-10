@@ -44,22 +44,14 @@ def get(path, params=None):
 
     return r
 
-
-#rbase = get(baseURL)
-#use_sim = 'TNG50-1'
-#names = [sim['name'] for sim in rbase['simulations']]
-#i = names.index(use_sim)
-#sim = get( rbase['simulations'][i]['url'] )
-#snaps = get( sim['snapshots'] )
-#snap = get( snaps[-1]['url'] )
-#subs = get( snap['subhalos'])
-#all_subs = get(snap['subhalos'], {'limit':subs['count'], 'order_by':'-mass_stars'} )
-
-
 class TNGsimulation():
-    def __init__(self, subhaloid = None , redshift = 0.1 ,simname = 'TNG50-1'):
-        # Need to specify the simulation name, snapshot number, and subhalo.
+    def __init__(self):
+        pass
 
+
+    def set_subhalo(self, subhaloid, redshift=0.1, simname = 'TNG50-1'):
+        # Set the _subhalo attribute by querying the TNG catalogs.
+        # Then, pull the corresponding particle data.
         rbase = get(baseURL)
         use_sim = simname
         names = [sim['name'] for sim in rbase['simulations']]
@@ -72,7 +64,10 @@ class TNGsimulation():
         suburl = snapurl+f'subhalos/{subhaloid}'
         print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")        
         self._subhalo = get(suburl)
-
+        self._getIllustrisTNGData()
+        
+        
+        
     def _calculate_gas_temperature(self,h5data):
         u           = h5data['PartType0']['InternalEnergy'][:]    #  the Internal Energy
         Xe          = h5data['PartType0']['ElectronAbundance'][:]  # xe (=ne/nH)  the electron abundance
@@ -112,7 +107,7 @@ class TNGsimulation():
         spec_norm = norm * (h5data['PartType4']['Masses'][:]*u.M_sun)
         return spec_norm        
 
-    def _getIllustrisTNGData(self,subhaloid=100, line_center = 6563*u.Angstrom, cachefile = None):
+    def _getIllustrisTNGData(self, cachefile = None):
         '''
         For a chosen haloid and snapshot, get the ingredients necessary to build a simulated datacube.
         This means stellar continuum (flat across our SED) and a line that traces the gas.

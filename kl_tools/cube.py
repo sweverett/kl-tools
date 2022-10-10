@@ -457,6 +457,24 @@ class DataCube(DataVector):
 
         return self._continuum_template
 
+    def set_continuum(self, continuum):
+        '''
+        Very basic version for the base class - should probably be
+        overloaded for each data-specific subclass
+
+        continuum: np.ndarray
+            A 2D numpy array representing the spectral continuum template
+            for a given emission line
+        '''
+
+        if continuum.shape != self.shape[1:]:
+            raise Exception('Continuum template must have the same ' +\
+                            'dimensions as the datacube slice!')
+
+        self._continuum_template = continuum
+
+        return
+
     def copy(self):
         return deepcopy(self)
 

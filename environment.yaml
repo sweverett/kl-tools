@@ -1,0 +1,22 @@
+name: kltools
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - astropy
+  - numpy=1.22
+  - jupyter
+  - pudb
+  - galsim
+  - numba
+  - zeus-mcmc
+  - jupyterlab
+  - corner
+  - snakeviz
+  - emcee
+  - schwimmbad
+  - openmpi
+  - mpi4py
+  - fitsio
+  - ipdb
+  - scipy

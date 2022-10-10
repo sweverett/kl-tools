@@ -18,22 +18,21 @@ import matplotlib.pyplot as plt
 import zeus
 
 import utils
-from mcmc import build_mcmc_runner
+from mcmc import KLensZeusRunner, KLensEmceeRunner
 import priors
 import cube
-import mocks
 import likelihood
-from parameters import Pars
-from likelihood import LogPosterior
+from parameters import PARS_ORDER
+from likelihood import log_posterior
 from velocity import VelocityMap
 
-import ipdb
+import pudb
 
 parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco'],
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
@@ -64,114 +63,106 @@ def main(args, pool):
         )
     utils.make_dir(outdir)
 
-    # for exp gal fits
-    true_flux = 1.8e4
-    true_hlr = 3.5
-
     true_pars = {
-        'g1': 0.025,
-        'g2': -0.0125,
+        'g1': 0.05,
+        'g2': -0.025,
         # 'g1': 0.0,
         # 'g2': 0.0,
-        'theta_int': np.pi / 6,
+        'theta_int': np.pi / 3,
         # 'theta_int': 0.,
-        'sini': 0.7,
-        'v0': 2,
+        'sini': 0.8,
+        'v0': 10.,
         'vcirc': 200,
         'rscale': 5,
-        # 'beta': np.NaN,
-        # 'flux': true_flux,
-        # 'hlr': true_hlr,
-        # 'x0': 0.5,
-        # 'y0': -1,
     }
 
-    mcmc_pars = {
-        'units': {
-            'v_unit': Unit('km / s'),
-            'r_unit': Unit('kpc'),
-        },
+    # additional args needed for prior / likelihood evaluation
+    halpha = 656.28 # nm
+    R = 5000.
+    z = 0.3
+    pars = {
+        'Nx': 30, # pixels
+        'Ny': 30, # pixels
+        'pix_scale': 1., # arcsec / pixel
+        'true_flux': 1e5, # counts
+        'true_hlr': 5, # pixels
+        'v_unit': Unit('km / s'),
+        'r_unit': Unit('kpc'),
+        'z': z,
+        'spec_resolution': R,
+        # 'line_std': 0.17,
+        'line_std': halpha * (1.+z) / R, # emission line SED std; nm
+        'line_value': 656.28, # emission line SED std; nm
+        'line_unit': Unit('nm'),
+        'sed_start': 655,
+        'sed_end': 657.5,
+        'sed_resolution': 0.025,
+        'sed_unit': Unit('nm'),
+        'cov_sigma': 3., # pixel counts; dummy value
+        'bandpass_throughput': '.2',
+        'bandpass_unit': 'nm',
+        'bandpass_zp': 30,
         'priors': {
-            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
+            'g1': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.3),#, clip_sigmas=2),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
-            'sini': priors.UniformPrior(0.6, 0.8),
-            # 'v0': priors.UniformPrior(0, 20),
-            'v0': priors.GaussPrior(0, 5),
-            'vcirc': priors.GaussPrior(200, 5, clip_sigmas=3),
+            'sini': priors.UniformPrior(0., 1.),
+            'v0': priors.UniformPrior(0, 20),
+            'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
-            # 'x0': priors.UniformPrior(-3, 3),
-            # 'y0': priors.UniformPrior(-3, 3),
-            # 'beta': priors.UniformPrior(0, 0.5),
-            # 'hlr': priors.UniformPrior(0, 8),
-            # 'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
             # 'type': 'inclined_exp',
-            # 'flux': true_flux, # counts
-            # 'hlr': true_hlr, # counts
-            # 'flux': 'sampled', # counts
-            # 'hlr': 'sampled', # pixels
+            # 'flux': 1e5, # counts
+            # 'hlr': 5, # pixels
             'type': 'basis',
             # 'basis_type': 'shapelets',
             'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
             'basis_kwargs': {
-                # 'Nmax': 12, revert to this
-                'Nmax': 12,
+                'Nmax': 7,
                 # 'plane': 'disk',
                 'plane': 'obs',
-                'beta': 0.37, # n12-exp_shapelet
-                # 'beta': 1.45, # n20-sersiclet
-                # 'beta': 'sampled',
+                'beta': 0.35,
                 'index': 1,
                 'b': 1,
                 }
         },
-        'velocity': {
-            # 'model': 'offset'
-            'model': 'centered'
-        },
-        # 'marginalize_intensity': True,
-        'run_options': {
-            'use_numba': False,
-            }
+        'marginalize_intensity': True,
+        # 'psf': gs.Gaussian(fwhm=3), # fwhm in pixels
+        'use_numba': False,
     }
 
-    datacube_pars = {
-        # image meta pars
-        'Nx': 40, # pixels
-        'Ny': 40, # pixels
-        'pix_scale': 0.5, # arcsec / pixel
-        # intensity meta pars
-        'true_flux': true_flux, # counts
-        'true_hlr': true_hlr, # pixels
-        # velocty meta pars
-        'v_model': mcmc_pars['velocity']['model'],
-        'v_unit': mcmc_pars['units']['v_unit'],
-        'r_unit': mcmc_pars['units']['r_unit'],
-        # emission line meta pars
-        'wavelength': 656.28, # nm; halpha
-        'lam_unit': 'nm',
-        'z': 0.3,
-        'R': 5000.,
-        's2n': 10000,
-        # 'sky_sigma': 0.01, # pixel counts for mock data vector
-        #'psf': gs.Gaussian(fwhm=1, flux=1.)
-    }
+    li, le, dl = 655.8, 656.8, 0.1
+    # li, le, dl = 655.6, 657, 0.1
+    # li, le, dl = 655.4, 657.1, 0.1
+    lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
 
-    print('Setting up test datacube and true Halpha image')
-    datacube, vmap, true_im = mocks.setup_likelihood_test(
-        true_pars, datacube_pars
+    bandpasses = cube.setup_simple_bandpasses(
+        li, le, dl,
+        throughput=pars['bandpass_throughput'],
+        zp=pars['bandpass_zp'],
+        unit=pars['bandpass_unit']
         )
-    Nspec, Nx, Ny = datacube.shape
-    lambdas = datacube.lambdas
-    #datacube.set_psf(datacube_pars['psf'])
+
+    Nx, Ny = 30, 30
+    Nspec = len(lambdas)
+    shape = (Nspec, Nx, Ny)
+    print('Setting up test datacube and true Halpha image')
+    datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
+        true_pars, pars, shape, lambdas
+        )
+
+    # Update pars w/ SED, bandapsses, etc. as can no longer assume
+    # this will be available in the datavector
+    pars['sed'] = sed
+    pars['lambdas'] = lambdas
+    pars['bandpasses'] = bandpasses
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')
@@ -221,45 +212,26 @@ def main(args, pool):
     else:
         plt.close()
 
-    #-----------------------------------------------------------------
-    # Setup sampled posterior
-
-    sampled_pars = list(true_pars)
-    pars = Pars(sampled_pars, mcmc_pars)
-    pars_order = pars.sampled.pars_order
-
-    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
-
-    #-----------------------------------------------------------------
-    # Setup sampler
-
-    ndims = log_posterior.ndims
-
-    print(f'Setting up {sampler} MCMCRunner')
-    kwargs = {}
-    if sampler in ['zeus', 'emcee']:
+    if sampler == 'zeus':
+        print('Setting up KLensZeusRunner')
+        ndims = len(PARS_ORDER)
         nwalkers = 2*ndims
-        args = [nwalkers, ndims, log_posterior, datacube, pars]
+        runner = KLensZeusRunner(
+            nwalkers, ndims, log_posterior, datacube, pars
+            )
 
-    elif sampler == 'poco':
-        nwalkers = 1000
-        args = [
-            nwalkers,
-            ndims,
-            log_posterior.log_likelihood,
-            log_posterior.log_prior,
-            datacube,
-            pars
-            ]
+    elif sampler == 'emcee':
+        print('Setting up KLensEmceeRunner')
+        ndims = len(PARS_ORDER)
+        nwalkers = 2*ndims
 
-    runner = build_mcmc_runner(sampler, args, kwargs)
-
-    #-----------------------------------------------------------------
-    # Run MCMC
+        runner = KLensEmceeRunner(
+            nwalkers, ndims, log_posterior, datacube, pars
+            )
 
     print('Starting mcmc run')
     # try:
-    runner.run(pool, nsteps=nsteps)
+    runner.run(nsteps, pool)
     # except Exception as e:
     #     g1 = runner.start[:,0]
     #     g2 = runner.start[:,1]
@@ -291,8 +263,8 @@ def main(args, pool):
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
 
-    truth = np.zeros(ndims)
-    for name, indx in pars_order.items():
+    truth = np.zeros(len(PARS_ORDER))
+    for name, indx in PARS_ORDER.items():
         truth[indx] = true_pars[name]
     outfile = os.path.join(outdir, 'test-mcmc-truth.pkl')
     print(f'Pickling truth to {outfile}')
@@ -301,9 +273,42 @@ def main(args, pool):
 
     outfile = os.path.join(outdir, 'chains.png')
     print(f'Saving chain plots to {outfile}')
-    reference = pars.pars2theta(true_pars)
+    reference = likelihood.pars2theta(true_pars)
     runner.plot_chains(
         outfile=outfile, reference=reference, show=show
+        )
+
+    outfile = os.path.join(outdir, 'corner-truth.png')
+    print(f'Saving corner plot to {outfile}')
+    title = 'Reference lines are param truth values'
+    runner.plot_corner(
+        outfile=outfile, reference=truth, title=title, show=show
+        )
+
+    runner.compute_MAP()
+    map_medians = runner.MAP_medians
+    print('(median) MAP values:')
+    for name, indx in PARS_ORDER.items():
+        m = map_medians[indx]
+        print(f'{name}: {m:.4f}')
+
+    outfile = os.path.join(outdir, 'compare-data-to-map.png')
+    print(f'Plotting MAP comparison to data in {outfile}')
+    runner.compare_MAP_to_data(outfile=outfile, show=show)
+
+    outfile = os.path.join(outdir, 'compare-vmap-to-map.png')
+    print(f'Plotting MAP comparison to velocity map in {outfile}')
+    vmap_pars = true_pars
+    vmap_pars['r_unit'] = pars['r_unit']
+    vmap_pars['v_unit'] = pars['v_unit']
+    vmap_true = VelocityMap('default', vmap_pars)
+    runner.compare_MAP_to_truth(vmap_true, outfile=outfile, show=show)
+
+    outfile = os.path.join(outdir, 'corner-map.png')
+    print(f'Saving corner plot compare to MAP in {outfile}')
+    title = 'Reference lines are param MAP values'
+    runner.plot_corner(
+        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
         )
 
     if sampler == 'emcee':
@@ -313,18 +318,18 @@ def main(args, pool):
 
     outfile = os.path.join(outdir, 'chain-probabilities.pkl')
     print(f'Saving prior & likelihood values to {outfile}')
-    blob_data = {
+    data = {
         'prior': blobs[:,:,0],
         'likelihood': blobs[:,:,1]
     }
     with open(outfile, 'wb') as f:
-        pickle.dump(blob_data, f)
+        pickle.dump(data, f)
 
     outfile = os.path.join(outdir, 'chain-probabilities.png')
     print(f'Saving prior & likelihood value plot to {outfile}')
-    indx = np.random.randint(0, high=nwalkers)
     prior = blobs[:,indx,0]
     like = blobs[:,indx,1]
+    indx = np.random.randint(0, high=nwalkers)
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 4))
     plt.subplot(131)
     plt.plot(prior, label='prior', c='tab:blue')
@@ -349,39 +354,6 @@ def main(args, pool):
         plt.show()
     else:
         plt.close()
-
-    outfile = os.path.join(outdir, 'corner-truth.png')
-    print(f'Saving corner plot to {outfile}')
-    title = 'Reference lines are param truth values'
-    runner.plot_corner(
-        outfile=outfile, reference=truth, title=title, show=show
-        )
-
-    runner.compute_MAP(loglike=blob_data['likelihood'])
-    map_vals = runner.MAP_true
-    print('MAP values:')
-    for name, indx in pars_order.items():
-        m = map_vals[indx]
-        print(f'{name}: {m:.4f}')
-
-    outfile = os.path.join(outdir, 'compare-data-to-map.png')
-    print(f'Plotting MAP comparison to data in {outfile}')
-    runner.compare_MAP_to_data(outfile=outfile, show=show)
-
-    outfile = os.path.join(outdir, 'compare-vmap-to-map.png')
-    print(f'Plotting MAP comparison to velocity map in {outfile}')
-    vmap_pars = true_pars
-    vmap_pars['r_unit'] = mcmc_pars['units']['r_unit']
-    vmap_pars['v_unit'] = mcmc_pars['units']['v_unit']
-    vmap_true = VelocityMap('default', vmap_pars)
-    runner.compare_MAP_to_truth(vmap_true, outfile=outfile, show=show)
-
-    outfile = os.path.join(outdir, 'corner-map.png')
-    print(f'Saving corner plot compare to MAP in {outfile}')
-    title = 'Reference lines are param MAP values'
-    runner.plot_corner(
-        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
-        )
 
     return 0
 

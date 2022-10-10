@@ -14,7 +14,7 @@ import likelihood
 import parameters
 from transformation import transform_coords, TransformableImage
 
-import pudb
+import ipdb
 
 '''
 This file contains a mix of IntensityMap classes for explicit definitions
@@ -52,12 +52,22 @@ class IntensityMap(object):
         self.nx = nx
         self.ny = ny
 
+        # we make a distinction between the intensity coming from emissoin
+        # vs the continuum
         self.image = None
+        self.continuum = None
+
+        # some intensity maps will not change per sample, but in general
+        # they might
+        self.is_static = False
 
         return
 
-    def render(self, theta_pars, datacube, pars, redo=False):
+    def render(self, theta_pars, datacube, pars, redo=False,
+               im_type='emission'):
         '''
+        Render an image of the emission line intensity
+
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
@@ -67,18 +77,27 @@ class IntensityMap(object):
         redo: bool
             Set to remake rendered image regardless of whether
             it is already internally stored
+        im_type: str
+            Can set to either `emission`, `continuum`, or `both`
 
-        return: np.ndarray
-            The rendered intensity map
+        return: np.ndarray, tuple
+            The rendered intensity map (emission, continuum, or both)
         '''
 
         # only render if it has not been computed yet, or if
         # explicitly asked
-        if self.image is not None:
-            if redo is False:
-                return self.image
+        if (self.image is None) or (redo is True):
+            self._render(theta_pars, datacube, pars)
 
-        return self._render(theta_pars, datacube, pars)
+        if im_type == 'emission':
+            return self.image
+        elif im_type == 'continuum':
+            return self.continuum
+        elif im_type == 'both':
+            return self.image, self.continuum
+        else:
+            raise ValueError('im_type can only be one of ' +\
+                             'emission, continuum, or both!')
 
     @abstractmethod
     def _render(self, theta_pars, datacube, pars):
@@ -126,7 +145,7 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux=None, hlr=None):
+    def __init__(self, datacube, flux, hlr):
         '''
         datacube: DataCube
             While this implementation will not use the datacube
@@ -142,14 +161,16 @@ class InclinedExponential(IntensityMap):
 
         pars = {'flux': flux, 'hlr': hlr}
         for name, val in pars.items():
-            if val is None:
-                pars[name] = 1.
-            else:
-                if not isinstance(val, (float, int)):
-                    raise TypeError(f'{name} must be a float or int!')
+            if not isinstance(val, (float, int)):
+                raise TypeError(f'{name} must be a float or int!')
 
-        self.flux = pars['flux']
-        self.hlr = pars['hlr']
+        self.flux = flux
+        self.hlr = hlr
+
+        self.pix_scale = datacube.pix_scale
+
+        # same as default, but to make it explicit
+        self.is_static = False
 
         return
 
@@ -168,7 +189,6 @@ class InclinedExponential(IntensityMap):
             The rendered intensity map
         '''
 
-        # A = theta_pars['A']
         inc = Angle(np.arcsin(theta_pars['sini']), radians)
 
         gal = gs.InclinedExponential(
@@ -176,11 +196,13 @@ class InclinedExponential(IntensityMap):
         )
 
         # Only add knots if a psf is provided
-        if 'psf' in pars:
-            if 'knots' in pars:
-                knot_pars = pars['knots']
-                knots = gs.RandomKnots(**knot_pars)
-                gal = gal + knots
+        # NOTE: no longer workds due to psf conovlution
+        # happening later in modeling
+        # if 'psf' in pars:
+        #     if 'knots' in pars:
+        #         knot_pars = pars['knots']
+        #         knots = gs.RandomKnots(**knot_pars)
+        #         gal = gal + knots
 
         rot_angle = Angle(theta_pars['theta_int'], radians)
         gal = gal.rotate(rot_angle)
@@ -195,14 +217,9 @@ class InclinedExponential(IntensityMap):
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
 
-        # TODO: could generalize in future, but for now assume
-        #       a constant PSF for exposures
-        if 'psf' in pars:
-            psf = pars['psf']
-            gal = gs.Convolve([gal, psf])
-
-        pixscale = pars['pix_scale']
-        self.image = gal.drawImage(nx=self.nx, ny=self.ny, scale=pixscale).array
+        self.image = gal.drawImage(
+            nx=self.nx, ny=self.ny, scale=self.pix_scale
+            ).array
 
         return self.image
 
@@ -278,6 +295,30 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # TODO: would be nice to generalize for chromatic
+        # PSFs in the future!
+        if 'psf' in basis_kwargs:
+            # always default an explicitly passed psf
+            self.psf = basis_kwargs['psf']
+        else:
+            # should return None if no PSF is stored
+            # in datacube pars
+            self.psf = datacube.get_psf()
+
+        # One way to handle the emission line continuum is to build
+        # a template function from the datacube
+        try:
+            use_cont = basis_kwargs['use_continuum_template']
+            if use_cont is True:
+                self.continuum_template = datacube.get_continuum()
+                if self.continuum_template is None:
+                    raise AttributeError('Datacube continnuum template is None!')
+            else:
+                self.continuum_template = None
+
+        except KeyError:
+            self.continuum_template = None
+
         # often useful to have a correct basis function scale given
         # stacked datacube image
         # if basis_type == 'shapelets':
@@ -296,35 +337,68 @@ class BasisIntensityMap(IntensityMap):
 
         self._setup_fitter(basis_type, nx, ny, basis_kwargs=basis_kwargs)
 
+        # at this stage we now know whether the imap will change per sample
+        if self.fitter.basis.plane == 'obs':
+            self.is_static = True
+        else:
+            # any other plane for the basis definition will make the fitted
+            # imap depend on the sample draw
+            self.is_static = False
+
         self.image = None
 
         return
 
     def _setup_fitter(self, basis_type, nx, ny, basis_kwargs=None):
+
         self.fitter = IntensityMapFitter(
-            basis_type, nx, ny, basis_kwargs=basis_kwargs
+            basis_type, nx, ny,
+            continuum_template=self.continuum_template,
+            psf=self.psf,
+            basis_kwargs=basis_kwargs
             )
 
         return
 
     def _fit_to_datacube(self, theta_pars, datacube, pars):
-        self.image = self.fitter.fit(theta_pars, datacube, pars)
+        try:
+            if pars['run_options']['remove_continuum'] is True:
+                if self.continuum_template is None:
+                    print('WANRING: cannot remove continuum as a ' +\
+                          'template was not provided')
+                    remove_continuum = False
+                else:
+                    remove_continuum = True
+            else:
+                remove_continuum = False
+
+        except KeyError:
+            remove_continuum = False
+
+        self.image, self.continuum = self.fitter.fit(
+            theta_pars, datacube, pars, remove_continuum=remove_continuum
+            )
 
         return
 
     def get_basis(self):
         return self.fitter.basis
 
-    def render(self, theta_pars, datacube, pars, redo=False):
+    def render(self, theta_pars, datacube, pars, redo=False,
+               im_type='emission'):
+        '''
+        see IntensityMap.render()
+        '''
+
         return super(BasisIntensityMap, self).render(
-            theta_pars, datacube, pars, redo=redo
+            theta_pars, datacube, pars, redo=redo, im_type=im_type
             )
 
     def _render(self, theta_pars, datacube, pars):
 
         self._fit_to_datacube(theta_pars, datacube, pars)
 
-        return self.image
+        return
 
 def get_intensity_types():
     return INTENSITY_TYPES
@@ -362,7 +436,8 @@ class IntensityMapFitter(object):
     This base class represents an intensity map defined
     by some set of basis functions {phi_i}.
     '''
-    def __init__(self, basis_type, nx, ny, basis_kwargs=None):
+    def __init__(self, basis_type, nx, ny, continuum_template=None,
+                 psf=None, basis_kwargs=None):
         '''
         basis_type: str
             The name of the basis_type type used
@@ -370,6 +445,11 @@ class IntensityMapFitter(object):
             The number of pixels in the x-axis
         ny: int
             The number of pixels in the y-ayis
+        continuum_template: numpy.ndarray
+            A template array for the object continuum
+        psf: galsim.GSObject
+            A galsim object representing a PSF to convolve the
+            basis functions by
         basis_kwargs: dict
             Keyword args needed to build given basis type
         '''
@@ -383,6 +463,9 @@ class IntensityMapFitter(object):
         self.basis_type = basis_type
         self.nx = nx
         self.ny = ny
+
+        self.continuum_template = continuum_template
+        self.psf = psf
 
         self.grid = utils.build_map_grid(nx, ny)
 
@@ -402,14 +485,23 @@ class IntensityMapFitter(object):
             basis_kwargs['nx'] = self.nx
             basis_kwargs['ny'] = self.ny
         else:
+            # TODO: do we really want this to be the default?
             basis_kwargs = {
                 'nx': self.nx,
                 'ny': self.ny,
-                'plane': 'disk'
+                'plane': 'obs',
+                'pix_scale': self.pix_scale
                 }
+
+        if 'use_continuum_template' in basis_kwargs:
+            basis_kwargs.pop('use_continuum_template')
 
         self.basis = basis.build_basis(self.basis_type, basis_kwargs)
         self.Nbasis = self.basis.N
+
+        if self.continuum_template is not None:
+            self.Nbasis += 1
+
         self.mle_coefficients = np.zeros(self.Nbasis)
 
         return
@@ -447,10 +539,17 @@ class IntensityMapFitter(object):
         else:
             self.design_mat = np.zeros((Ndata, Nbasis))
 
-        for n in range(Nbasis):
-            func, func_args = self.basis.get_basis_func(n)
-            args = [x, y, *func_args]
-            self.design_mat[:,n] = func(*args)
+        for n in range(self.basis.N):
+            self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
+
+        # handle continuum template separately
+        if self.continuum_template is not None:
+            template = self.continuum_template.reshape(Ndata)
+
+            # make sure we aren't overriding anything
+            assert (self.basis.N + 1) == self.Nbasis
+            assert np.sum(self.design_mat[:,-1]) == 0
+            self.design_mat[:,-1] = template
 
         return
 
@@ -552,7 +651,7 @@ class IntensityMapFitter(object):
 
         return
 
-    def fit(self, theta_pars, datacube, pars, cov=None):
+    def fit(self, theta_pars, datacube, pars, cov=None, remove_continuum=True):
         '''
         Fit MLE of the intensity map for a given set of datacube
         slices
@@ -574,6 +673,8 @@ class IntensityMapFitter(object):
                   constant sigma, it does not contribute to the MLE. Thus
                   you should only pass cov if it is non-trivial
             TODO: This should be handled by pars in future
+        remove_continuum: bool
+            If true, remove continuum template if fitted
         '''
 
         nx, ny = self.nx, self.ny
@@ -584,7 +685,6 @@ class IntensityMapFitter(object):
         # Initialize pseudo-inverse given the transformation parameters
         self._initialize_pseudo_inv(theta_pars)
 
-        # We will fit to the sum of all slices
         data = datacube.stack().reshape(nx*ny)
 
         # Find MLE basis coefficients
@@ -594,12 +694,24 @@ class IntensityMapFitter(object):
         self.mle_coefficients = mle_coeff
 
         # Now create MLE intensity map
-        mle_im = self.basis.render_im(theta_pars, mle_coeff)
+        if self.continuum_template is None:
+            used_coeff = mle_coeff
+            mle_continuum = None
+        else:
+            # the last mle coefficient is for the continuum template
+            used_coeff = mle_coeff[:-1]
+            mle_continuum = mle_coeff[-1] * self.continuum_template
+
+            if self.basis.is_complex is True:
+                mle_continuum = mle_continuum.real
+
+        mle_im = self.basis.render_im(theta_pars, used_coeff)
 
         assert mle_im.shape == (nx, ny)
         self.mle_im = mle_im
+        self.mle_continuum = mle_continuum
 
-        return mle_im
+        return mle_im, mle_continuum
 
     def _fit_mle_coeff(self, data, cov=None):
         '''
@@ -693,10 +805,40 @@ class TransformedIntensityMapFitter(object):
 
         return
 
+def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
+                 bmin=0.001, bmax=5):
+    '''
+    TODO: Finish!
+    Scan over beta values for the best fit to the
+    stacked datacube image
+
+    datacube: DataCube
+        The datacube to find the preferred beta scale for
+    basis_type: str
+        The type of basis to use for fitting for beta
+    betas: list, np.array
+        A list or array of beta values to use in finding
+        optimal value. Will create one if not passed
+
+    returns: float
+        The value of beta that minimizes the imap chi2
+    '''
+
+    if betas is None:
+        betas = np.linspace(bmin, bmax, Nbetas)
+
+    for beta in betas:
+        pass
+
+    return
+
 def main(args):
     '''
     For now, just used for testing the classes
     '''
+
+    from mocks import setup_likelihood_test
+    from astropy.units import Unit
 
     show = args.show
 
@@ -713,31 +855,67 @@ def main(args):
         )
 
     print('Creating IntensityMapFitter w/ transformed shapelet basis')
-    basis_kwargs = {'Nmax': nmax, 'plane':'disk'}
+    basis_kwargs = {'Nmax': nmax, 'plane':'disk', 'pix_scale':1}
     fitter_transform = IntensityMapFitter(
         'shapelets', nx, ny, basis_kwargs=basis_kwargs
         )
 
     print('Setting up test datacube and true Halpha image')
-    true_pars, pars = likelihood.setup_test_pars(nx, ny)
+    true_pars = {
+        'g1': 0.025,
+        'g2': -0.0125,
+        'theta_int': np.pi / 6,
+        'sini': 0.7,
+        'v0': 5,
+        'vcirc': 200,
+        'rscale': 3,
+    }
 
-    # Change the pars a bit
-    # true_pars['g1'] = 0.
-    # true_pars['g2'] = 0.
-    # true_pars['theta_int'] = 0.
-    # true_pars['sini'] = 0.5
-    pars['cov_sigma'] = 0.05
+    mcmc_pars = {
+        'units': {
+            'v_unit': Unit('km / s'),
+            'r_unit': Unit('kpc'),
+        },
+        'intensity': {
+            # For this test, use truth info
+            'type': 'inclined_exp',
+            'flux': 3.8e4, # counts
+            'hlr': 3.5,
+        },
+        'velocity': {
+            'model': 'centered'
+        },
+        'run_options': {
+            'use_numba': False,
+            }
+    }
 
-    # li, le, dl = 655.8, 656.8, 0.1
-    li, le, dl = 655.4, 657.1, 0.1
-    # li, le, dl = 655, 657.5, 0.1
-    lambdas = [(l, l+dl) for l in np.arange(li, le, dl)]
+    datacube_pars = {
+        # image meta pars
+        'Nx': 40, # pixels
+        'Ny': 40, # pixels
+        'pix_scale': 0.5, # arcsec / pixel
+        # intensity meta pars
+        'true_flux': mcmc_pars['intensity']['flux'],
+        'true_hlr': mcmc_pars['intensity']['hlr'], # pixels
+        # velocty meta pars
+        'v_model': mcmc_pars['velocity']['model'],
+        'v_unit': mcmc_pars['units']['v_unit'],
+        'r_unit': mcmc_pars['units']['r_unit'],
+        # emission line meta pars
+        'wavelength': 656.28, # nm; halpha
+        'lam_unit': 'nm',
+        'z': 0.3,
+        'R': 5000.,
+        'sky_sigma': 0.5, # pixel counts for mock data vector
+        # 'psf': mcmc_pars['psf']
+    }
 
-    Nspec = len(lambdas)
-    shape = (nx, ny, Nspec)
-    datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
-        true_pars, pars, shape, lambdas
+    datacube, vmap, true_im = setup_likelihood_test(
+        true_pars, datacube_pars
         )
+    Nspec = datacube.Nspec
+    lambdas = datacube.lambdas
 
     outfile = os.path.join(outdir, 'datacube.fits')
     print(f'Saving test datacube to {outfile}')
@@ -768,118 +946,122 @@ def main(args):
     #---------------------------------------------------------
     # Fits to inclined exp
 
+    true_flux = datacube_pars['true_flux']
+    true_hlr = datacube_pars['true_hlr']
+
     imap = InclinedExponential(
-        datacube, flux=pars['true_flux'], hlr=pars['true_hlr']
+        datacube, flux=true_flux, hlr=true_hlr
         )
 
     outfile = os.path.join(outdir, 'compare-inc-exp-to-data.png')
     print(f'Plotting inclined exp fit compared to stacked data to {outfile}')
-    imap.render(true_pars, datacube, pars)
+    imap.render(true_pars, datacube, mcmc_pars)
     imap.plot_fit(datacube, outfile=outfile, show=show)
 
     #---------------------------------------------------------
     # Fits to incined exp + knots
+    # NOTE: this no longer works due to how psf is now handled
 
     # add some knot features
-    knot_frac = 0.05 # not really correct, but close enough for tests
-    pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
-    pars['knots'] = {
-        # 'npoints': 25,
-        'npoints': 15,
-        'half_light_radius': 1.*pars['true_hlr'],
-        'flux': knot_frac * pars['true_flux'],
-    }
+    # knot_frac = 0.05 # not really correct, but close enough for tests
+    # datacube_pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
+    # mcmc_pars['intensity']['knots'] = {
+    #     # 'npoints': 25,
+    #     'npoints': 15,
+    #     'half_light_radius': 1.*true_hlr,
+    #     'flux': knot_frac * true_flux,
+    # }
 
-    datacube, sed, vmap, true_im = likelihood.setup_likelihood_test(
-        true_pars, pars, shape, lambdas
-        )
+    # datacube, vmap, true_im = setup_likelihood_test(
+    #     true_pars, datacube_pars
+    #     )
 
-    outfile = os.path.join(outdir, 'datacube-knots.fits')
-    print(f'Saving test datacube to {outfile}')
-    datacube.write(outfile)
+    # outfile = os.path.join(outdir, 'datacube-knots.fits')
+    # print(f'Saving test datacube to {outfile}')
+    # datacube.write(outfile)
 
-    outfile = os.path.join(outdir, 'datacube-knots-slices.png')
-    print(f'Saving example datacube slice images to {outfile}')
-    # if Nspec < 10:
-    sqrt = int(np.ceil(np.sqrt(Nspec)))
-    slice_indices = range(Nspec)
+    # outfile = os.path.join(outdir, 'datacube-knots-slices.png')
+    # print(f'Saving example datacube slice images to {outfile}')
+    # # if Nspec < 10:
+    # sqrt = int(np.ceil(np.sqrt(Nspec)))
+    # slice_indices = range(Nspec)
 
-    k = 1
-    for i in slice_indices:
-        plt.subplot(sqrt, sqrt, k)
-        plt.imshow(datacube.slices[i]._data, origin='lower')
-        plt.colorbar()
-        l, r = lambdas[i]
-        plt.title(f'lambda=({l:.1f}, {r:.1f})')
-        k += 1
-    plt.gcf().set_size_inches(12,12)
-    plt.tight_layout()
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+    # k = 1
+    # for i in slice_indices:
+    #     plt.subplot(sqrt, sqrt, k)
+    #     plt.imshow(datacube.slices[i]._data, origin='lower')
+    #     plt.colorbar()
+    #     l, r = lambdas[i]
+    #     plt.title(f'lambda=({l:.1f}, {r:.1f})')
+    #     k += 1
+    # plt.gcf().set_size_inches(12,12)
+    # plt.tight_layout()
+    # plt.savefig(outfile, bbox_inches='tight', dpi=300)
+    # if show is True:
+    #     plt.show()
+    # else:
+    #     plt.close()
 
-    print('Fitting simulated datacube with shapelet basis')
-    start = time.time()
-    mle_im = fitter.fit(true_pars, datacube, pars=pars)
-    t = time.time() - start
-    print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} basis funcs')
+    # print('Fitting simulated datacube with shapelet basis')
+    # start = time.time()
+    # mle_im = fitter.fit(true_pars, datacube, pars=pars)
+    # t = time.time() - start
+    # print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} basis funcs')
 
-    outfile = os.path.join(outdir, 'compare-mle-to-data.png')
-    print(f'Plotting MLE fit compared to stacked data to {outfile}')
-    fitter.plot_mle_fit(datacube, outfile=outfile, show=show)
+    # outfile = os.path.join(outdir, 'compare-mle-to-data.png')
+    # print(f'Plotting MLE fit compared to stacked data to {outfile}')
+    # fitter.plot_mle_fit(datacube, outfile=outfile, show=show)
 
-    print('Fitting simulated datacube with transformed shapelet basis')
-    start = time.time()
-    mle_im_transform = fitter_transform.fit(true_pars, datacube, pars=pars)
-    t = time.time() - start
-    print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} transformed basis funcs')
+    # print('Fitting simulated datacube with transformed shapelet basis')
+    # start = time.time()
+    # mle_im_transform = fitter_transform.fit(true_pars, datacube, pars=pars)
+    # t = time.time() - start
+    # print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} transformed basis funcs')
 
-    outfile = os.path.join(outdir, 'compare-transform-mle--to-data.png')
-    print(f'Plotting transform MLE fit compared to stacked data to {outfile}')
-    fitter_transform.plot_mle_fit(datacube, outfile=outfile, show=show)
+    # outfile = os.path.join(outdir, 'compare-transform-mle--to-data.png')
+    # print(f'Plotting transform MLE fit compared to stacked data to {outfile}')
+    # fitter_transform.plot_mle_fit(datacube, outfile=outfile, show=show)
 
-    # Now compare the fits
-    outfile = os.path.join(outdir, 'compare-disk-vs-obs-mle-to-data.png')
-    print(f'Comparing MLE fits to data for basis in obs vs. disk')
-    data = datacube.stack()
-    im = fitter.mle_im
-    im_transform = fitter_transform.mle_im
+    # # Now compare the fits
+    # outfile = os.path.join(outdir, 'compare-disk-vs-obs-mle-to-data.png')
+    # print(f'Comparing MLE fits to data for basis in obs vs. disk')
+    # data = datacube.stack()
+    # im = fitter.mle_im
+    # im_transform = fitter_transform.mle_im
 
-    X, Y = utils.build_map_grid(nx, ny)
+    # X, Y = utils.build_map_grid(nx, ny)
 
-    images = [data, im, im_transform,
-              im-im_transform, im-data, im_transform-data]
-    titles = ['Data', 'Obs basis', 'Disk basis',
-              'Obs-Disk', 'Obs-data', 'Disk-data']
+    # images = [data, im, im_transform,
+    #           im-im_transform, im-data, im_transform-data]
+    # titles = ['Data', 'Obs basis', 'Disk basis',
+    #           'Obs-Disk', 'Obs-data', 'Disk-data']
 
-    diff_max = np.max([np.max(im-data), np.max(im_transform-data)])
-    diff_min = np.max([np.min(im-data), np.min(im_transform-data)])
+    # diff_max = np.max([np.max(im-data), np.max(im_transform-data)])
+    # diff_min = np.max([np.min(im-data), np.min(im_transform-data)])
 
-    fig, axes = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True,
-                             figsize=(12,7))
-    for i in range(6):
-        ax = axes[i//3, i%3]
-        if (i//3 == 1) and (i%3 > 0):
-            vmin, vmax = diff_min, diff_max
-        else:
-            vmin, vmax = None, None
-        mesh = ax.pcolormesh(X, Y, images[i], vmin=vmin, vmax=vmax)
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes('right', size='5%', pad=0.05)
-        plt.colorbar(mesh, cax=cax)
-        ax.set_title(titles[i])
-    nbasis = fitter.basis.N
-    fig.suptitle(f'Nmax={nmax}; {nbasis} basis functions')#, y=1.05)
-    plt.tight_layout()
+    # fig, axes = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True,
+    #                          figsize=(12,7))
+    # for i in range(6):
+    #     ax = axes[i//3, i%3]
+    #     if (i//3 == 1) and (i%3 > 0):
+    #         vmin, vmax = diff_min, diff_max
+    #     else:
+    #         vmin, vmax = None, None
+    #     mesh = ax.pcolormesh(X, Y, images[i], vmin=vmin, vmax=vmax)
+    #     divider = make_axes_locatable(ax)
+    #     cax = divider.append_axes('right', size='5%', pad=0.05)
+    #     plt.colorbar(mesh, cax=cax)
+    #     ax.set_title(titles[i])
+    # nbasis = fitter.basis.N
+    # fig.suptitle(f'Nmax={nmax}; {nbasis} basis functions')#, y=1.05)
+    # plt.tight_layout()
 
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+    # plt.savefig(outfile, bbox_inches='tight', dpi=300)
 
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+    # if show is True:
+    #     plt.show()
+    # else:
+    #     plt.close()
 
     #---------------------------------------------------------
     # Intensity map constructors and renders
@@ -890,7 +1072,7 @@ def main(args):
                                                         'pix_scale':pix_scale,
                                                         'plane':'obs'}
         )
-    imap.render(true_pars, datacube, pars)
+    imap.render(true_pars, datacube, mcmc_pars)
 
     outfile = os.path.join(outdir, 'shapelet-imap-render.png')
     print(f'Saving render for shapelet basis to {outfile}')
@@ -902,7 +1084,7 @@ def main(args):
                                                         'pix_scale':pix_scale,
                                                         'plane':'disk'}
         )
-    imap_transform.render(true_pars, datacube, pars)
+    imap_transform.render(true_pars, datacube, mcmc_pars)
 
     outfile = os.path.join(outdir, 'shapelet-imap-transform-render.png')
     print(f'Saving render for shapelet basis to {outfile}')

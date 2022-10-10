@@ -9,17 +9,17 @@ from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from corner import corner
+
 import zeus
 import emcee
+import pocomc as pc
 
 import utils
 import priors
-import likelihood
-from parameters import PARS_ORDER
+from likelihood import DataCubeLikelihood
 from velocity import VelocityMap
-from likelihood import log_posterior
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 
@@ -30,21 +30,37 @@ parser.add_argument('--test', action='store_true', default=False,
 
 class MCMCRunner(object):
     '''
-    Class to run a MCMC chain with emcee or zeus
+    Base class to run a MCMC chain (currently emcee, zeus, & pocomc)
 
-    Currently a very light wrapper around emzee/zeus, but in principle
+    Currently a very light wrapper around a few samplers, but in principle
     might want to do something fancier in the future
     '''
 
-    def __init__(self, nwalkers, ndim, pfunc, args=None, kwargs=None):
+    def __init__(self, nwalkers, ndim,
+                 logpost=None, logpost_args=None, logpost_kwargs=None,
+                 loglike=None, loglike_args=None, loglike_kwargs=None,
+                 logprior=None, logprior_args=None, logprior_kwargs=None
+                 ):
         '''
-        nwalkers: Number of MCMC walkers. Must be at least 2*ndim
-        ndim:     Number of sampled dimensions
-        pfunc:    Posterior function to sample from
-        args:     List of additional args needed to evaluate posterior,
-                    such as the data vector, covariance matrix, etc.
-        kwargs:     List of additional kwargs needed to evaluate posterior,
-                    such as the data vector, covariance matrix, etc.
+        nwalkers: int
+            Number of MCMC walkers/particles. Must be at least 2*ndim for
+            zeus/emcee, suggested to be at least 100 for pocomc
+        ndim: int
+            Number of sampled dimensions
+
+        NOTE: The following are sets of callable functions & their args/kwargs
+        needed to compute a (log) probablility density. The user should provide
+        *either* a posterior or likelihood + prior, not both
+
+        log{func}: function or callable()
+            Callable function to sample from the log posterior, likelihood,
+            or prior
+        log{func}_args: list
+            List of additional args needed to evaluate corresponding
+            distribution, such as the data vector, covariance matrix, etc.
+        log{func}_kwargs: dict (or subclass, such as Pars, MetaPars, etc.)
+            Dictionary of additional kwargs needed to evaluate corresponding
+            distribution, such as the meta parameters
         '''
 
         for name, val in {'nwalkers':nwalkers, 'ndim':ndim}.items():
@@ -53,18 +69,50 @@ class MCMCRunner(object):
             if not isinstance(val, int):
                 raise TypeError(f'{name} must be an int!')
 
-        if not callable(pfunc):
-            raise TypeError(f'{pfunc} is not callable!')
-
-        if args is not None:
-            if not isinstance(args, list):
-                raise TypeError('args must be a list!')
-
         self.nwalkers = nwalkers
         self.ndim = ndim
-        self.pfunc = pfunc
-        self.args = args
-        self.kwargs = kwargs
+
+        pfuncs = {}
+        if (logpost is not None):
+            if (loglike is not None) or (logprior is not None):
+                raise Exception('Cannot provide both a posterior and ' +\
+                                'a likelihood or prior!')
+            self.logpost = logpost
+            self.loglike = None
+            self.logprior = None
+            self.use_post = True
+            pfuncs['posterior'] = logpost
+        else:
+            if (loglike is None) or (logprior is None):
+                raise Exception('Must pass both a likelihood and prior ' +\
+                                'if a posterior is not passed!')
+            self.logpost = None
+            self.loglike = loglike
+            self.logprior = logprior
+            self.use_post = False
+            pfuncs['likelihood'] = loglike
+            pfuncs['prior'] = logprior
+
+        for name, pfunc in pfuncs.items():
+            if not callable(pfunc):
+                raise TypeError(f'passed log {name} is not callable!')
+        self.pfuncs = pfuncs
+
+        for arg in [logpost_args, loglike_args, logprior_args]:
+            if arg is not None:
+                if not isinstance(arg, list):
+                    raise TypeError('passed args must be a list!')
+        self.logpost_args = logpost_args
+        self.loglike_args = loglike_args
+        self.logprior_args = logprior_args
+
+        for kwarg in [logpost_kwargs, loglike_kwargs, logprior_kwargs]:
+            if kwarg is not None:
+                if not isinstance(kwarg, dict):
+                    raise TypeError('passed kwargs must be a dict!')
+        self.logpost_kwargs = logpost_kwargs
+        self.loglike_kwargs = loglike_kwargs
+        self.logprior_kwargs = logprior_kwargs
 
         self.has_run = False
         self.has_MAP = False
@@ -75,8 +123,34 @@ class MCMCRunner(object):
         self.MAP_means = None
         self.MAP_medians = None
         self.MAP_sigmas = None
+        self.MAP_true = None # if actual loglikelihood values are passed
+        self.MAP_indx = None # if actual loglikelihood values are passed
+
+        self.sampler = None
 
         return
+
+    @property
+    def args(self):
+        '''
+        Most samplers use just a single args/kwargs pair. We define
+        it here as the "default" one, even though some samplers
+        have separate args for likelihood & prior
+        '''
+        pass
+
+    @property
+    def kwargs(self):
+        '''
+        Most samplers use just a single args/kwargs pair. We define
+        it here as the "default" one, even though some samplers
+        have separate kwargs for likelihood & prior
+        '''
+        pass
+
+    @property
+    def meta(self):
+        pass
 
     @abstractmethod
     def _initialize_sampler(self, pool=None):
@@ -94,21 +168,22 @@ class MCMCRunner(object):
         each prior, centered at the max of the prior
         '''
 
-        if 'priors' in self.kwargs['pars']:
+        if 'priors' in self.meta:
             # use peak of priors for initialization
             self.start = np.zeros((self.nwalkers, self.ndim))
 
-            for name, indx in PARS_ORDER.items():
-                prior = self.kwargs['pars']['priors'][name]
+            for name, indx in self.pars_order.items():
+                prior = self.meta['priors'][name]
                 peak, cen = prior.peak, prior.cen
 
                 base = peak if peak is not None else cen
-                radius = base*scale if base !=0 else scale
 
-                # for (g1,g2), there seems to be some additional
-                # outlier problems. So reduce
-                if name in ['g1', 'g2']:
-                    radius /= 2.
+                if prior.scale is not None:
+                    radius = prior.scale
+                elif base != 0:
+                    radius = base*scale
+                else:
+                    radius = scale
 
                 # random ball about base value
                 ball = radius * np.random.randn(self.nwalkers)
@@ -141,28 +216,28 @@ class MCMCRunner(object):
         prior: prior being sampled with random points about ball
         '''
 
-        outliers = np.abs(ball) > 2.*radius
+        outliers = np.abs(ball) > 3.*radius
         if isinstance(prior, priors.UniformPrior):
             left, right = prior.left, prior.right
             outliers = outliers | \
-                        ((base + ball) < left) | \
-                        ((base + ball) > right)
+                        ((base + ball) <= left) | \
+                        ((base + ball) >= right)
         elif isinstance(prior, priors.GaussPrior):
             if prior.clip_sigmas is not None:
                 outliers = outliers | \
-                    (abs(base + ball - prior.mu) > prior.clip_sigmas)
+                    (abs(ball) > prior.clip_sigmas*prior.sigma)
         Noutliers = len(np.where(outliers == True)[0])
 
         return outliers, Noutliers
 
-    def run(self, nsteps, pool, start=None, return_sampler=False,
+    def run(self, pool, nsteps=None, start=None, return_sampler=False,
             vb=True):
         '''
-        nsteps: int
-            Number of MCMC steps / iterations
         pool: Pool
             A pool object returned from schwimmbad. Can be SerialPool,
             MultiPool, or MPIPool
+        nsteps: int
+            Number of MCMC steps / iterations
         start: list
             Can provide starting walker positions if you don't
             want to use the default initialization
@@ -199,13 +274,9 @@ class MCMCRunner(object):
                     pool.wait()
                     sys.exit(0)
 
-            sampler = self._initialize_sampler(pool=pool)
+            self.sampler = self._initialize_sampler(pool=pool)
 
-            sampler.run_mcmc(
-                start, nsteps, progress=progress
-                )
-
-        self.sampler = sampler
+            self._run_sampler(start, nsteps=nsteps, progress=progress)
 
         self.has_run = True
 
@@ -214,16 +285,36 @@ class MCMCRunner(object):
         else:
             return
 
+    def _run_sampler(self, start, nsteps=None, progress=True):
+        '''
+        A standard way to run the sampler in the emcee/zeus convention.
+        Can be overloaded by subclasses for different sampler calls
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        if nsteps is None:
+            raise Exception('nsteps should be set except for a few ' +\
+                            'specific samplers!')
+
+        self.sampler.run_mcmc(
+            start, nsteps, progress=progress
+            )
+
+        return
+
     def set_burn_in(burn_in):
         self.burn_in = burn_in
 
         return
 
-    def compute_MAP(self, discard=None, thin=1, recompute=False):
+    def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         '''
-        TODO: For now, just computing the means & medians
-              Will fail for multi-modal distributions
+        loglike: np.ndarray, list
+            A list or numpy array of log likelihood values from mcmc run
 
+        # NOTE: the following are only used if loglike is not provided:
         discard: int
             The number of samples to discard, from 0:discard
         thin: int
@@ -250,14 +341,26 @@ class MCMCRunner(object):
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
 
-        chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
+        if loglike is None:
+            # don't know actual min of loglikelihood, so do best we can
+            chain = self.sampler.get_chain(
+                flat=True, discard=discard, thin=thin
+                )
 
-        self.MAP_means   = np.mean(chain, axis=0)
-        self.MAP_medians = np.median(chain, axis=0)
+            self.MAP_means   = np.mean(chain, axis=0)
+            self.MAP_medians = np.median(chain, axis=0)
 
-        self.MAP_sigmas = []
-        for i in range(self.ndim):
-            self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
+            self.MAP_sigmas = []
+            for i in range(self.ndim):
+                self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
+        else:
+            chain = self.sampler.get_chain()
+            self.MAP_indx = np.unravel_index(loglike.argmax(), loglike.shape)
+            self.MAP_true = chain[self.MAP_indx]
+
+            self.MAP_sigmas = []
+            for i in range(self.ndim):
+                self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
 
         self.has_MAP = True
 
@@ -284,7 +387,7 @@ class MCMCRunner(object):
 
         fig = plt.figure(figsize=size)
         # for n in range(ndim):
-        for name, indx in PARS_ORDER.items():
+        for name, indx in self.pars_order.items():
             plt.subplot2grid((ndim, 1), (indx, 0))
             plt.plot(chain[burn_in:,:,indx], alpha=0.5)
             plt.ylabel(name)
@@ -306,7 +409,7 @@ class MCMCRunner(object):
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
-                    show=True, close=True, outfile=None, size=(16,16),
+                    show=True, close=True, outfile=None, size=(20,20),
                     show_titles=True, title=None, use_derived=True,
                     title_fmt='.3f'):
         '''
@@ -335,7 +438,6 @@ class MCMCRunner(object):
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
 
-
         chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
 
         if use_derived is True:
@@ -343,7 +445,7 @@ class MCMCRunner(object):
             new_shape = (chain.shape[0], chain.shape[1]+1)
             new_chain = np.zeros((new_shape))
             new_chain[:,0:-1] = chain
-            i1, i2 = PARS_ORDER['sini'], PARS_ORDER['vcirc']
+            i1, i2 = self.pars_order['sini'], self.pars_order['vcirc']
             new_chain[:,-1] = chain[:,i1] * chain[:,i2]
             chain = new_chain
 
@@ -362,7 +464,7 @@ class MCMCRunner(object):
                     reference = arr
 
             names = self.ndim*['']
-            for name, indx in PARS_ORDER.items():
+            for name, indx in self.pars_order.items():
                 names[indx] = name
 
             if use_derived is True:
@@ -415,6 +517,22 @@ class ZeusRunner(MCMCRunner):
 
         return sampler
 
+    @property
+    def args(self):
+        return self.logpost_args
+
+    @property
+    def kwargs(self):
+        return self.logpost_kwargs
+
+    @property
+    def pfunc(self):
+        return self.logpost
+
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+
 class KLensZeusRunner(ZeusRunner):
     '''
     Main difference is that we assume args=[datacube] and
@@ -423,44 +541,52 @@ class KLensZeusRunner(ZeusRunner):
 
     def __init__(self, nwalkers, ndim, pfunc, datacube, pars):
         '''
-        nwalkers: Number of MCMC walkers. Must be at least 2*ndim
-        ndim:     Number of sampled dimensions
-        pfunc:    Posterior function to sample from
-        datacube: Datacube object the fit a model to
-        pars: A dict of needed kwargs to evaluate posterior, such as
+        nwalkers: int
+            Number of MCMC walkers. Must be at least 2*ndim
+        ndim: int
+            Number of sampled dimensions
+        pfunc: function, callable()
+            Posterior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
               covariance matrix, SED definition, etc.
         '''
 
         super(KLensZeusRunner, self).__init__(
-            nwalkers, ndim, pfunc, args=[datacube], kwargs={'pars': pars}
+            nwalkers, ndim, logpost=pfunc, logpost_args=[datacube, pars],
+            # nwalkers, ndim, logpost=pfunc, logpost_args=[datacube],
+            # logpost_kwargs={'pars': pars.meta.pars}
             )
 
         self.datacube = datacube
         self.pars = pars
 
+        self.pars_order = self.pars.sampled.pars_order
+
         self.MAP_vmap = None
 
         return
 
-    def compute_MAP(self, discard=None, thin=1, recompute=False):
+    def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         super(KLensZeusRunner, self).compute_MAP(
-            discard=discard, thin=thin, recompute=recompute
+            loglike=loglike, discard=discard, thin=thin, recompute=recompute
             )
 
-        theta_pars = likelihood.theta2pars(self.MAP_medians)
+        if self.MAP_true is None:
+            theta_pars = self.pars.theta2pars(self.MAP_medians)
+        else:
+            theta_pars = self.pars.theta2pars(self.MAP_true)
 
-        # Now compute the corresonding (median) MAP velocity map
-        # vel_pars = theta_pars.copy()
-        # vel_pars['r_unit'] = self.pars['r_unit']
-        # vel_pars['v_unit'] = self.pars['v_unit']
-
-        # self.MAP_vmap = VelocityMap('default', vel_pars)
-        self.MAP_vmap = likelihood._setup_vmap(theta_pars, self.pars)
+        self.MAP_vmap = DataCubeLikelihood._setup_vmap(
+            theta_pars, self.pars.meta.pars, 'default'
+            )
 
         # Now do the same for the corresonding (median) MAP intensity map
         # TODO: For now, doing same simple thing in likelihood
-        self.MAP_imap = likelihood._setup_imap(
-            theta_pars, self.datacube, self.pars
+        self.MAP_imap = DataCubeLikelihood._setup_imap(
+            theta_pars, self.datacube, self.pars.meta
             )
 
         return
@@ -511,21 +637,23 @@ class KLensZeusRunner(ZeusRunner):
         return
 
     def compare_MAP_to_data(self, show=True, close=True, outfile=None,
-                            size=(16,5)):
+                            size=(24,5)):
         '''
         For this subclass, have guaranteed access to datacube
         '''
 
         if self.has_MAP is False:
-            print('MAP has not been computed yet; trying now ' +\
-                  'with default parameters')
-            self.compute_MAP()
+            raise Exception('MAP has not been computed yet!')
+
+        if self.MAP_true is None:
+            theta_pars = self.pars.theta2pars(self.MAP_medians)
+        else:
+            theta_pars = self.pars.theta2pars(self.MAP_true)
 
         # gather needed components to evaluate model
         datacube = self.datacube
         lambdas = datacube.lambdas
-        sed = likelihood._setup_sed(self.pars)
-        sed_array = np.array([sed.x, sed.y])
+        sed_array = DataCubeLikelihood._setup_sed(theta_pars, datacube)
         vmap = self.MAP_vmap
         imap = self.MAP_imap
 
@@ -539,17 +667,20 @@ class KLensZeusRunner(ZeusRunner):
         zfactor = 1. / (1. + V)
 
         # compute intensity map from MAP
-        # TODO: Eventually this should be called like vmap
-        theta_pars = likelihood.theta2pars(self.MAP_medians)
-        intensity = imap.render(theta_pars, datacube, self.pars)
+        intensity, continuum = imap.render(
+            theta_pars, datacube, self.pars.meta.pars, im_type='both'
+            )
 
         Nspec = datacube.Nspec
+
+        # grab psf if present
+        psf = datacube.get_psf()
 
         fig, axs = plt.subplots(4, Nspec, sharex=True, sharey=True,)
         for i in range(Nspec):
             # first, data
             ax = axs[0,i]
-            data = datacube.slices[i]._data
+            data = datacube.data[i]
             im = ax.imshow(data, origin='lower')
             if i == 0:
                 ax.set_ylabel('Data')
@@ -561,8 +692,9 @@ class KLensZeusRunner(ZeusRunner):
 
             # second, model
             ax = axs[1,i]
-            model = likelihood._compute_slice_model(
-                lambdas[i], sed_array, zfactor, intensity
+            model = DataCubeLikelihood._compute_slice_model(
+                lambdas[i], sed_array, zfactor, intensity, continuum,
+                psf=psf, pix_scale=datacube.pix_scale
                 )
             im = ax.imshow(model, origin='lower')
             if i == 0:
@@ -618,6 +750,149 @@ class KLensEmceeRunner(KLensZeusRunner):
 
         return sampler
 
+class PocoRunner(MCMCRunner):
+
+    def _initialize_sampler(self, pool=None):
+        sampler = pc.Sampler(
+            self.nparticles, self.ndim,
+            log_likelihood=self.loglike,
+            log_prior=self.logprior,
+            log_likelihood_args=self.loglike_args,
+            log_likelihood_kwargs=self.loglike_kwargs,
+            log_prior_args=self.logprior_args,
+            log_prior_kwargs=self.logprior_kwargs,
+            pool=pool,
+            infer_vectorization=False
+            # NOTE: wes bounds as we implement this in our priors
+            #bounds=bounds
+            )
+
+        return sampler
+
+class KLensPocoRunner(PocoRunner):
+    '''
+    See https://pocomc.readthedocs.io/en/latest/
+    '''
+
+    def __init__(self, nparticles, ndim, loglike, logprior,
+                 datacube, pars,
+                 loglike_args=None, loglike_kwargs=None,
+                 logprior_args=None, logprior_kwargs=None):
+        '''
+        nparticles: int
+            Number of MCMC particles. Recommended to be at least 100
+            for complex posteriors
+        ndim: int
+            Number of sampled dimensions
+        loglike: function / callable
+            Log likelihood function to sample from
+        logprior: function / callable
+            Log prior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
+              covariance matrix, SED definition, etc.
+        loglike_args: list
+            List of additional args needed to evaluate log likelihood,
+            such as the data vector, covariance matrix, etc.
+        loglike_kwargs: dict
+            List of additional kwargs needed to evaluate log likelihood,
+            such as meta parameters, etc.
+        logprior_args: list
+            List of additional args needed to evaluate log prior,
+            such as the data vector, covariance matrix, etc.
+        logprior_kwargs: dict
+            List of additional kwargs needed to evaluate log prior,
+            such as meta parameters, etc.
+
+        NOTE: to make this consistent w/ the other mcmc runner classes,
+        you must pass datacube & pars separately from the rest of the
+        args/kwargs!
+        '''
+
+        if loglike_args is not None:
+            loglike_args = [datacube] + loglike_args
+        else:
+            loglike_args = [datacube]
+
+        super(KLensPocoRunner, self).__init__(
+            nparticles, ndim,
+            loglike=loglike, logprior=logprior,
+            loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
+            logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+            )
+
+        self.datacube = datacube
+        self.pars = pars
+
+        self.pars_order = self.pars.sampled.pars_order
+
+        self.MAP_vmap = None
+
+        #...
+
+    @property
+    def nparticles(self):
+        return self.nwalkers
+
+    @property
+    def args(self):
+        return self.loglike_args
+
+    @property
+    def kwargs(self):
+        return self.loglike_kwargs
+
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+
+    def _run_sampler(self, start, nsteps=None, progress=True):
+        '''
+        The poco-specific way to run the sampler object
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        self.sampler.run(
+            start, progress=progress
+            )
+
+        return
+
+def get_runner_types():
+    return RUNNER_TYPES
+
+# NOTE: This is where you must register a new model
+RUNNER_TYPES = {
+    'default': None,
+    'emcee': KLensEmceeRunner,
+    'zeus': KLensZeusRunner,
+    'poco': KLensPocoRunner,
+    }
+
+def build_mcmc_runner(name, args, kwargs):
+    '''
+    name: str
+        Name of mcmc runner type
+    args: list
+        A list of args for the runner constructor
+    kwargs: dict, Pars, MCMCPars, etc.
+        Keyword args to pass to runner constructor
+    '''
+
+    name = name.lower()
+
+    if name in RUNNER_TYPES.keys():
+        # User-defined input construction
+        runner = RUNNER_TYPES[name](*args, **kwargs)
+    else:
+        raise ValueError(f'{name} is not a registered MCMC runner!')
+
+    return runner
+
 def main(args):
 
     show = args.show
@@ -630,7 +905,7 @@ def main(args):
     nwalkers = 2*ndims
     args = None
     kwargs = None
-    runner = ZeusRunner(nwalkers, ndims, log_posterior, args=args, kwargs=kwargs)
+    # runner = ZeusRunner(nwalkers, ndims, log_posterior, args=args, kwargs=kwargs)
 
     return 0
 

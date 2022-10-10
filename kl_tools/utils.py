@@ -1,6 +1,7 @@
 import numpy as np
 import os, sys
 import yaml
+import matplotlib.colors as colors
 import pdb, pudb
 
 class ForkedPdb(pdb.Pdb):
@@ -17,6 +18,24 @@ class ForkedPdb(pdb.Pdb):
             sys.stdin = _stdin
 
         return
+
+class MidpointNormalize(colors.Normalize):
+    '''
+    Normalise the colorbar so that diverging bars work there way either side from a prescribed midpoint value)
+
+    e.g. im=ax1.imshow(array, norm=MidpointNormalize(midpoint=0.,vmin=-100, vmax=100))
+    '''
+
+    def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
+        self.midpoint = midpoint
+        colors.Normalize.__init__(self, vmin, vmax, clip)
+
+        return
+
+    def __call__(self, value, clip=None):
+        # Ignoring masked values and edge cases
+        x, y = [self.vmin, self.midpoint, self.vmax], [0, 0.5, 1]
+        return np.ma.masked_array(np.interp(value, x, y), np.isnan(value))
 
 def read_yaml(yaml_file):
     with open(yaml_file, 'r') as stream:
@@ -41,9 +60,80 @@ def build_map_grid(Nx, Ny):
     assert len(x) == Nx
     assert len(y) == Ny
 
-    X, Y = np.meshgrid(x, y)
+    X, Y = np.meshgrid(x, y, indexing='ij')
 
     return X, Y
+
+def check_file(filename):
+    '''
+    Check if file exists; err if not
+    '''
+
+    if not os.path.exists(filename):
+        raise OSError(f'{filename} does not exist!')
+
+    return
+
+def check_type(var, name, desired_type):
+    '''
+    Checks that the passed variable (with given name)
+    is of the desired type
+    '''
+
+    if not isinstance(var, desired_type):
+        raise TypeError(f'{name} must be a {desired_type}!')
+
+    return
+
+def check_types(var_dict):
+    '''
+    Check that the passed variables match the desired type.
+    Convenience wrapper around check_type() for multiple variables
+
+    var_dict: dict
+        A dictionary in the format of name: (var, desired_type)
+    '''
+
+    for name, tup in var_dict.items():
+        var, desired_type = tup
+        check_type(var, name, desired_type)
+
+    return
+
+def check_req_fields(config, req, name=None):
+    for field in req:
+        if not field in config:
+            raise ValueError(f'{name}config must have field {field}')
+
+    return
+
+def check_fields(config, req, opt, name=None):
+    '''
+    req: list of required field names
+    opt: list of optional field names
+    name: name of config type, for extra print info
+    '''
+    assert isinstance(config, dict)
+
+    if name is None:
+        name = ''
+    else:
+        name = name + ' '
+
+    if req is None:
+        req = []
+    if opt is None:
+        opt = []
+
+    # ensure all req fields are present
+    check_req_fields(config, req, name=name)
+
+    # now check for fields not in either
+    for field in config:
+        if (not field in req) and (not field in opt):
+            raise ValueError(f'{field} not a valid field for {name} config!')
+
+    return
 
 def make_dir(d):
     '''

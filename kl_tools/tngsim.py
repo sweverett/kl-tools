@@ -45,19 +45,33 @@ def get(path, params=None):
     return r
 
 
-rbase = get(baseURL)
-use_sim = 'TNG50-1'
-names = [sim['name'] for sim in rbase['simulations']]
-i = names.index(use_sim)
-sim = get( rbase['simulations'][i]['url'] )
-snaps = get( sim['snapshots'] )
-snap = get( snaps[-1]['url'] )
-subs = get( snap['subhalos'], {'limit':500, 'order_by':'-mass_stars'} )
+#rbase = get(baseURL)
+#use_sim = 'TNG50-1'
+#names = [sim['name'] for sim in rbase['simulations']]
+#i = names.index(use_sim)
+#sim = get( rbase['simulations'][i]['url'] )
+#snaps = get( sim['snapshots'] )
+#snap = get( snaps[-1]['url'] )
+#subs = get( snap['subhalos'])
+#all_subs = get(snap['subhalos'], {'limit':subs['count'], 'order_by':'-mass_stars'} )
 
 
-class TNGsimulation(Simulation):
-    def __init__(self):
-        pass
+class TNGsimulation():
+    def __init__(self, subhaloid = None , redshift = 0.1 ,simname = 'TNG50-1'):
+        # Need to specify the simulation name, snapshot number, and subhalo.
+
+        rbase = get(baseURL)
+        use_sim = simname
+        names = [sim['name'] for sim in rbase['simulations']]
+        i = names.index(use_sim)
+        sim = get( rbase['simulations'][i]['url'] )
+        snaps = get( sim['snapshots'] )
+        snap_redshifts = np.array([snap['redshift'] for snap in snaps])
+
+        snapurl = snaps[np.argmin(np.abs(snap_redshifts - redshift))]['url']
+        suburl = snapurl+f'subhalos/{subhaloid}'
+        print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")        
+        self._subhalo = get(suburl)
 
     def _calculate_gas_temperature(self,h5data):
         u           = h5data['PartType0']['InternalEnergy'][:]    #  the Internal Energy
@@ -108,7 +122,7 @@ class TNGsimulation(Simulation):
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
         if cachefile == None:
-            sub = get( subs['results'][subhaloid]['url'] )        
+            sub = self._subhalo# get( subs['results'][subhaloid]['url'] )        
             url = f"http://www.tng-project.org/api/{use_sim}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
             r = requests.get(url,headers=headers)
             f = BytesIO(r.content)
@@ -179,3 +193,7 @@ class TNGsimulation(Simulation):
 
     
 
+
+if __name__ == '__main__':
+    sim = TNGsimulation(5)
+    ipdb.set_trace()

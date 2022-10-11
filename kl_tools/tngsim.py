@@ -59,6 +59,7 @@ class TNGsimulation(object):
         suburl = snapurl+f'subhalos/{subhaloid}'
         print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")
         self._subhalo = get(suburl)
+        self._snapshot = snap
         self._getIllustrisTNGData()
 
         return
@@ -104,7 +105,7 @@ class TNGsimulation(object):
 
         return spec_norm
 
-    def _getIllustrisTNGData(self, cachefile = None):
+    def _getIllustrisTNGData(self):
         '''
         For a chosen haloid and snapshot, get the ingredients necessary to build a simulated datacube.
         This means stellar continuum (flat across our SED) and a line that traces the gas.
@@ -113,15 +114,13 @@ class TNGsimulation(object):
           it will look there first, and use data if that file exists.
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
-        if cachefile == None:
-            sub = self._subhalo# get( subs['results'][subhaloid]['url'] )
+        sub  = self._subhalo
+        cachepath = pathlib.Path(f"./TNGcache_{self._sim_name}_subhalo_{sub['id']}.hdf5")
+        if not cachepath.exists():
             url = f"http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
             r = requests.get(url,headers=headers)
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
-
-            # Assign an emission-line flux and star particle continuum level to each star and gas particle
-
         else:
             h = h5py.File(cachefile,mode='r')
             self._cachefile = cachefile
@@ -130,6 +129,7 @@ class TNGsimulation(object):
         self._particleTemp = self._calculate_gas_temperature(h)
         self._starFlux = self._star_particle_flux(h)
         self._line_flux = self._gas_line_flux(h)
+
 
         return
 
@@ -188,23 +188,20 @@ class TNGsimulation(object):
 
         # TODO: add an optional rotation matrix operation.
         RR = Rotation.from_euler('z',45,degrees=True)
-
-        sigma = line_center / resolution
+        
         # Calculate the velocity offset of each particle.
         dv = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1/1+self.redshift) * u.km/u.s
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
         dlam = line_center *  dv / const.c
-        delta_lambda = self._lambda1d[1:] - self._lambda1d[:-1]
         line_spectra = self._line_flux[:,np.newaxis]/np.sqrt(2*np.pi*sigma**2) * np.exp((-(self._lambda1d - (line_center + dlam)[:,np.newaxis])**2/sigma**2/2.).value)
         # Now put these on the pixel grid.
         du = (dx*u.kpc / self.cosmo.angular_diameter_distance(self.redshift)).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / self._datacube.pars['pix_scale']
         dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(self.redshift)).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / self._datacube.pars['pix_scale']
-
         # TODO: This is where we should apply a shear.
         # Round each one to the pixel center
-        du_int = (np.round(du)).astype(int)
-        dv_int = (np.round(dv)).astype(int)
+        du_int = (np.round(du)).astype(int) # + x grid size
+        dv_int = (np.round(dv)).astype(int) # + y grid size
         self.simcube = np.zeros_like(self._datacube.data)
         for i in range(self.simcube.shape[1]):
             for j in range(self.simcube.shape[2]):

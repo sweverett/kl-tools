@@ -64,7 +64,7 @@ def main(args, pool):
         )
     utils.make_dir(outdir)
 
-    # for exp gal fits
+    # for exp gal datavector
     true_flux = 1.8e4
     true_hlr = 3.5
 
@@ -76,12 +76,12 @@ def main(args, pool):
         'theta_int': np.pi / 6,
         # 'theta_int': 0.,
         'sini': 0.7,
-        'v0': 2,
+        'v0': 5,
         'vcirc': 200,
         'rscale': 5,
         # 'beta': np.NaN,
-        # 'flux': true_flux,
-        # 'hlr': true_hlr,
+        'flux': true_flux,
+        'hlr': true_hlr,
         # 'x0': 0.5,
         # 'y0': -1,
     }
@@ -97,41 +97,41 @@ def main(args, pool):
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
-            'sini': priors.UniformPrior(0.6, 0.8),
+            'sini': priors.UniformPrior(0, 1.0),
             # 'v0': priors.UniformPrior(0, 20),
-            'v0': priors.GaussPrior(0, 5),
-            'vcirc': priors.GaussPrior(200, 5, clip_sigmas=3),
+            'v0': priors.GaussPrior(0, 10),
+            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
             # 'x0': priors.UniformPrior(-3, 3),
             # 'y0': priors.UniformPrior(-3, 3),
             # 'beta': priors.UniformPrior(0, 0.5),
-            # 'hlr': priors.UniformPrior(0, 8),
-            # 'flux': priors.UniformPrior(5e3, 7e4),
+            'hlr': priors.UniformPrior(0, 8),
+            'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
-            # 'type': 'inclined_exp',
-            # 'flux': true_flux, # counts
-            # 'hlr': true_hlr, # counts
+            'type': 'inclined_exp',
+            'flux': true_flux, # counts
+            'hlr': true_hlr, # counts
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
-            'type': 'basis',
-            # 'basis_type': 'shapelets',
-            'basis_type': 'sersiclets',
-            # 'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                # 'Nmax': 12, revert to this
-                'Nmax': 12,
-                # 'plane': 'disk',
-                'plane': 'obs',
-                'beta': 0.37, # n12-exp_shapelet
-                # 'beta': 1.45, # n20-sersiclet
-                # 'beta': 'sampled',
-                'index': 1,
-                'b': 1,
-                }
+            # 'type': 'basis',
+            # # 'basis_type': 'shapelets',
+            # 'basis_type': 'sersiclets',
+            # # 'basis_type': 'exp_shapelets',
+            # 'basis_kwargs': {
+            #     # 'Nmax': 12, # fiducial
+            #     'Nmax': 7,
+            #     # 'plane': 'disk',
+            #     'plane': 'obs',
+            #     'beta': 0.37, # n12-exp_shapelet
+            #     # 'beta': 1.45, # n20-sersiclet
+            #     # 'beta': 'sampled',
+            #     'index': 1,
+            #     'b': 1,
+            #     }
         },
         'velocity': {
             # 'model': 'offset'
@@ -160,7 +160,7 @@ def main(args, pool):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        's2n': 10000,
+        's2n': 100000,
         # 'sky_sigma': 0.01, # pixel counts for mock data vector
         #'psf': gs.Gaussian(fwhm=1, flux=1.)
     }

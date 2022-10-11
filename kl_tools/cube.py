@@ -12,7 +12,6 @@ from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
-# from . import utils
 import utils
 import parameters
 
@@ -32,7 +31,8 @@ class CubePars(parameters.MetaPars):
     '''
 
     _req_fields = ['pix_scale', 'bandpasses']
-    _opt_fields = ['psf', 'emission_lines', 'files']
+    _opt_fields = ['psf', 'emission_lines', 'files', 'shape']
+    _gen_fields = ['wavelengths'] # not an allowed input field, but generated
 
     def __init__(self, pars):
         '''
@@ -53,7 +53,11 @@ class CubePars(parameters.MetaPars):
                 raise TypeError('CubePars bandpass field must be a' +\
                                 'list of galsim bandpasses or a dict!')
 
-        # ...
+        self.build_bandpasses()
+
+        self._lambdas = None
+        self._lambda_unit = None
+        self.build_wavelength_list()
 
         return
 
@@ -95,8 +99,88 @@ class CubePars(parameters.MetaPars):
             bandpasses = setup_simple_bandpasses(*args, **kwargs)
 
         self._bandpasses = bandpasses
+        self['bandpasses'] = bandpasses
 
-        return bandpasses
+        return
+
+    def build_wavelength_list(self):
+        '''
+        Build a list of slice wavelength bounds (lambda_blue, lambda_red)
+        given a set bandpass list
+        '''
+
+        if self._bandpasses is None:
+            self.build_bandpasses()
+
+        # Not necessarily needed, but could help ease of access
+        self._lambda_unit = u.Unit(self._bandpasses[0].wave_type)
+        self._lambdas = [] # Tuples of bandpass bounds in unit of bandpass
+        for bp in self._bandpasses:
+            # galsim bandpass limits are always stored in nm
+            li = (bp.blue_limit * u.nm).to(self._lambda_unit).value
+            le = (bp.red_limit * u.nm).to(self._lambda_unit).value
+            self._lambdas.append((li, le))
+
+            # Make sure units are consistent
+            # (could generalize, but not necessary)
+            assert bp.wave_type == self._lambda_unit
+
+        self['wavelengths'] = self._lambdas
+
+        return
+
+    def reset(self):
+        '''
+        Reset any attributes or fields that were set during instantiation,
+        not as a direct field input. Useful for datacube truncations
+        '''
+
+        self._bandpasses = None
+        self._lambdas = None
+        self._lambda_unit = None
+
+        # remove any generated fields
+        for field in self._gen_fields:
+            del self[field]
+
+        self.__init__(self.pars)
+
+        return
+
+    def set_shape(self, shape):
+        '''
+        Store the datacube shape in CubePars
+
+        shape: (Nspec, Nx, Ny) tuple
+        '''
+
+        if len(shape) != 3:
+            raise ValueError('shape must be a tuple of len 3!')
+
+        # this will build a lambda list from the bandpasses, if not yet created
+        lambdas = self.lambdas
+
+        if shape[0] != len(lambdas):
+            raise ValueError('The first dimension of shape must be the ' +\
+                             'length as the bandpass & wavelength list!')
+
+        self['shape'] = shape
+
+        return
+
+    @property
+    def bandpasses(self):
+        if self._bandpasses is None:
+            self.build_bandpasses()
+
+        return self._bandpasses
+
+    @property
+    def lambdas(self):
+        if self._lambdas is None:
+            self.build_lambdas()
+
+        return self._lambdas
 
 class DataVector(object):
     '''
@@ -175,7 +259,6 @@ class DataCube(DataVector):
 
         self.pars = pars
         self.pix_scale = pars['pix_scale']
-        self.bandpasses = pars.build_bandpasses()
 
         if len(data.shape) != 3:
             # Handle the case of 1 slice
@@ -183,6 +266,8 @@ class DataCube(DataVector):
             data = data.reshape(1, data.shape[0], data.shape[1])
 
         self.shape = data.shape
+
+        self.pars.set_shape(self.shape)
 
         self.Nspec = self.shape[0]
         self.Nx = self.shape[1]
@@ -197,19 +282,6 @@ class DataCube(DataVector):
         if self.Nspec == 0:
             print('WARNING: there are no slices in passed datacube. ' +\
                   'Are you sure that is right?')
-
-        # Not necessarily needed, but could help ease of access
-        self.lambda_unit = u.Unit(self.bandpasses[0].wave_type)
-        self.lambdas = [] # Tuples of bandpass bounds in unit of bandpass
-        for bp in self.bandpasses:
-            # galsim bandpass limits are always stored in nm
-            li = (bp.blue_limit * u.nm).to(self.lambda_unit).value
-            le = (bp.red_limit * u.nm).to(self.lambda_unit).value
-            self.lambdas.append((li, le))
-
-            # Make sure units are consistent
-            # (could generalize, but not necessary)
-            assert bp.wave_type == self.lambda_unit
 
         # If weights/masks not passed, set non-informative defaults
         if weights is not None:
@@ -238,6 +310,17 @@ class DataCube(DataVector):
             raise ValueError('DataCube.shape must be len 3!')
 
         return
+
+    @property
+    def bandpasses(self):
+        return self.pars.bandpasses
+
+    @property
+    def lambdas(self):
+        return self.pars.lambdas
+    @property
+    def lambda_unit(self):
+        return self.pars._lambda_unit
 
     @property
     def slices(self):
@@ -633,6 +716,9 @@ class DataCube(DataVector):
         self.pars['bandpasses'] = [self.bandpasses[i]
                                    for i in range(self.Nspec)
                                    if cut[i] == True]
+
+        # Reset any attributes set during initialization
+        self.pars.reset()
 
         if trunc_type == 'in-place':
             self.__init__(

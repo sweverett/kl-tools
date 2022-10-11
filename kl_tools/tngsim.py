@@ -287,9 +287,10 @@ class TNGsimulation(object):
         # generate cube data given passed pars & emission lines
         data = self._generateCube(pars)
 
-        new_cube = DataCube(data, pars=pars)
+        # override any existing data in the cube, while keeping all metadata
+        datacube.set_data(data)
 
-        return new_cube
+        return datacube
 
 if __name__ == '__main__':
     sim = TNGsimulation()

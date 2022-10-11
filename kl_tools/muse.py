@@ -123,10 +123,11 @@ class MuseDataCube(cube.DataCube):
         clean up later
         '''
 
-        self.pars['z'] = self.obj_data['Z']
+        # self.pars['z'] = self.obj_data['Z']
 
         # some are set later
-        self.pars['specs'] = {
+        # self.pars['specs'] = {
+        specs = {
             # A guess, based on throughput here:
             # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
             'throughput': 0.2,
@@ -135,8 +136,10 @@ class MuseDataCube(cube.DataCube):
 
         Nlines = len(self.lines)
 
-        z = float(self.pars['z'])
-        R = self.pars['specs']['resolution']
+        # z = float(self.pars['z'])
+        z = self.obj_data['Z']
+        # R = self.pars['specs']['resolution']
+        R = specs['resolution']
         lines = []
         for line in self.lines:
             # TODO: We should investigate whether to use LAMBDA_SN directly,

@@ -4,6 +4,8 @@ import astropy.units as u
 
 import utils
 
+import ipdb
+
 class EmissionLine(object):
     '''
     Holds relevant information for a specific emission line

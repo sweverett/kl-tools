@@ -1,4 +1,3 @@
-from abc import abstractmethod
 import numpy as np
 from scipy.sparse import identity, dia_matrix
 import fitsio
@@ -14,6 +13,7 @@ from argparse import ArgumentParser
 
 import utils
 import parameters
+from datavector import DataVector
 
 import ipdb
 
@@ -168,6 +168,34 @@ class CubePars(parameters.MetaPars):
 
         return
 
+    def set_data(self, data, weights=None, masks=None):
+        '''
+        This method overwrites the existing datacube slice data, while
+        keeping all existing metadata
+
+        data: np.ndarray
+            The 3-dimensional numpy array to set as the new slice data
+        weights: float, list, np.ndarray
+            Pass if you want to overwrite the weight maps as well
+        masks: float, list, np.ndarray
+            Pass if you want to overwrite the mask maps as well
+
+        see _set_maps() for details for weight & masks
+        '''
+
+        if data.shape != self.shape:
+            raise ValueError('Passed data shape must match existing shape!')
+
+
+        self._data = data
+
+        if weights is not None:
+            self.set_weights(weights)
+        if masks is not None:
+            self.set_masks(masks)
+
+        return
+
     @property
     def bandpasses(self):
         if self._bandpasses is None:
@@ -182,25 +210,19 @@ class CubePars(parameters.MetaPars):
 
         return self._lambdas
 
-class DataVector(object):
-    '''
-    Light wrapper around things like cube.DataCube to allow for
-    uniform interface for things like the intensity map rendering
-    '''
+    def copy(self):
+        return self.__copy__()
 
-    @abstractmethod
-    def stack(self):
-        '''
-        Each datavector must have a method that defines how to stack it
-        into a single (Nx,Ny) image for basis function fitting
-        '''
-        pass
+    def __copy__(self):
+        return CubePars(deepcopy(self.pars))
 
 class DataCube(DataVector):
     '''
     Base class for an abstract data cube.
     Contains astronomical images of a source
     at various wavelength slices
+
+    NOTE: All subclasses of DataVector must implement a stack() method
     '''
 
     def __init__(self, data, pars=None, weights=None, masks=None,
@@ -712,25 +734,28 @@ class DataCube(DataVector):
         trunc_weights = self.weights[cut,:,:]
         trunc_masks = self.masks[cut,:,:]
 
+        trunc_pars = self.pars.copy() # is a deep copy
+
         # Have to do it this way as lists cannot be indexed by np arrays
-        self.pars['bandpasses'] = [self.bandpasses[i]
+        trunc_pars['bandpasses'] = [self.bandpasses[i]
                                    for i in range(self.Nspec)
                                    if cut[i] == True]
 
         # Reset any attributes set during initialization
-        self.pars.reset()
+        # ipdb.set_trace()
+        trunc_pars.reset()
 
         if trunc_type == 'in-place':
             self.__init__(
                 trunc_data,
-                pars=self.pars,
+                pars=trunc_pars,
                 weights=trunc_weights,
                 masks=trunc_masks,
             )
         elif trunc_type == 'return-args':
             args = [trunc_data]
             kwargs = {
-                'pars': self.pars,
+                'pars': trunc_pars,
                 'weights': trunc_weights,
                 'masks': trunc_masks
             }

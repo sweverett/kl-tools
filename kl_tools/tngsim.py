@@ -49,13 +49,14 @@ class TNGsimulation():
         pass
 
 
-    def set_subhalo(self, subhaloid, redshift=0.1, simname = 'TNG50-1'):
+    def set_subhalo(self, subhaloid, redshift=0.1, simname = 'TNG100-1'):
         # Set the _subhalo attribute by querying the TNG catalogs.
         # Then, pull the corresponding particle data.
+        self.redshift = redshift
         rbase = get(baseURL)
-        use_sim = simname
+        self._sim_name = simname
         names = [sim['name'] for sim in rbase['simulations']]
-        i = names.index(use_sim)
+        i = names.index(simname)
         sim = get( rbase['simulations'][i]['url'] )
         snaps = get( sim['snapshots'] )
         snap_redshifts = np.array([snap['redshift'] for snap in snaps])
@@ -117,8 +118,8 @@ class TNGsimulation():
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
         if cachefile == None:
-            sub = self._subhalo# get( subs['results'][subhaloid]['url'] )        
-            url = f"http://www.tng-project.org/api/{use_sim}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
+            sub = self._subhalo# get( subs['results'][subhaloid]['url'] )
+            url = f"http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
             r = requests.get(url,headers=headers)
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
@@ -135,7 +136,17 @@ class TNGsimulation():
         self._line_flux = self._gas_line_flux(h)
 
         
-    def _generateSpectra(self,line_center = 6563*u.Angstrom, resolution = 5000):
+    def _generateCube(self, some_parameters:cubepars instance):
+
+
+        # unpacking parmeters step
+        # needed parameters:
+        #   - pixel scale [arcsec/pixel, scalar]
+        #   - vector of wavelength spaxel centers [angstroms]
+        #   - spectral resolution [ scalar float, lambda/delta_lambda]
+        #   - redshift (default to _requested_ subhalo redshift) [scalar float]
+        #   - dimensions of the datacube [nlam, nx, ny]
+        
 
         # What are the dimensions of the datacube?
 
@@ -178,17 +189,21 @@ class TNGsimulation():
         
         
     
-    @classmethod
     def from_slit(self):
         pass
 
-    @classmethod
     def to_slit(self):
         pass
 
+    def to_cube(self, parameters):
+        pass
+
+    def from_cube(self, DataCube):
+        pass
     
 
 
 if __name__ == '__main__':
-    sim = TNGsimulation(5)
+    sim = TNGsimulation()
+    sim.set_subhalo(0)
     ipdb.set_trace()

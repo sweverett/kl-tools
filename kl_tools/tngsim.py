@@ -287,7 +287,9 @@ class TNGsimulation(object):
         # generate cube data given passed pars & emission lines
         data = self._generateCube(pars)
 
-        return datacube
+        new_cube = DataCube(data, pars=pars)
+
+        return new_cube
 
 if __name__ == '__main__':
     sim = TNGsimulation()

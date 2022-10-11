@@ -63,11 +63,7 @@ class CubePars(parameters.MetaPars):
         '''
 
         # sometimes it is already set in the parameter dict
-        if 'bandpasses' in self.pars:
-            self._bandpasses = self.pars['bandpasses']
-            return self._bandpasses
-
-        if (self._bandpasses is not None) and (remake is False):
+        if (remake is False) & (self._bandpasses is not None):
             return self._bandpasses
 
         bp = self.pars['bandpasses']
@@ -79,18 +75,21 @@ class CubePars(parameters.MetaPars):
                                 'galsim.Bandpass objects!')
             bandpasses = bp
         else:
+            # make this a separate dict
+            bp_dict = deepcopy(bp)
+
             # already checked it is a list or dict
-            bandpass_req = ['lambda_blue, lambda_red, dlambda']
+            bandpass_req = ['lambda_blue', 'lambda_red', 'dlambda']
             bandpass_opt = ['throughput', 'zp', 'unit']
-            utils.check_fields(bp, bandpass_req, bandpass_opt)
+            utils.check_fields(bp_dict, bandpass_req, bandpass_opt)
 
             args = [
-                pars['bandpass'].pop('lambda_blue'),
-                pars['bandpass'].pop('lambda_red'),
-                pars['bandpass'].pop('dlambda')
+                bp_dict.pop('lambda_blue'),
+                bp_dict.pop('lambda_red'),
+                bp_dict.pop('dlambda')
                 ]
 
-            kwargs = pars['bandpass']
+            kwargs = bp_dict
 
             bandpasses = setup_simple_bandpasses(*args, **kwargs)
 
@@ -655,6 +654,7 @@ class DataCube(DataVector):
         self.pars['bandpasses'] = [self.bandpasses[i]
                                    for i in range(self.Nspec)
                                    if cut[i] == True]
+        self.pars._bandpasses = None # Force CubePars to remake bandpass list
 
         if trunc_type == 'in-place':
             self.__init__(
@@ -901,6 +901,16 @@ def main(args):
     print('Building DataCube object from array')
     cube = DataCube(data=data, pars=pars)
 
+    print('Build a bandpass list from a dict')
+    dict_pars = {'pix_scale': 1}
+    dict_pars['bandpasses'] = {
+        'lambda_blue': li,
+        'lambda_red': le,
+        'dlambda': dl,
+        'zp': 25.0
+    }
+    cube = DataCube(data=data, pars=dict_pars)
+
     print('Building DataCube with constant weight & mask')
     weights = 1. / 3
     masks = 0
@@ -928,6 +938,7 @@ def main(args):
     lambda_range = le - li
     blue_cut = li + 0.25*lambda_range + 0.5
     red_cut  = li + 0.75*lambda_range - 0.5
+    ipdb.set_trace()
     test_cube.truncate(blue_cut, red_cut, cut_type='center')
     nslices_cen = len(test_cube.slices)
     print(f'----Truncation resulted in {nslices_cen} slices')

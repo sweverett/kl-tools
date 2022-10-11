@@ -221,7 +221,7 @@ class InclinedExponential(IntensityMap):
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
 
-        return self.image
+        return
 
     def plot_fit(self, datacube, show=True, close=True, outfile=None,
                  size=(9,9), vmin=None, vmax=None):

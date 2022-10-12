@@ -200,7 +200,8 @@ class MuseDataCube(cube.DataCube):
 
         return
 
-    def set_continuum(self,lmin_line, lmax_line, lmin_cont, lmax_cont, method='sum'):
+    def set_continuum(self,lmin_line, lmax_line, lmin_cont, lmax_cont, 
+                      method='sum'):
         '''
         Build a 2d template for the continuum from the spectrum near the line.
         '''
@@ -210,7 +211,9 @@ class MuseDataCube(cube.DataCube):
         lred = lmin_line
         args, kwargs = self.truncate(lblue, lred, trunc_type='return-args')
         blue_cont_cube = cube.DataCube(*args,**kwargs)
-        blue_cont_template = np.sum(blue_cont_cube.data * blue_cont_cube.weights, axis=0) / np.sum(blue_cont_cube.weights, axis=0)
+        blue_cont_template = np.sum(
+            blue_cont_cube.data * blue_cont_cube.weights, axis=0
+            ) / np.sum(blue_cont_cube.weights, axis=0)
 
         lblue = lmax_line
         lred = lmax_cont

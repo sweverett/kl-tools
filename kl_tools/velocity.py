@@ -12,7 +12,7 @@ import transformation as transform
 from parameters import SampledPars
 import numba_transformation as numba_transform
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 
@@ -43,7 +43,7 @@ class VelocityModel(object):
         self._check_model_pars()
 
         # Needed if using numba for transformations
-        # can set uring MCMC w/ self.build_pars_array()
+        # can set during MCMC w/ self.build_pars_array()
         self.pars_array = None
 
         # some models can include an offset, which adds a
@@ -148,7 +148,10 @@ class VelocityMap(TransformableImage):
     source: View from the lensing source plane, rotated version of gal
             plane with theta = theta_intrinsic
 
-    obs:  Observed image plane. Sheared version of source plane
+    cen: View from the object-centered observed plane. Sheared version of
+         source plane
+
+    obs:  Observed image plane. Offset version of cen plane
     '''
 
     def __init__(self, model_name, model_pars):
@@ -253,7 +256,7 @@ class VelocityMap(TransformableImage):
                 )
         else:
             # skip the centroid offset translation layer
-            obs_vmap = super(VelocityMap, cls)._eval_in_source_plane(
+            obs_vmap = super(VelocityMap, cls)._eval_in_cen_plane(
                 pars, x, y, **kwargs
                 )
 

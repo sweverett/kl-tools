@@ -64,6 +64,10 @@ def main(args, pool):
         )
     utils.make_dir(outdir)
 
+    # for exp gal fits
+    true_flux = 1.8e4
+    true_hlr = 3.5
+
     true_pars = {
         'g1': 0.025,
         'g2': -0.0125,
@@ -72,12 +76,14 @@ def main(args, pool):
         'theta_int': np.pi / 6,
         # 'theta_int': 0.,
         'sini': 0.7,
-        'v0': 5,
+        'v0': 2,
         'vcirc': 200,
-        'rscale': 3,
-        # 'beta': np.NaN
-        # 'flux': 1.8e4,
-        # 'hlr': 3.5,
+        'rscale': 5,
+        # 'beta': np.NaN,
+        # 'flux': true_flux,
+        # 'hlr': true_hlr,
+        # 'x0': 0.5,
+        # 'y0': -1,
     }
 
     mcmc_pars = {
@@ -86,47 +92,52 @@ def main(args, pool):
             'r_unit': Unit('kpc'),
         },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
+            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
-            'sini': priors.UniformPrior(0., 1.),
-            'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
+            'sini': priors.UniformPrior(0.6, 0.8),
+            # 'v0': priors.UniformPrior(0, 20),
+            'v0': priors.GaussPrior(0, 5),
+            'vcirc': priors.GaussPrior(200, 5, clip_sigmas=3),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 10),
+            # 'x0': priors.UniformPrior(-3, 3),
+            # 'y0': priors.UniformPrior(-3, 3),
             # 'beta': priors.UniformPrior(0, 0.5),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 3.8e4, # counts
-            'hlr': 3.5,
+            # 'type': 'inclined_exp',
+            # 'flux': true_flux, # counts
+            # 'hlr': true_hlr, # counts
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
-            # 'type': 'basis',
+            'type': 'basis',
             # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
+            'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
-            # 'basis_kwargs': {
-            #     'Nmax': 7,
-            #     # 'plane': 'disk',
-            #     'plane': 'obs',
-            #     # 'beta': 0.35,
-            #     'beta': 'sampled',
-            #     # 'index': 1,
-            #     # 'b': 1,
-            #     }
+            'basis_kwargs': {
+                # 'Nmax': 12, revert to this
+                'Nmax': 12,
+                # 'plane': 'disk',
+                'plane': 'obs',
+                'beta': 0.37, # n12-exp_shapelet
+                # 'beta': 1.45, # n20-sersiclet
+                # 'beta': 'sampled',
+                'index': 1,
+                'b': 1,
+                }
         },
         'velocity': {
+            # 'model': 'offset'
             'model': 'centered'
         },
         # 'marginalize_intensity': True,
-        # 'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }
@@ -138,8 +149,8 @@ def main(args, pool):
         'Ny': 40, # pixels
         'pix_scale': 0.5, # arcsec / pixel
         # intensity meta pars
-        'true_flux': mcmc_pars['intensity']['flux'],
-        'true_hlr': mcmc_pars['intensity']['hlr'], # pixels
+        'true_flux': true_flux, # counts
+        'true_hlr': true_hlr, # pixels
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
         'v_unit': mcmc_pars['units']['v_unit'],
@@ -149,8 +160,9 @@ def main(args, pool):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        'sky_sigma': 0.5, # pixel counts for mock data vector
-        # 'psf': mcmc_pars['psf']
+        's2n': 10000,
+        # 'sky_sigma': 0.01, # pixel counts for mock data vector
+        #'psf': gs.Gaussian(fwhm=1, flux=1.)
     }
 
     print('Setting up test datacube and true Halpha image')
@@ -159,6 +171,7 @@ def main(args, pool):
         )
     Nspec, Nx, Ny = datacube.shape
     lambdas = datacube.lambdas
+    #datacube.set_psf(datacube_pars['psf'])
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')

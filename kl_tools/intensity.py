@@ -428,8 +428,8 @@ def build_intensity_map(name, datavector, kwargs):
     '''
     name: str
         Name of intensity map type
-    datavector: DataCube
-        The datacube whose stacked image the intensity map
+    datavector: any class that subclass from DataVector
+        The datavector whose stacked image the intensity map
         will represent
     kwargs: dict
         Keyword args to pass to intensity constructor

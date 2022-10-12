@@ -261,7 +261,7 @@ class LogLikelihood(LogBase):
         # unpack sampled params
         theta_pars = self.theta2pars(theta)
 
-        # setup model corresponding to cube.DataCube type
+        # setup model corresponding to datavector type
         model = self._setup_model(theta_pars, datavector)
 
         # if we are computing the marginalized posterior over intensity
@@ -310,7 +310,7 @@ class LogLikelihood(LogBase):
         See setup_vmap()
         '''
 
-        vmodel = theta_pars
+        vmodel = theta_pars.copy()
 
         for name in ['r_unit', 'v_unit']:
             if name in meta_pars['units']:
@@ -588,25 +588,16 @@ class DataCubeLikelihood(LogLikelihood):
 
         sed_array = self._setup_sed(theta_pars, datacube)
 
-        if 'psf' in self.meta:
-            psf = self.meta['psf']
-        else:
-            psf = None
+        psf = datacube.get_psf()
+
+        # get kinematic redshift correct per imap image pixel
+        zfactor = 1. / (1 + v_array)
 
         for i in range(Nspec):
-            zfactor = 1. / (1 + v_array)
-
-            obs_array = self._compute_slice_model(
+            data[i,:,:] = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array, cont_array,
                 psf=psf, pix_scale=datacube.pix_scale
             )
-
-            # NB: here you could do something fancier, such as a
-            # wavelength-dependent PSF
-            # obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
-            # obs_im = ...
-
-            data[i,:,:] = obs_array
 
         model_datacube = DataCube(
             data=data, pars=datacube.pars
@@ -661,15 +652,13 @@ class DataCubeLikelihood(LogLikelihood):
 
         # TODO: could generalize in future, but for now assume
         #       a constant PSF for exposures
-        if (psf is not None) and (np.sum(model) > 0):
-            # This fails if the model has no flux, which
-            # can happen for very wrong redshift samples
+        if psf is not None:
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
             gal = gs.InterpolatedImage(model_im)
-            gal = gs.Convolve([gal, psf])
-            model = gal.drawImage(
-                nx=ny, ny=nx, method='no_pixel'
+            conv = gs.Convolve([psf, gal])
+            model = conv.drawImage(
+                nx=ny, ny=nx, method='no_pixel', scale=pix_scale
                 ).array
 
         # for now, continuum is modeled as lambda-independent
@@ -1126,7 +1115,7 @@ class GrismLikelihood_test(LogLikelihood):
         dc_array, sed = self._construct_model_datacube(theta_pars, 
             v_array, i_array, gal)
         return dc_array, gal, sed
-        
+
     def setup_imap(self, theta_pars):
         '''
         theta_pars: dict
@@ -1391,7 +1380,11 @@ def main(args):
         1., 'A', blue_limit=1e4, red_limit=2e4)
                   for i in range(100)
                   ]
-    datacube = DataCube(data, pix_scale=pix_scale, bandpasses=bandpasses)
+    datacube = DataCube(
+        data, pix_scale=pix_scale, bandpasses=bandpasses
+        )
+
+    datacube.set_psf(gs.Gaussian(fwhm=0.8, flux=1.))
 
     sampled_pars = list(true_pars)
     pars = Pars(sampled_pars, mcmc_pars)

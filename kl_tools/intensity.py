@@ -173,7 +173,7 @@ class InclinedExponential(IntensityMap):
 
         self.flux = flux
         self.hlr = hlr
-        self.pix_scale = scale if scale is not None else atavector.pix_scale
+        self.pix_scale = scale if scale is not None else datavector.pix_scale
 
         # same as default, but to make it explicit
         self.is_static = False
@@ -229,7 +229,7 @@ class InclinedExponential(IntensityMap):
             raise e
         self.gal = gal
 
-        self.image = self.gal.drawImage(
+        self.image = gal.drawImage(
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
         if pars.get('run_options', {}).get('imap_return_gal', False):
@@ -309,6 +309,16 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # TODO: would be nice to generalize for chromatic
+        # PSFs in the future!
+        if 'psf' in basis_kwargs:
+            # always default an explicitly passed psf
+            self.psf = basis_kwargs['psf']
+        else:
+            # should return None if no PSF is stored
+            # in datacube pars
+            self.psf = datacube.get_psf()
+
         # One way to handle the emission line continuum is to build
         # a template function from the datacube
         try:
@@ -358,6 +368,7 @@ class BasisIntensityMap(IntensityMap):
         self.fitter = IntensityMapFitter(
             basis_type, nx, ny,
             continuum_template=self.continuum_template,
+            psf=self.psf,
             basis_kwargs=basis_kwargs
             )
 
@@ -372,6 +383,8 @@ class BasisIntensityMap(IntensityMap):
                     remove_continuum = False
                 else:
                     remove_continuum = True
+            else:
+                remove_continuum = False
 
         except KeyError:
             remove_continuum = False
@@ -438,7 +451,7 @@ class IntensityMapFitter(object):
     by some set of basis functions {phi_i}.
     '''
     def __init__(self, basis_type, nx, ny, continuum_template=None,
-                 basis_kwargs=None):
+                 psf=None, basis_kwargs=None):
         '''
         basis_type: str
             The name of the basis_type type used
@@ -448,6 +461,9 @@ class IntensityMapFitter(object):
             The number of pixels in the y-ayis
         continuum_template: numpy.ndarray
             A template array for the object continuum
+        psf: galsim.GSObject
+            A galsim object representing a PSF to convolve the
+            basis functions by
         basis_kwargs: dict
             Keyword args needed to build given basis type
         '''
@@ -463,6 +479,7 @@ class IntensityMapFitter(object):
         self.ny = ny
 
         self.continuum_template = continuum_template
+        self.psf = psf
 
         self.grid = utils.build_map_grid(nx, ny)
 
@@ -537,9 +554,7 @@ class IntensityMapFitter(object):
             self.design_mat = np.zeros((Ndata, Nbasis))
 
         for n in range(self.basis.N):
-            func, func_args = self.basis.get_basis_func(n)
-            args = [x, y, *func_args]
-            self.design_mat[:,n] = func(*args)
+            self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -684,7 +699,6 @@ class IntensityMapFitter(object):
         # Initialize pseudo-inverse given the transformation parameters
         self._initialize_pseudo_inv(theta_pars)
 
-        # We will fit to the sum of all slices
         data = datacube.stack().reshape(nx*ny)
 
         # Find MLE basis coefficients
@@ -804,6 +818,31 @@ class TransformedIntensityMapFitter(object):
         self.transform_pars = transform_pars
 
         return
+
+def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
+                 bmin=0.001, bmax=5):
+    '''
+    TODO: Finish!
+    Scan over beta values for the best fit to the
+    stacked datacube image
+    datacube: DataCube
+        The datacube to find the preferred beta scale for
+    basis_type: str
+        The type of basis to use for fitting for beta
+    betas: list, np.array
+        A list or array of beta values to use in finding
+        optimal value. Will create one if not passed
+    returns: float
+        The value of beta that minimizes the imap chi2
+    '''
+
+    if betas is None:
+        betas = np.linspace(bmin, bmax, Nbetas)
+
+    for beta in betas:
+        pass
+
+    return
 
 def main(args):
     '''

@@ -16,7 +16,7 @@ from argparse import ArgumentParser
 import utils
 import parameters
 
-import pudb
+import ipdb
 
 parser = ArgumentParser()
 
@@ -32,7 +32,7 @@ class CubePars(parameters.MetaPars):
     '''
 
     _req_fields = ['pix_scale', 'bandpasses']
-    _opt_fields = ['psf', 'emission_lines', 'files']
+    _opt_fields = ['psf', 'emission_lines', 'files', 'meta']
 
     def __init__(self, pars):
         '''

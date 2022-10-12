@@ -22,6 +22,7 @@ class ForkedPdb(pdb.Pdb):
 class MidpointNormalize(colors.Normalize):
     '''
     Normalise the colorbar so that diverging bars work there way either side from a prescribed midpoint value)
+
     e.g. im=ax1.imshow(array, norm=MidpointNormalize(midpoint=0.,vmin=-100, vmax=100))
     '''
 

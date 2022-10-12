@@ -275,6 +275,7 @@ class MCMCRunner(object):
                     sys.exit(0)
 
             self.sampler = self._initialize_sampler(pool=pool)
+
             self._run_sampler(start, nsteps=nsteps, progress=progress)
 
         self.has_run = True

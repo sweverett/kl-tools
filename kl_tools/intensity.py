@@ -94,7 +94,7 @@ class IntensityMap(object):
         if im_type == 'emission':
             return self.image if not _RG_ else self.image, self.gal
         elif im_type == 'continuum':
-            return self.continuum if not _RG_ else self.contimuum, self.gal
+            return self.continuum if not _RG_ else self.continuum, self.gal
         elif im_type == 'both':
             return self.image, self.continuum if not _RG_ else self.image, self.continuum, self.gal
         else:
@@ -147,8 +147,8 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux, hlr,
-                 theory_Nx = None, theory_Ny = None, scale = None):
+    def __init__(self, datavector, flux, hlr,
+        theory_Nx = None, theory_Ny = None, scale = None):
 
         '''
         datavector: DataCube
@@ -201,7 +201,7 @@ class InclinedExponential(IntensityMap):
         g1 = pars.get('g1', theta_pars['g1'])
         g2 = pars.get('g2', theta_pars['g2'])
         theta_int = pars.get('theta_int', theta_pars['theta_int'])
-
+        
         inc = Angle(np.arcsin(sini), radians)
 
         gal = gs.InclinedExponential(

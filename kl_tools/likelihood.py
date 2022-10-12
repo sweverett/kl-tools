@@ -1367,7 +1367,6 @@ def main(args):
         'velocity': {
             'model': 'centered'
         },
-        'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }

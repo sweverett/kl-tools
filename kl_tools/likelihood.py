@@ -652,6 +652,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         # TODO: could generalize in future, but for now assume
         #       a constant PSF for exposures
+        # if (psf is not None) and (np.sum(model) != 0):
         if psf is not None:
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)

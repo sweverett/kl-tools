@@ -266,6 +266,8 @@ class MCMCRunner(object):
                       'degrade perfomance for parallel processing.')
 
         with pool:
+            pt = type(pool)
+            print(f'Pool: {pool}')
 
             if isinstance(pool, schwimmbad.MPIPool):
                 if not pool.is_master():
@@ -273,7 +275,6 @@ class MCMCRunner(object):
                     sys.exit(0)
 
             self.sampler = self._initialize_sampler(pool=pool)
-            #print(f'Run sampler now {pool.is_master()}')
             self._run_sampler(start, nsteps=nsteps, progress=progress)
 
         self.has_run = True
@@ -295,11 +296,7 @@ class MCMCRunner(object):
         if nsteps is None:
             raise Exception('nsteps should be set except for a few ' +\
                             'specific samplers!')
-        #print(f'Run _run_sampler now')
-        #print(f'start = {start}')
-        #print(f'nsteps = {nsteps}')
-        #(p, loglike, state) = self.sampler.sample(start, iterations=1)
-        #print(p, loglike, state)
+
         self.sampler.run_mcmc(
             start, nsteps, progress=progress
             )
@@ -411,7 +408,7 @@ class MCMCRunner(object):
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
-                    show=True, close=True, outfile=None, size=(16,16),
+                    show=True, close=True, outfile=None, size=(20,20),
                     show_titles=True, title=None, use_derived=True,
                     title_fmt='.3f'):
         '''
@@ -439,7 +436,6 @@ class MCMCRunner(object):
             else:
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
-
 
         chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
 
@@ -677,16 +673,13 @@ class KLensZeusRunner(ZeusRunner):
         Nspec = datacube.Nspec
 
         # grab psf if present
-        try:
-            psf = self.pars.meta['psf']
-        except KeyError:
-            psf = None
+        psf = datacube.get_psf()
 
         fig, axs = plt.subplots(4, Nspec, sharex=True, sharey=True,)
         for i in range(Nspec):
             # first, data
             ax = axs[0,i]
-            data = datacube.slices[i]._data
+            data = datacube.data[i]
             im = ax.imshow(data, origin='lower')
             if i == 0:
                 ax.set_ylabel('Data')

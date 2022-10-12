@@ -97,7 +97,7 @@ class SED(object):
     '''
     Not currently being used, but we could
     '''
-    def __init__(self, start, end, resolution, unit):
+    def __init__(self, lblue, lred, resolution, unit):
 
         args = {
             'lblue': lblue,

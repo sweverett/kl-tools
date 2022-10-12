@@ -686,6 +686,7 @@ class DataCubeLikelihood(LogLikelihood):
 class GrismLikelihood(LogLikelihood):
     '''
     An implementation of a LogLikelihood for a Grism KL measurement
+
     Note: a reminder of LogLikelihood interface
     method:
         - __init__(Pars:parameters, DataVector:datavector)
@@ -698,6 +699,7 @@ class GrismLikelihood(LogLikelihood):
         - _interp1d(np.ndarray:table, np.ndarray:values, kind='linear')
         o _log_likelihood(list:theta, DataVector:datavector, DataCube:model)
         o _setup_model(list:theta_pars, DataVector:datavector) 
+
     attributes:
         From LogBase
         - self.parameters: parameters.Pars
@@ -707,6 +709,7 @@ class GrismLikelihood(LogLikelihood):
     '''
     def __init__(self, parameters, datavector):
         ''' Initialization
+
         Besides the usual likelihood.LogLikelihood initialization, we further
         initialize the grism.GrismModelCube object, fsor the sake of speed
         '''
@@ -732,6 +735,7 @@ class GrismLikelihood(LogLikelihood):
         Do setup and type / sanity checking here
         before calling the abstract method _loglikelihood,
         which will have a different implementation for each class
+
         theta: list
             Sampled parameters. Order defined in self.pars_order
         datavector: DataCube, etc.
@@ -797,6 +801,7 @@ class GrismLikelihood(LogLikelihood):
     def _setup_model(self, theta_pars, datavector):
         '''
         Setup the model datacube given the input theta_pars and datavector
+
         theta_pars: dict
             Dictionary of sampled pars
         datavector: DataVector
@@ -833,7 +838,7 @@ class GrismLikelihood(LogLikelihood):
         i_array, gal = imap.render(theta_pars, datavector, _pars)
         self.i_array = i_array
         self._construct_model_datacube(theta_pars, v_array, i_array, gal)
-
+        
     def setup_imap(self, theta_pars, datavector):
         '''
         theta_pars: dict
@@ -870,6 +875,7 @@ class GrismLikelihood(LogLikelihood):
         '''
         Create the model datacube from model slices, using the evaluated
         velocity and intensity maps, SED, etc.
+
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
@@ -1287,7 +1293,7 @@ LIKELIHOOD_TYPES = {
     'default': DataCubeLikelihood,
     'datacube': DataCubeLikelihood,
     'grism': GrismLikelihood,
-    'grism': GrismLikelihood_test
+    'grism_test': GrismLikelihood_test
     }
 
 def build_likelihood_model(name, parameters, datavector):

@@ -940,6 +940,7 @@ class GrismLikelihood(LogLikelihood):
 class GrismLikelihood_test(LogLikelihood):
     '''
     An implementation of a LogLikelihood for a Grism KL measurement
+
     Note: light-weight version
     method:
         - __init__(Pars:parameters, DataVector:datavector)
@@ -952,6 +953,7 @@ class GrismLikelihood_test(LogLikelihood):
         - _interp1d(np.ndarray:table, np.ndarray:values, kind='linear')
         o _log_likelihood(list:theta, DataVector:datavector, DataCube:model)
         o _setup_model(list:theta_pars, DataVector:datavector) 
+
     attributes:
         From LogBase
         - self.parameters: parameters.Pars
@@ -961,6 +963,7 @@ class GrismLikelihood_test(LogLikelihood):
     '''
     def __init__(self, parameters, datavector):
         ''' Initialization
+
         Besides the usual likelihood.LogLikelihood initialization, we further
         initialize the grism.GrismModelCube object, fsor the sake of speed
         '''
@@ -1019,6 +1022,7 @@ class GrismLikelihood_test(LogLikelihood):
         Do setup and type / sanity checking here
         before calling the abstract method _loglikelihood,
         which will have a different implementation for each class
+
         theta: list
             Sampled parameters. Order defined in self.pars_order
         datavector: DataCube, etc.
@@ -1078,6 +1082,7 @@ class GrismLikelihood_test(LogLikelihood):
     def _setup_model(self, theta_pars):
         '''
         Setup the model datacube given the input theta_pars and datavector
+
         theta_pars: dict
             Dictionary of sampled pars
         '''
@@ -1148,6 +1153,7 @@ class GrismLikelihood_test(LogLikelihood):
         '''
         Create the model datacube from model slices, using the evaluated
         velocity and intensity maps, SED, etc.
+
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
@@ -1185,14 +1191,17 @@ class GrismLikelihood_test(LogLikelihood):
 
     def _build_PSF_model(self, config, **kwargs):
         ''' Generate PSF model
+
         Inputs:
         =======
         kwargs: keyword arguments for building psf model
             - lam: wavelength in nm
             - scale: pixel scale
+
         Outputs:
         ========
         psf_model: GalSim PSF object
+
         '''
         _type = config.get('psf_type', 'none').lower()
         if _type != 'none':
@@ -1218,6 +1227,7 @@ class GrismLikelihood_test(LogLikelihood):
             return None
     def _getNoise(self, config):
         ''' Generate image noise based on parameter settings
+
         Outputs:
         ========
         noise: GalSim Noise object

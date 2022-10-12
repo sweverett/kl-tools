@@ -825,6 +825,7 @@ def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
     TODO: Finish!
     Scan over beta values for the best fit to the
     stacked datacube image
+
     datacube: DataCube
         The datacube to find the preferred beta scale for
     basis_type: str
@@ -832,6 +833,7 @@ def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
     betas: list, np.array
         A list or array of beta values to use in finding
         optimal value. Will create one if not passed
+
     returns: float
         The value of beta that minimizes the imap chi2
     '''

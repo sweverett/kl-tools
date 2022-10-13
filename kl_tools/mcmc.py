@@ -13,6 +13,7 @@ from corner import corner
 import zeus
 import emcee
 import pocomc as pc
+import ultranest
 
 import utils
 import priors
@@ -862,6 +863,107 @@ class KLensPocoRunner(PocoRunner):
 
         return
 
+class UltranestRunner(MCMCRunner):
+
+    def _initialize_sampler(self, pool=None):
+        sampler = ultranest.ReactiveNestedSampler(
+            self.pars.sampled.names,
+            self.loglike,
+            transform=self.logprior,
+            )
+
+        return sampler
+
+    @property
+    def args(self):
+        return self.loglike_args
+
+    @property
+    def kwargs(self):
+        return self.loglike_kwargs
+
+    @property
+    def pfunc(self):
+        return self.loglike
+
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+
+class KLensUltranestRunner(UltranestRunner):
+    '''
+    See https://pocomc.readthedocs.io/en/latest/
+    '''
+
+    def __init__(self, nwalkers, ndims, loglike, logprior,
+                 datacube, pars,
+                 loglike_args=None, loglike_kwargs=None,
+                 logprior_args=None, logprior_kwargs=None):
+        '''
+        loglike: function / callable
+            Log likelihood function to sample from
+        logprior: function / callable
+            Log prior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
+              covariance matrix, SED definition, etc.
+        loglike_args: list
+            List of additional args needed to evaluate log likelihood,
+            such as the data vector, covariance matrix, etc.
+        loglike_kwargs: dict
+            List of additional kwargs needed to evaluate log likelihood,
+            such as meta parameters, etc.
+        logprior_args: list
+            List of additional args needed to evaluate log prior,
+            such as the data vector, covariance matrix, etc.
+        logprior_kwargs: dict
+            List of additional kwargs needed to evaluate log prior,
+            such as meta parameters, etc.
+
+        NOTE: to make this consistent w/ the other mcmc runner classes,
+        you must pass datacube & pars separately from the rest of the
+        args/kwargs!
+        '''
+
+        if loglike_args is not None:
+            loglike_args = [datacube] + loglike_args
+        else:
+            loglike_args = [datacube]
+
+        super(KLensUltranestRunner, self).__init__(
+            nwalkers, ndims,
+            loglike=loglike, logprior=logprior,
+            loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
+            logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+            )
+
+        self.datacube = datacube
+        self.pars = pars
+
+        self.pars_order = self.pars.sampled.pars_order
+
+        self.MAP_vmap = None
+
+        #...
+
+        return
+
+    def _run_sampler(self, start, nsteps=None, progress=True):
+        '''
+        The ultranest-specific way to run the sampler object
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        self.sampler.run(
+            # start, progress=progress
+            )
+
+        return
+
 def get_runner_types():
     return RUNNER_TYPES
 
@@ -871,6 +973,7 @@ RUNNER_TYPES = {
     'emcee': KLensEmceeRunner,
     'zeus': KLensZeusRunner,
     'poco': KLensPocoRunner,
+    'ultranest': KLensUltranestRunner,
     }
 
 def build_mcmc_runner(name, args, kwargs):

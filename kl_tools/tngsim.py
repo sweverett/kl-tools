@@ -135,6 +135,8 @@ class TNGsimulation(object):
         self._particleData = h
         self._particleTemp = self._calculate_gas_temperature(h)
         self._starFlux = self._star_particle_flux(h)
+        #mags = h['PartType4']['GFM_StellarPhotometrics'][:]
+        #starflux = 10**(-mags[:,4]/2.5)
         self._line_flux = self._gas_line_flux(h)
 
         
@@ -174,8 +176,8 @@ class TNGsimulation(object):
         else:
             psf = None
         print("choosing  indices.")
-        #inds = np.sort(np.random.choice(np.arange(self._particleData['PartType0']['Coordinates'][:,0].size),size=1000000,replace=False))
         inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e-5) & (np.isfinite(self._line_flux.value))]
+        #inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e3) & (np.isfinite(self._line_flux.value))]      
         # What is the position of the sources relative to the field center?
         print("reading particle data.")
         dx = rescale * (self._particleData['PartType0']['Coordinates'][:,0] - np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/self.cosmo.h
@@ -347,9 +349,9 @@ if __name__ == '__main__':
     vel = (lam_vel/lam_cen-1.) * 300000.
 
     fig,(ax1,ax2) = plt.subplots(ncols=2,figsize=(14,7))
-    ax1.imshow(np.log10(np.sum(musemock.data,axis=0)))
-    cax1 = ax1.set_title("log stellar density")
-    cax = ax2.imshow(vel,cmap=plt.cm.seismic)
+    ax1.imshow(np.log10(np.sum(musemock.data,axis=0)),origin='lower')
+    cax1 = ax1.set_title("log summed intensity")
+    cax = ax2.imshow(vel,cmap=plt.cm.seismic,vmin=-1000,vmax=1000,origin='lower')
     ax2.set_title("line-of-sight velocity")
     fig.colorbar(cax,ax=ax2,fraction=0.046,pad=0.04)
     plt.show()

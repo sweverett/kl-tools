@@ -127,7 +127,6 @@ class TNGsimulation(object):
             r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all'})
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
-            ipdb.set_trace()
             with open(cachepath, 'wb') as ff:
                 ff.write(r.content)
         else:

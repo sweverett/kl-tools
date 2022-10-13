@@ -137,7 +137,7 @@ class MuseDataCube(cube.DataCube):
         Nlines = len(self.lines)
 
         # z = float(self.pars['z'])
-        z = self.obj_data['Z']
+        z = self.obj_data['Z'].value[0]
         # R = self.pars['specs']['resolution']
         R = specs['resolution']
         lines = []

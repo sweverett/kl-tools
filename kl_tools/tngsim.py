@@ -123,9 +123,11 @@ class TNGsimulation(object):
         if not cachepath.exists():
             url = f"http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
             hdr = gethdr()
-            r = requests.get(url,headers=hdr)
+
+            r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all'})
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
+            ipdb.set_trace()
             with open(cachepath, 'wb') as ff:
                 ff.write(r.content)
         else:
@@ -140,7 +142,7 @@ class TNGsimulation(object):
         self._line_flux = self._gas_line_flux(h)
 
         
-    def _generateCube(self, pars, rescale = .6,center=True):
+    def _generateCube(self, pars, rescale = .3,center=True):
         '''
         pars: cube.CubePars
             A CubePars instance that holds all relevant metadata about the
@@ -322,7 +324,7 @@ class TNGsimulation(object):
 
 if __name__ == '__main__':
     sim = TNGsimulation()
-    sim.set_subhalo(1)
+    sim.set_subhalo(3)
 
 
     # Make a mock of a MUSE data cube.

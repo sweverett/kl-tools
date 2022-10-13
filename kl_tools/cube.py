@@ -168,34 +168,6 @@ class CubePars(parameters.MetaPars):
 
         return
 
-    def set_data(self, data, weights=None, masks=None):
-        '''
-        This method overwrites the existing datacube slice data, while
-        keeping all existing metadata
-
-        data: np.ndarray
-            The 3-dimensional numpy array to set as the new slice data
-        weights: float, list, np.ndarray
-            Pass if you want to overwrite the weight maps as well
-        masks: float, list, np.ndarray
-            Pass if you want to overwrite the mask maps as well
-
-        see _set_maps() for details for weight & masks
-        '''
-
-        if data.shape != self.shape:
-            raise ValueError('Passed data shape must match existing shape!')
-
-
-        self._data = data
-
-        if weights is not None:
-            self.set_weights(weights)
-        if masks is not None:
-            self.set_masks(masks)
-
-        return
-
     @property
     def bandpasses(self):
         if self._bandpasses is None:
@@ -760,6 +732,34 @@ class DataCube(DataVector):
                 'masks': trunc_masks
             }
             return (args, kwargs)
+
+        return
+
+    def set_data(self, data, weights=None, masks=None):
+        '''
+        This method overwrites the existing datacube slice data, while
+        keeping all existing metadata
+
+        data: np.ndarray
+            The 3-dimensional numpy array to set as the new slice data
+        weights: float, list, np.ndarray
+            Pass if you want to overwrite the weight maps as well
+        masks: float, list, np.ndarray
+            Pass if you want to overwrite the mask maps as well
+
+        see _set_maps() for details for weight & masks
+        '''
+
+        if data.shape != self.shape:
+            raise ValueError('Passed data shape must match existing shape!')
+
+
+        self._data = data
+
+        if weights is not None:
+            self.set_weights(weights)
+        if masks is not None:
+            self.set_masks(masks)
 
         return
 

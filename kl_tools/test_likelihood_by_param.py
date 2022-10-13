@@ -154,7 +154,7 @@ def main(args):
         'sini': 0.7,
         'v0': 5,
         'vcirc': 200,
-        'rscale': 3,
+        'rscale': 5,
         # 'beta': np.NaN,
         # 'flux': true_flux,
         # 'hlr': true_hlr,
@@ -217,7 +217,8 @@ def main(args):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        'sky_sigma': 0.01, # pixel counts for mock data vector
+        # 'sky_sigma': 0.01, # pixel counts for mock data vector
+        's2n': 1000000,
     }
 
     if psf is True:
@@ -303,7 +304,7 @@ def main(args):
         'sini': (0.675, 0.725, .01),
         'v0': (3, 7, .05),
         'vcirc': (190, 210, 1),
-        'rscale': (2, 4, .05),
+        'rscale': (4, 6, .05),
         # 'g1': (-0.2, 0.2, .005),
         # 'g2': (-0.2, 0.2, .005),
         # 'theta_int': (0., np.pi, .05),

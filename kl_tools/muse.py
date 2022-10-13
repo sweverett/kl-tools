@@ -177,7 +177,7 @@ class MuseDataCube(cube.DataCube):
             l = len(weights)
             if l != self.Nspec:
                 raise ValueError(f'The weight array has len {l} ' +\
-                                 f'but {self.Nspec=}!')
+                                 f'but {self.Nspec}=!')
 
         # MUSE wgt maps are actually sky background, so take inverse
         # and handle bad weights

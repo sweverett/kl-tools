@@ -67,7 +67,7 @@ class CubePars(parameters.MetaPars):
         '''
 
         # sometimes it is already set in the parameter dict
-        if 'bandpasses' in self.pars:
+        if ('bandpasses' in self.pars) and isinstance(self.pars['bandpasses'], list):
             self._bandpasses = self.pars['bandpasses']
             return self._bandpasses
 
@@ -83,18 +83,20 @@ class CubePars(parameters.MetaPars):
                                 'galsim.Bandpass objects!')
             bandpasses = bp
         else:
+            bp_dict = deepcopy(bp)
+
             # already checked it is a list or dict
-            bandpass_req = ['lambda_blue, lambda_red, dlambda']
+            bandpass_req = ['lambda_blue', 'lambda_red', 'dlambda']
             bandpass_opt = ['throughput', 'zp', 'unit']
-            utils.check_fields(bp, bandpass_req, bandpass_opt)
+            utils.check_fields(bp_dict, bandpass_req, bandpass_opt)
 
             args = [
-                pars['bandpass'].pop('lambda_blue'),
-                pars['bandpass'].pop('lambda_red'),
-                pars['bandpass'].pop('dlambda')
+                bp_dict.pop('lambda_blue'),
+                bp_dict.pop('lambda_red'),
+                bp_dict.pop('dlambda')
                 ]
 
-            kwargs = pars['bandpass']
+            kwargs = bp_dict
 
             bandpasses = setup_simple_bandpasses(*args, **kwargs)
 

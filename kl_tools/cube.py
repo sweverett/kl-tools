@@ -31,7 +31,7 @@ class CubePars(parameters.MetaPars):
     '''
 
     _req_fields = ['pix_scale', 'bandpasses']
-    _opt_fields = ['psf', 'emission_lines', 'files', 'shape']
+    _opt_fields = ['psf', 'emission_lines', 'files', 'shape','truth']
     _gen_fields = ['wavelengths'] # not an allowed input field, but generated
 
     def __init__(self, pars):

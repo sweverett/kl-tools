@@ -191,11 +191,11 @@ class TNGsimulation(object):
 
         print(f"calculating velocity offsets")
         # Calculate the velocity offset of each particle.
-        deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./1+self.redshift) * u.km/u.s
+        deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./(1+self.redshift)) * u.km/u.s
         deltav = deltav[inds]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
-
+        
         # Loop over the lines.
         line_spectra = np.zeros_like(lambdas)
 
@@ -348,6 +348,8 @@ if __name__ == '__main__':
 
     fig,(ax1,ax2) = plt.subplots(ncols=2,figsize=(14,7))
     ax1.imshow(np.log10(np.sum(musemock.data,axis=0)))
+    cax1 = ax1.set_title("log stellar density")
     cax = ax2.imshow(vel,cmap=plt.cm.seismic)
+    ax2.set_title("line-of-sight velocity")
     fig.colorbar(cax,ax=ax2,fraction=0.046,pad=0.04)
     plt.show()

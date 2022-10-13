@@ -658,7 +658,6 @@ class DataCubeLikelihood(LogLikelihood):
             # can happen for very wrong redshift samples
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
-            ipdb.set_trace()
             gal = gs.InterpolatedImage(model_im)
             conv = gs.Convolve([psf, gal])
             model = conf.drawImage(
@@ -679,8 +678,6 @@ class DataCubeLikelihood(LogLikelihood):
         #       is *post* psf-convolution
         if continuum is not None:
             model += continuum
-
-        ipdb.set_trace()
 
         return model
 

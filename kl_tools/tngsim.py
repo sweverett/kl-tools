@@ -205,8 +205,8 @@ class TNGsimulation(object):
         #    line_spectra = self._line_flux[:,np.newaxis]* iline.sed( lambdas / (1+pars['z']) - dlam[:,np.newaxis] )
         # Now put these on the pixel grid.
         print("calculating position offsets")
-        du = (dx*u.kpc / self.cosmo.angular_diameter_distance(pars['z'].value[0])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
-        dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(pars['z'].value[0])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+        du = (dx*u.kpc / self.cosmo.angular_diameter_distance(pars['emission_lines'][0].line_pars['z'].value[0])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+        dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(pars['emission_lines'][0].line_pars['z'].value[0])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
         # TODO: This is where we should apply a shear.
         # Round each one to the pixel center
         if center:
@@ -231,10 +231,10 @@ class TNGsimulation(object):
             for j in range(shape[2]):
                 these = (du_int == i) & (dv_int == j)
                 for iline in pars['emission_lines']:
-                    line_center = iline.line_pars['value'] * (1 + pars['z'].value[0])
-                    if (line_center > np.min(lambdas/(1+pars['z'].value[0]))) & (line_center < np.max(lambdas/(1+pars['z'].value[0]))):
+                    line_center = iline.line_pars['value'] * (1 + iline.line_pars['z'].value[0])
+                    if (line_center > np.min(lambdas/(1+iline.line_pars['z'].value[0]))) & (line_center < np.max(lambdas/(1+iline.line_pars['z'].value[0]))):
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
-                        line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+pars['z'].value[0]) - dlam[:,np.newaxis] )
+                        line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z'].value[0]) - dlam[:,np.newaxis] )
                 pbar.update(1)
                 simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value,axis=0)
         pbar.close()
@@ -313,8 +313,10 @@ class TNGsimulation(object):
         # generate cube data given passed pars & emission lines
         data = self._generateCube(pars)
 
-        new_cube = DataCube(data, pars=pars)
-        return new_cube
+        # override any existing data in the cube, while keeping all metadata
+        datacube.set_data(data)
+
+        return datacube
 
 if __name__ == '__main__':
     sim = TNGsimulation()

@@ -140,6 +140,14 @@ def get_test_dir():
     base_dir = get_base_dir()
     return os.path.join(base_dir, 'tests')
 
+def set_cache_dir():
+    basedir = get_base_dir()
+    cachedir = basedir+'/.cache'
+    make_dir(cachedir)
+    return cachedir
+    
+
 BASE_DIR = get_base_dir()
 MODULE_DIR = get_module_dir()
 TEST_DIR = get_test_dir()
+CACHE_DIR = set_cache_dir()

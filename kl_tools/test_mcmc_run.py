@@ -33,7 +33,8 @@ parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco'],
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco',
+                                                   'ultranest'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
@@ -113,10 +114,10 @@ def main(args, pool):
         'intensity': {
             # For this test, use truth info
             'type': 'inclined_exp',
-            'flux': true_flux, # counts
-            'hlr': true_hlr, # counts
-            # 'flux': 'sampled', # counts
-            # 'hlr': 'sampled', # pixels
+            # 'flux': true_flux, # counts
+            # 'hlr': true_hlr, # counts
+            'flux': 'sampled', # counts
+            'hlr': 'sampled', # pixels
             # 'type': 'basis',
             # # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
@@ -160,7 +161,7 @@ def main(args, pool):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        's2n': 100000,
+        's2n': 1000000,
         # 'sky_sigma': 0.01, # pixel counts for mock data vector
         #'psf': gs.Gaussian(fwhm=1, flux=1.)
     }
@@ -228,7 +229,10 @@ def main(args, pool):
     pars = Pars(sampled_pars, mcmc_pars)
     pars_order = pars.sampled.pars_order
 
-    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
+    prior_type = likelihood.get_sampler_prior_type(sampler)
+
+    log_posterior = LogPosterior(pars, datacube, likelihood='datacube',
+                                 prior=prior_type)
 
     #-----------------------------------------------------------------
     # Setup sampler
@@ -251,6 +255,17 @@ def main(args, pool):
             datacube,
             pars
             ]
+
+    elif sampler == 'ultranest':
+        nwalkers = 2*ndims
+        args = [
+            nwalkers,
+            ndims,
+            log_posterior.log_likelihood._call_no_args,
+            log_posterior.log_prior,
+            datacube,
+            pars
+        ]
 
     runner = build_mcmc_runner(sampler, args, kwargs)
 
@@ -332,8 +347,8 @@ def main(args, pool):
     plt.ylabel('Log probability')
     plt.legend()
     plt.subplot(132)
-    plt.plot(like, label='likelihood', c='tab:orange')
-    plt.xlabel('Sample')
+    start = int(0.2*len(like)) # get rid of very beginning of burn in
+    plt.plot(like[start:], label='likelihood', c='tab:orange')
     plt.ylabel('Log probability')
     plt.legend()
     plt.subplot(133)

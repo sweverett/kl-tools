@@ -341,9 +341,13 @@ if __name__ == '__main__':
     # Now generate a MUSE-like mock from the datacube.
     musemock = sim.from_cube(museCube)
     lambdas = np.array([np.mean([l[0], l[1]]) for l in museCube.pars['wavelengths']])
-    dlam = np.sum(lambdas[:,np.newaxis,np.newaxis] * musemock.data,axis=0) / np.sum(musemock.data,axis=0)
+    spec1d = np.sum(np.sum(musemock.data,axis=-1),axis=-1)
+    lam_vel = np.sum(lambdas[:,np.newaxis,np.newaxis] * musemock.data,axis=0) / np.sum(musemock.data,axis=0)
+    lam_cen = np.nanmedian(lam_vel)
+    vel = (lam_vel/lam_cen-1.) * 300000.
+
     fig,(ax1,ax2) = plt.subplots(ncols=2,figsize=(14,7))
-    ax1.imshow(np.sum(musemock.data,axis=0))
-    ax2.imshow(dlam)
+    ax1.imshow(np.log10(np.sum(musemock.data,axis=0)))
+    cax = ax2.imshow(vel,cmap=plt.cm.seismic)
+    fig.colorbar(cax,ax=ax2,fraction=0.046,pad=0.04)
     plt.show()
-    ipdb.set_trace()

@@ -191,7 +191,7 @@ class TNGsimulation(object):
 
         print(f"calculating velocity offsets")
         # Calculate the velocity offset of each particle.
-        deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./1+self.redshift) * u.km/u.s
+        deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./(1+self.redshift)) * u.km/u.s
         deltav = deltav[inds]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0

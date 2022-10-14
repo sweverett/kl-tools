@@ -443,6 +443,24 @@ class DataCube(DataVector):
     def data(self):
         return self._data
 
+    @property
+    def z(self, line_indx=0):
+        '''
+        TODO: This is a bit hacky, we may want a better way to store the object
+        redshift & check that it is the same across all indices
+        '''
+
+        if 'emission_lines' in self.pars:
+            Nlines = len(self.pars['emission_lines'])
+            if line_indx >= Nlines:
+                raise ValueError(f'{line_indx} is too large an index for ' +\
+                                 'the emission line list of len {Nlines}')
+
+            return self.pars['emission_lines'][line_indx].line_pars['z']
+
+        else:
+            return None
+
     def slice(self, indx):
         return self.slices[indx]
 

@@ -157,14 +157,15 @@ def get_module_dir():
 
 def get_test_dir():
     base_dir = get_base_dir()
-    return os.path.join(base_dir, 'tests')
+    test_dir = os.path.join(base_dir, 'tests')
+    make_dir(test_dir) # will only create if tdoes not exist
+    return test_dir
 
 def set_cache_dir():
     basedir = get_base_dir()
-    cachedir = basedir+'/.cache'
-    make_dir(cachedir)
-    return cachedir
-    
+    cachedir = os.path.join(basedir, '.cache/')
+    make_dir(cachedir) # will only create if tdoes not exist
+    return
 
 BASE_DIR = get_base_dir()
 MODULE_DIR = get_module_dir()

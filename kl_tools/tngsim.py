@@ -118,9 +118,11 @@ class TNGsimulation(object):
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
         sub  = self._subhalo
-        cachepath = pathlib.Path(f"{utils.CACHE_DIR}/{self._sim_name}_subhalo_{sub['id']}_{self._snapshot['number']}.hdf5")
+        cachepath = pathlib.Path(
+            f'{utils.CACHE_DIR}/{self._sim_name}_subhalo_{sub["id"]}_{self._snapshot["number"]}.hdf5'
+            )
         if not cachepath.exists():
-            url = f"http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub['snap']}/subhalos/{sub['id']}/cutout.hdf5"
+            url = f'http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub["snap"]}/subhalos/{sub["id"]}/cutout.hdf5'
             hdr = gethdr()
 
             r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all'})
@@ -414,7 +416,8 @@ class TNGsimulation(object):
 
         return centers
 
-if __name__ == '__main__':
+def main():
+
     sim = TNGsimulation()
     sim.set_subhalo(2)
 
@@ -451,3 +454,6 @@ if __name__ == '__main__':
     plt.show()
 
     return
+
+if __name__ == '__main__':
+    main()

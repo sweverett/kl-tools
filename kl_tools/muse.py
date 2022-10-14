@@ -176,7 +176,7 @@ class MuseDataCube(cube.DataCube):
             l = len(weights)
             if l != self.Nspec:
                 raise ValueError(f'The weight array has len {l} ' +\
-                                 f'but {self.Nspec}=!')
+                                 f'but {self.Nspec=}!')
 
         # MUSE wgt maps are actually sky background, so take inverse
         # and handle bad weights
@@ -291,7 +291,11 @@ def main(args):
         linefile=emlinePath
         )
 
+    # check that selecting max line s2n works correctly
     muse.set_line()
+
+    # check that redshift acessing works correctly
+    muse.z
 
     outdir = os.path.join(utils.TEST_DIR, 'muse')
     utils.make_dir(outdir)

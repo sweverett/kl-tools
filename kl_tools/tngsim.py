@@ -235,7 +235,6 @@ class TNGsimulation(object):
                 these = (du_int == i) & (dv_int == j)
                 for iline in pars['emission_lines']:
                     line_center = iline.line_pars['value'] * (1 + iline.line_pars['z'])
-                    ipdb.set_trace()
                     if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
                         line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )

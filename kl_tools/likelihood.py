@@ -644,13 +644,29 @@ class DataCubeLikelihood(LogLikelihood):
         #       a constant PSF for exposures
         # if (psf is not None) and (np.sum(model) != 0):
         if psf is not None:
+            # plt.subplot(131)
+            # plt.imshow(model, origin='lower')
+            # plt.colorbar()
+            # plt.title('pre-psf model')
+            # This fails if the model has no flux, which
+            # can happen for very wrong redshift samples
             nx, ny = imap.shape[0], imap.shape[1]
             model_im = gs.Image(model, scale=pix_scale)
             gal = gs.InterpolatedImage(model_im)
             conv = gs.Convolve([psf, gal])
+
             model = conv.drawImage(
                 nx=ny, ny=nx, method='no_pixel', scale=pix_scale
                 ).array
+            # plt.subplot(132)
+            # plt.imshow(pmodel, origin='lower')
+            # plt.colorbar()
+            # plt.title('post-psf model')
+            # plt.subplot(133)
+            # plt.imshow(pmodel-model, origin='lower')
+            # plt.colorbar()
+            # plt.title('post-pre psf model')
+            # plt.show()
 
         # for now, continuum is modeled as lambda-independent
         # TODO: This assumes that the continuum template (if passed)

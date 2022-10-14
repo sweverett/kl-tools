@@ -20,7 +20,8 @@ import zeus
 import utils
 from mcmc import build_mcmc_runner
 import priors
-from muse import MuseDataCube
+import cube
+import mocks
 import likelihood
 from parameters import Pars
 from likelihood import LogPosterior
@@ -32,7 +33,7 @@ parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
@@ -59,61 +60,65 @@ def main(args, pool):
     show = args.show
 
     outdir = os.path.join(
-        utils.TEST_DIR, 'muse-mcmc-run', run_name
+        utils.TEST_DIR, 'test-tng', run_name
         )
     utils.make_dir(outdir)
 
-    sampled_pars = [
-        'g1',
-        'g2',
-        'theta_int',
-        'sini',
-        'v0',
-        'vcirc',
-        'rscale',
-        'x0',
-        'y0',
-        'z',
-        'R'
-        # 'beta'
-        ]
+    # true_pars = {
+    #     'g1': 0.025,
+    #     'g2': -0.0125,
+    #     # 'g1': 0.0,
+    #     # 'g2': 0.0,
+    #     'theta_int': np.pi / 6,
+    #     # 'theta_int': 0.,
+    #     'sini': 0.7,
+    #     'v0': 5,
+    #     'vcirc': 200,
+    #     'rscale': 3,
+    #     # 'beta': np.NaN
+    #     # 'flux': 1.8e4,
+    #     # 'hlr': 3.5,
+    # }
 
-    # additional args needed for prior / likelihood evaluation
+    sampled_pars = ['g1',
+                    'g2',
+                    'theta_int',
+                    'sini',
+                    'v0',
+                    'vcirc',
+                    'rscale',
+                    'x0',
+                    'y0',
+                    'beta'
+                    ]
+
     mcmc_pars = {
         'units': {
-            'v_unit': Unit('km/s'),
-            'r_unit': Unit('kpc')
-            },
+            'v_unit': Unit('km / s'),
+            'r_unit': Unit('kpc'),
+        },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            # 'g1': priors.UniformPrior(-.01, 0.01),
-            # 'g2': priors.UniformPrior(-.01, 0.01),
+            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             # 'theta_int': priors.UniformPrior(0., np.pi),
-            'theta_int': priors.UniformPrior(0., 2.*np.pi),
+            'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
-            'sini': priors.UniformPrior(0, 1.),
+            'sini': priors.UniformPrior(0., 1.),
             'v0': priors.UniformPrior(0, 20),
-            # 'vcirc': priors.GaussPrior(200, 20, zero_boundary='positive'),# clip_sigmas=2),
-            'vcirc': priors.UniformPrior(0, 800),
+            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
-            'rscale': priors.UniformPrior(0, 40),
-            'x0': priors.GaussPrior(0, 2.5),
-            'y0': priors.GaussPrior(0, 2.5),
-            'z': priors.GaussPrior(0.2466, .00001),# clip_sigmas=3),
-            'R': priors.GaussPrior(3200, 20),# clip_sigmas=4),
-            # 'beta': priors.UniformPrior(0, .2),
+            'rscale': priors.UniformPrior(0, 20),
+            'x0': priors.UniformPrior(-20, 20.),
+            'y0': priors.UniformPrior(-20, 20.),
+            'beta': priors.UniformPrior(0, 0.5),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
-            },
-        'velocity': {
-            'model': 'offset'
         },
         'intensity': {
             # For this test, use truth info
             # 'type': 'inclined_exp',
-            # 'flux': 1.8e4, # counts
+            # 'flux': 3.8e4, # counts
             # 'hlr': 3.5,
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
@@ -122,49 +127,45 @@ def main(args, pool):
             'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
             'basis_kwargs': {
-                'use_continuum_template': True,
-                'Nmax': 12,
-            #     # 'plane': 'disk',
+                'Nmax': 7,
+                # 'plane': 'disk',
                 'plane': 'obs',
-                # 'beta': 0.17,
-                'beta': 0.61,
-                # 'beta': 'sampled',
-                'index': 1,
-                'b': 1,
+                # 'beta': 0.35,
+                'beta': 'sampled',
+                # 'index': 1,
+                # 'b': 1,
                 }
-            },
+        },
+        'velocity': {
+            'model': 'offset'
+        },
         # 'marginalize_intensity': True,
-        'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
-        # 'psf': gs.Moffat(fwhm=.8, beta=2.5, flux=1.0), # fwhm in arcsec
+        # 'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
-            'remove_continuum': True,
-            'use_numba': False
+            'use_numba': False,
             }
     }
 
-    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+    with open('../.cache/TNG50-1_subhalo_2_snap67_MUSEcube.pickle', 'rb') as p:
+        datacube = pickle.load(p)
 
-    cubefile = os.path.join(cube_dir, '102021103_objcube.fits')
-    specfile = os.path.join(cube_dir, 'spectrum_102021103.fits')
-    catfile = os.path.join(cube_dir, 'MW_1-24_main_table.fits')
-    linefile = os.path.join(cube_dir, 'MW_1-24_emline_table.fits')
+    # plt.imshow(datacube.stack())
+    # plt.colorbar()
+    # plt.show()
+    # ipdb.set_trace()
 
-    print(f'Setting up MUSE datacube from file {cubefile}')
-    datacube = MuseDataCube(
-        cubefile, specfile, catfile, linefile
-        )
+    datacube.set_line()
 
-    # default, but we'll make it explicit:
-    datacube.set_line(line_choice='strongest')
-    Nspec = datacube.Nspec
+    Nspec, Nx, Ny = datacube.shape
     lambdas = datacube.lambdas
 
-    datacube.set_psf(mcmc_pars['psf'])
-
-    print(f'Strongest emission line has {Nspec} slices')
+    outfile = os.path.join(outdir, 'datacube.fits')
+    print(f'Saving TNG datacube to {outfile}')
+    datacube.write(outfile)
 
     outfile = os.path.join(outdir, 'datacube-slices.png')
     print(f'Saving example datacube slice images to {outfile}')
+    # if Nspec < 10:
     sqrt = int(np.ceil(np.sqrt(Nspec)))
     slice_indices = range(Nspec)
 
@@ -196,21 +197,23 @@ def main(args, pool):
     # Setup sampler
 
     ndims = log_posterior.ndims
-    nwalkers = 2*ndims
 
     print(f'Setting up {sampler} MCMCRunner')
-    args = [nwalkers, ndims]
+    kwargs = {}
     if sampler in ['zeus', 'emcee']:
-        args += [log_posterior, datacube, pars]
-        kwargs = {}
+        nwalkers = 2*ndims
+        args = [nwalkers, ndims, log_posterior, datacube, pars]
 
     elif sampler == 'poco':
-        kwargs = {
-            'datacube': datacube,
-            'pars': pars,
-            'loglike': log_posterior.log_likelihood,
-            'logprior': log_posterior.log_prior,
-        }
+        nwalkers = 1000
+        args = [
+            nwalkers,
+            ndims,
+            log_posterior.log_likelihood,
+            log_posterior.log_prior,
+            datacube,
+            pars
+            ]
 
     runner = build_mcmc_runner(sampler, args, kwargs)
 
@@ -218,7 +221,17 @@ def main(args, pool):
     # Run MCMC
 
     print('Starting mcmc run')
+    # try:
     runner.run(pool, nsteps=nsteps)
+    # except Exception as e:
+    #     g1 = runner.start[:,0]
+    #     g2 = runner.start[:,1]
+    #     print('Starting ball for (g1, g2):')
+    #     print(f'g1: {g1}')
+    #     print(f'g2: {g2}')
+    #     val = np.sqrt(g1**2+g2**2)
+    #     print(f' |g1+ig2| = {val}')
+    #     raise e
 
     runner.burn_in = nsteps // 2
 
@@ -247,47 +260,25 @@ def main(args, pool):
         outfile=outfile, show=show
         )
 
-    runner.compute_MAP()
-    map_medians = runner.MAP_medians
-    print('(median) MAP values:')
-    for name, indx in pars_order.items():
-        m = map_medians[indx]
-        print(f'{name}: {m:.4f}')
-
-    outfile = os.path.join(outdir, 'compare-data-to-map.png')
-    print(f'Plotting MAP comparison to data in {outfile}')
-    runner.compare_MAP_to_data(outfile=outfile, show=show)
-
-    outfile = os.path.join(outdir, 'corner-map.png')
-    print(f'Saving corner plot compare to MAP in {outfile}')
-    title = 'Reference lines are param MAP values'
-    runner.plot_corner(
-        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
-        )
-
     if sampler == 'emcee':
         blobs = runner.sampler.blobs
     elif sampler == 'zeus':
         blobs = runner.sampler.get_blobs()
 
-    outfile = os.path.join(outdir, 'chain-blob.pkl')
+    outfile = os.path.join(outdir, 'chain-probabilities.pkl')
     print(f'Saving prior & likelihood values to {outfile}')
-    data = {
+    blob_data = {
         'prior': blobs[:,:,0],
-        'likelihood': blobs[:,:,1],
-        # TODO: generalize or remove after debugging!
-        # 'image': blobs[:,:,2],
-        # 'cont_template': blobs[:,:,3],
-        # 'mle_coeff': blobs[:,:,4],
+        'likelihood': blobs[:,:,1]
     }
     with open(outfile, 'wb') as f:
-        pickle.dump(data, f)
+        pickle.dump(blob_data, f)
 
     outfile = os.path.join(outdir, 'chain-probabilities.png')
     print(f'Saving prior & likelihood value plot to {outfile}')
+    indx = np.random.randint(0, high=nwalkers)
     prior = blobs[:,indx,0]
     like = blobs[:,indx,1]
-    indx = np.random.randint(0, high=nwalkers)
     fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 4))
     plt.subplot(131)
     plt.plot(prior, label='prior', c='tab:blue')
@@ -312,6 +303,24 @@ def main(args, pool):
         plt.show()
     else:
         plt.close()
+
+    runner.compute_MAP(loglike=blob_data['likelihood'])
+    map_vals = runner.MAP_true
+    print('MAP values:')
+    for name, indx in pars_order.items():
+        m = map_vals[indx]
+        print(f'{name}: {m:.4f}')
+
+    outfile = os.path.join(outdir, 'compare-data-to-map.png')
+    print(f'Plotting MAP comparison to data in {outfile}')
+    runner.compare_MAP_to_data(outfile=outfile, show=show)
+
+    outfile = os.path.join(outdir, 'corner-map.png')
+    print(f'Saving corner plot compare to MAP in {outfile}')
+    title = 'Reference lines are param MAP values'
+    runner.plot_corner(
+        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
+        )
 
     return 0
 

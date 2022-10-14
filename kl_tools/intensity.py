@@ -221,7 +221,7 @@ class InclinedExponential(IntensityMap):
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
 
-        return self.image
+        return
 
     def plot_fit(self, datacube, show=True, close=True, outfile=None,
                  size=(9,9), vmin=None, vmax=None):
@@ -369,6 +369,8 @@ class BasisIntensityMap(IntensityMap):
                     remove_continuum = False
                 else:
                     remove_continuum = True
+            else:
+                remove_continuum = False
 
         except KeyError:
             remove_continuum = False
@@ -538,16 +540,7 @@ class IntensityMapFitter(object):
             self.design_mat = np.zeros((Ndata, Nbasis))
 
         for n in range(self.basis.N):
-            func, func_args = self.basis.get_basis_func(n)
-            args = [x, y, *func_args]
-
-            # evaluate basis function on image grid
-            if self.psf is None:
-                bfunc = func(*args)
-            else:
-                bfunc = self.convolve_basis_func(func(*args))
-
-            self.design_mat[:,n] = bfunc
+            self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -873,6 +866,33 @@ class TransformedIntensityMapFitter(object):
         self.transform_pars = transform_pars
 
         return
+
+def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
+                 bmin=0.001, bmax=5):
+    '''
+    TODO: Finish!
+    Scan over beta values for the best fit to the
+    stacked datacube image
+
+    datacube: DataCube
+        The datacube to find the preferred beta scale for
+    basis_type: str
+        The type of basis to use for fitting for beta
+    betas: list, np.array
+        A list or array of beta values to use in finding
+        optimal value. Will create one if not passed
+
+    returns: float
+        The value of beta that minimizes the imap chi2
+    '''
+
+    if betas is None:
+        betas = np.linspace(bmin, bmax, Nbetas)
+
+    for beta in betas:
+        pass
+
+    return
 
 def main(args):
     '''

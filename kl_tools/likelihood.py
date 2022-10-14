@@ -300,7 +300,7 @@ class LogLikelihood(LogBase):
         See setup_vmap()
         '''
 
-        vmodel = theta_pars
+        vmodel = theta_pars.copy()
 
         for name in ['r_unit', 'v_unit']:
             if name in meta_pars['units']:
@@ -580,20 +580,14 @@ class DataCubeLikelihood(LogLikelihood):
 
         psf = datacube.get_psf()
 
-        for i in range(Nspec):
-            zfactor = 1. / (1 + v_array)
+        # get kinematic redshift correct per imap image pixel
+        zfactor = 1. / (1 + v_array)
 
-            obs_array = self._compute_slice_model(
+        for i in range(Nspec):
+            data[i,:,:] = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array, cont_array,
                 psf=psf, pix_scale=datacube.pix_scale
             )
-
-            # NB: here you could do something fancier, such as a
-            # wavelength-dependent PSF
-            # obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
-            # obs_im = ...
-
-            data[i,:,:] = obs_array
 
         model_datacube = DataCube(
             data=data, pars=datacube.pars
@@ -660,8 +654,9 @@ class DataCubeLikelihood(LogLikelihood):
             model_im = gs.Image(model, scale=pix_scale)
             gal = gs.InterpolatedImage(model_im)
             conv = gs.Convolve([psf, gal])
-            model = conf.drawImage(
-                nx=ny, ny=nx, method='no_pixel'
+
+            model = conv.drawImage(
+                nx=ny, ny=nx, method='no_pixel', scale=pix_scale
                 ).array
             # plt.subplot(132)
             # plt.imshow(pmodel, origin='lower')
@@ -765,7 +760,6 @@ def main(args):
         'velocity': {
             'model': 'centered'
         },
-        'psf': gs.Gaussian(fwhm=.5), # fwhm in pixels
         'run_options': {
             'use_numba': False,
             }
@@ -778,7 +772,11 @@ def main(args):
         1., 'A', blue_limit=1e4, red_limit=2e4)
                   for i in range(100)
                   ]
-    datacube = DataCube(data, pix_scale=pix_scale, bandpasses=bandpasses)
+    datacube = DataCube(
+        data, pix_scale=pix_scale, bandpasses=bandpasses
+        )
+
+    datacube.set_psf(gs.Gaussian(fwhm=0.8, flux=1.))
 
     sampled_pars = list(true_pars)
     pars = Pars(sampled_pars, mcmc_pars)

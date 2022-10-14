@@ -75,7 +75,7 @@ def main(args, pool):
         'y0',
         'z',
         'R'
-        #'beta'
+        # 'beta'
         ]
 
     # additional args needed for prior / likelihood evaluation
@@ -101,8 +101,8 @@ def main(args, pool):
             'rscale': priors.UniformPrior(0, 40),
             'x0': priors.GaussPrior(0, 2.5),
             'y0': priors.GaussPrior(0, 2.5),
-            'z': priors.GaussPrior(0.2466, .00001, clip_sigmas=3),
-            'R': priors.GaussPrior(3200, 20)#, clip_sigmas=3),
+            'z': priors.GaussPrior(0.2466, .00001),# clip_sigmas=3),
+            'R': priors.GaussPrior(3200, 20),# clip_sigmas=4),
             # 'beta': priors.UniformPrior(0, .2),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
@@ -119,17 +119,18 @@ def main(args, pool):
             # 'hlr': 'sampled', # pixels
             'type': 'basis',
             # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
-            'basis_type': 'exp_shapelets',
+            'basis_type': 'sersiclets',
+            # 'basis_type': 'exp_shapelets',
             'basis_kwargs': {
                 'use_continuum_template': True,
-                'Nmax': 7,
+                'Nmax': 12,
             #     # 'plane': 'disk',
                 'plane': 'obs',
-                'beta': 0.17,
+                # 'beta': 0.17,
+                'beta': 0.61,
                 # 'beta': 'sampled',
-            #     # 'index': 1,
-            #     # 'b': 1,
+                'index': 1,
+                'b': 1,
                 }
             },
         # 'marginalize_intensity': True,

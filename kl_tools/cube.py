@@ -31,7 +31,7 @@ class CubePars(parameters.MetaPars):
     '''
 
     _req_fields = ['pix_scale', 'bandpasses']
-    _opt_fields = ['psf', 'emission_lines', 'files', 'shape','truth']
+    _opt_fields = ['psf', 'emission_lines', 'files', 'shape', 'meta', 'truth']
     _gen_fields = ['wavelengths'] # not an allowed input field, but generated
 
     def __init__(self, pars):
@@ -71,7 +71,7 @@ class CubePars(parameters.MetaPars):
             self._bandpasses = self.pars['bandpasses']
             return self._bandpasses
 
-        if (self._bandpasses is not None) and (remake is False):
+        if (remake is False) & (self._bandpasses is not None):
             return self._bandpasses
 
         bp = self.pars['bandpasses']
@@ -83,6 +83,7 @@ class CubePars(parameters.MetaPars):
                                 'galsim.Bandpass objects!')
             bandpasses = bp
         else:
+            # make this a separate dict
             bp_dict = deepcopy(bp)
 
             # already checked it is a list or dict
@@ -403,11 +404,15 @@ class DataCube(DataVector):
 
     def set_psf(self, psf):
         '''
-        TODO
+        psf: galsim.GSObject
+            A PSF model for the datacube
+
+        NOTE: This assumes the psf is achromatic for now!
         '''
 
-        if not isinstance(psf, galsim.GSObject):
-            raise TypeError('psf must be a galsim.GSObject!')
+        if psf is not None:
+            if not isinstance(psf, galsim.GSObject):
+                raise TypeError('psf must be a galsim.GSObject!')
 
         self.pars['psf'] = psf
 
@@ -531,6 +536,24 @@ class DataCube(DataVector):
                                  'for the continuum first')
 
         return self._continuum_template
+
+    def set_continuum(self, continuum):
+        '''
+        Very basic version for the base class - should probably be
+        overloaded for each data-specific subclass
+
+        continuum: np.ndarray
+            A 2D numpy array representing the spectral continuum template
+            for a given emission line
+        '''
+
+        if continuum.shape != self.shape[1:]:
+            raise Exception('Continuum template must have the same ' +\
+                            'dimensions as the datacube slice!')
+
+        self._continuum_template = continuum
+
+        return
 
     def copy(self):
         return deepcopy(self)
@@ -714,6 +737,7 @@ class DataCube(DataVector):
         trunc_pars['bandpasses'] = [self.bandpasses[i]
                                    for i in range(self.Nspec)
                                    if cut[i] == True]
+        self.pars._bandpasses = None # Force CubePars to remake bandpass list
 
         # Reset any attributes set during initialization
         # ipdb.set_trace()
@@ -991,6 +1015,16 @@ def main(args):
 
     print('Building DataCube object from array')
     cube = DataCube(data=data, pars=pars)
+
+    print('Build a bandpass list from a dict')
+    dict_pars = {'pix_scale': 1}
+    dict_pars['bandpasses'] = {
+        'lambda_blue': li,
+        'lambda_red': le,
+        'dlambda': dl,
+        'zp': 25.0
+    }
+    cube = DataCube(data=data, pars=dict_pars)
 
     print('Building DataCube with constant weight & mask')
     weights = 1. / 3

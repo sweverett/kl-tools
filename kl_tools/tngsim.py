@@ -183,6 +183,7 @@ class TNGsimulation(object):
         dx = rescale * (self._particleData['PartType0']['Coordinates'][:,0] - np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/self.cosmo.h
         dy = rescale * (self._particleData['PartType0']['Coordinates'][:,1] - np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/self.cosmo.h
         dz = rescale * (self._particleData['PartType0']['Coordinates'][:,2] - np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/self.cosmo.h
+
         print("subsampling particle data.")
         dx = dx[inds]
         dy = dy[inds]
@@ -234,9 +235,13 @@ class TNGsimulation(object):
                 these = (du_int == i) & (dv_int == j)
                 for iline in pars['emission_lines']:
                     line_center = iline.line_pars['value'] * (1 + iline.line_pars['z'])
-                    if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
+                    #ipdb.set_trace()
+                    #if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
+                    if (line_center > lambdas[0]) & (line_center < lambdas[-1]):
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
-                        line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
+                        #line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
+                        line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas - dlam[:,np.newaxis] )
+
                 pbar.update(1)
                 simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
         pbar.close()

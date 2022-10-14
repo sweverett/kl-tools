@@ -170,8 +170,8 @@ class TNGsimulation(object):
         lambda_bounds = pars['wavelengths']
 
         # get list of slice wavelength midpoints
-        lambdas = [np.mean([l[0], l[1]]) for l in lambda_bounds]
-
+        lambdas = np.array([np.mean([l[0], l[1]]) for l in lambda_bounds])
+        # ipdb.set_trace()
         if 'psf' in pars:
             psf = pars['psf']
         else:
@@ -200,7 +200,7 @@ class TNGsimulation(object):
         # https://www.tng-project.org/data/docs/specifications/#parttype0
         
         # Loop over the lines.
-        line_spectra = np.zeros_like(lambdas)
+        line_spectra = np.zeros_like(lambdas) *  (self._line_flux[0]* pars['emission_lines'][0].sed(lambdas[0])).unit
 
         #for iline in pars['emission_lines']:
         #    line_center = iline.line_pars['value'] * (1 + pars['z'])
@@ -226,10 +226,10 @@ class TNGsimulation(object):
         du_int = (np.round(du - xmax)).astype(int)  + int(shape[1]/2)
         dv_int = (np.round(dv - ymax)).astype(int)  + int(shape[2]/2)
         
-        
         simcube = np.zeros(shape)
         print("populating datacube")
         pbar = tqdm(total=shape[1]*shape[2])
+        # ipdb.set_trace() 
         for i in range(shape[1]):
             for j in range(shape[2]):
                 these = (du_int == i) & (dv_int == j)
@@ -239,12 +239,13 @@ class TNGsimulation(object):
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
                         line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
                 pbar.update(1)
-                simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value,axis=0)
+                simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
         pbar.close()
+        
         if psf is not None:
             for islice in range(shape[0]):
                 channelIm = galsim.Image(simcube[islice,:,:],scale=pixel_scale)
-                channelIm_conv = galsim.Convolve([psf,galsim.InterpolatedImage(channelIm)]).drawImage(image= channelIm)
+                channelIm_conv = galsim.Convolve([psf,galsim.InterpolatedImage(channelIm)]).drawImage(image= channelIm, method='nopixel')
                 simcube[:,i,j] = channelIm_conv.array
         return simcube
     
@@ -284,6 +285,7 @@ class TNGsimulation(object):
             pars['emission_lines']  = []
 
         # generate cube data given passed pars & emission lines
+        # ipdb.set_trace()
         data = self._generateCube(pars)
 
         return DataCube(data, pars=pars)

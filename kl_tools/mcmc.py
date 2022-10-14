@@ -870,6 +870,7 @@ class UltranestRunner(MCMCRunner):
             self.pars.sampled.names,
             self.loglike,
             transform=self.logprior,
+            log_dir=self.log_dir
             )
 
         return sampler
@@ -898,7 +899,8 @@ class KLensUltranestRunner(UltranestRunner):
     def __init__(self, nwalkers, ndims, loglike, logprior,
                  datacube, pars,
                  loglike_args=None, loglike_kwargs=None,
-                 logprior_args=None, logprior_kwargs=None):
+                 logprior_args=None, logprior_kwargs=None,
+                 out_dir='temp_ultranest'):
         '''
         loglike: function / callable
             Log likelihood function to sample from
@@ -921,6 +923,8 @@ class KLensUltranestRunner(UltranestRunner):
         logprior_kwargs: dict
             List of additional kwargs needed to evaluate log prior,
             such as meta parameters, etc.
+        out_dir: str
+            Where to store intermediate & final outputs
 
         NOTE: to make this consistent w/ the other mcmc runner classes,
         you must pass datacube & pars separately from the rest of the
@@ -946,21 +950,77 @@ class KLensUltranestRunner(UltranestRunner):
 
         self.MAP_vmap = None
 
+        # ultranest calls this the log_dir
+        self.log_dir = out_dir
+
         #...
 
         return
 
-    def _run_sampler(self, start, nsteps=None, progress=True):
+    def _run_sampler(self, start, nsteps=None, progress=True,
+                     min_num_live_points=25, print_results=True,
+                     make_plots=True, show_status=True):
         '''
-        The ultranest-specific way to run the sampler object
+        The ultranest-specific way to run the sampler object. Here,
+        we treat nsteps as the max number of likelihood evaluations
         '''
 
         if self.sampler is None:
             raise AttributeError('sampler has not yet been initialized!')
 
+        if progress is True:
+            viz_callback = 'auto'
+
         self.sampler.run(
-            # start, progress=progress
+            min_num_live_points=min_num_live_points, max_ncalls=nsteps,
+            viz_callback=viz_callback, show_status=show_status
             )
+
+        if print_results is True:
+            self.sampler.print_results()
+
+        if make_plots is True:
+            self.sampler.plot_run()
+            self.sampler.plot_trace()
+            self.sampler.plot_corner()
+
+        return
+
+    def plot_corner(self, *args, **kwargs):
+        '''
+        See parent function for possible args & kwargs
+        '''
+
+        # discard & thin kwargs don't make sense for nested sampling
+        kwargs['discard'] = None
+        kwargs['thin'] = None
+
+        assert (self.burn_in == 0) or (self.burn_in is None)
+
+        super(KLUltranestRunner, self).plot_corner(*args, **kwargs)
+
+        return
+
+    def get_chains(self, equal_weighted=True):
+        chain_dir = os.path.join(self.log_dir, 'chains/')
+
+        if equal_weighted is True:
+            fname = 'equal_weighted_post.txt'
+        else:
+            # must account for differently weighted samples of posterior
+            fname = 'weighted_post.txt'
+
+        chain = Table.read(fname, format='ascii')
+
+        return chain
+
+    def set_burn_in(self, index):
+        '''
+        Nested samplers don't need a burn-in, so ignore
+        '''
+
+        print('Warning: requested to set a burn-in for a nested ' +\
+              'sampler; ignoring')
 
         return
 

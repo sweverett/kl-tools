@@ -39,6 +39,8 @@ parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
+parser.add_argument('--continue_previous', action='store_true', default=False,
+                    help='Set to continue previous run (if sampler allows)')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 
@@ -58,6 +60,7 @@ def main(args, pool):
     ncores = args.ncores
     mpi = args.mpi
     run_name = args.run_name
+    continue_previous = args.continue_previous
     show = args.show
 
     outdir = os.path.join(
@@ -257,7 +260,8 @@ def main(args, pool):
             ]
 
     elif sampler == 'ultranest':
-        nwalkers = 2*ndims
+        # we will equate "walkers" with "live points" for ultranest
+        nwalkers = 100
         args = [
             nwalkers,
             ndims,
@@ -273,19 +277,9 @@ def main(args, pool):
     # Run MCMC
 
     print('Starting mcmc run')
-    # try:
     runner.run(pool, nsteps=nsteps)
-    # except Exception as e:
-    #     g1 = runner.start[:,0]
-    #     g2 = runner.start[:,1]
-    #     print('Starting ball for (g1, g2):')
-    #     print(f'g1: {g1}')
-    #     print(f'g2: {g2}')
-    #     val = np.sqrt(g1**2+g2**2)
-    #     print(f' |g1+ig2| = {val}')
-    #     raise e
 
-    runner.burn_in = nsteps // 2
+    runner.set_burn_in(nsteps // 2)
 
     if (sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
         # The sampler isn't pickleable for some reason in this scenario
@@ -295,7 +289,7 @@ def main(args, pool):
         print(f'pickling chain to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(chain, f)
-    else:
+    elif sampler not in ['ultranest']:
         outfile = os.path.join(outdir, 'test-mcmc-sampler.pkl')
         print(f'Pickling sampler to {outfile}')
         with open(outfile, 'wb') as f:

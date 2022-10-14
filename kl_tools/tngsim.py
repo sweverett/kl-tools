@@ -113,7 +113,7 @@ class TNGsimulation(object):
         For a chosen haloid and snapshot, get the ingredients necessary to build a simulated datacube.
         This means stellar continuum (flat across our SED) and a line that traces the gas.
 
-        This sets internal attributes that hold the TNG data. If a cachefile is provided, 
+        This sets internal attributes that hold the TNG data. If a cachefile is provided,
           it will look there first, and use data if that file exists.
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
@@ -131,7 +131,7 @@ class TNGsimulation(object):
         else:
             h = h5py.File(cachepath,mode='r')
             self._cachefile = cachepath
-            
+
         self._particleData = h
         self._particleTemp = self._calculate_gas_temperature(h)
         self._starFlux = self._star_particle_flux(h)
@@ -139,24 +139,19 @@ class TNGsimulation(object):
         #starflux = 10**(-mags[:,4]/2.5)
         self._line_flux = self._gas_line_flux(h)
 
-        
-    def _generateCube(self, pars, rescale = .25,center=True):
+        return
+
+    def _generateCube(self, pars, rescale=.25, center=True):
         '''
         pars: cube.CubePars
             A CubePars instance that holds all relevant metadata about the
             desired instrument and DataCube parameters needed to render the
             TNG object
+        rescale: float
+            TODO: ask Eric
+        center: bool
+            TODO: ask Eric
         '''
-
-        #----------------------------------------------------------------------
-        # unpacking parmeters step
-        # needed parameters:
-        #   - pixel scale [arcsec/pixel, scalar]
-        #   - vector of wavelength spaxel centers [angstroms]
-        #   - spectral resolution [ scalar float, lambda/delta_lambda]
-        #   - redshift (default to _requested_ subhalo redshift) [scalar float]
-        #   - dimensions of the datacube [nlam, nx, ny]
-        # What are the dimensions of the datacube?
 
         pixel_scale = pars['pix_scale']
         shape = pars['shape']
@@ -167,24 +162,30 @@ class TNGsimulation(object):
         # list of tuples (lambda_blue, lambda_red) w/ associated astropy unit for
         # each slice
         lambda_bounds = pars['wavelengths']
-        
+
         # get list of slice wavelength midpoints
         lambdas = np.array([np.mean([l[0], l[1]]) for l in lambda_bounds])
-        # ipdb.set_trace()
         if 'psf' in pars:
             psf = pars['psf']
         else:
             psf = None
-        print("choosing  indices.")
-        inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e-5) & (np.isfinite(self._line_flux.value))]
-        #inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e3) & (np.isfinite(self._line_flux.value))]      
-        # What is the position of the sources relative to the field center?
-        print("reading particle data.")
-        dx = rescale * (self._particleData['PartType0']['Coordinates'][:,0] - np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/self.cosmo.h
-        dy = rescale * (self._particleData['PartType0']['Coordinates'][:,1] - np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/self.cosmo.h
-        dz = rescale * (self._particleData['PartType0']['Coordinates'][:,2] - np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/self.cosmo.h
 
-        print("subsampling particle data.")
+        print('Choosing  indices')
+        inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[
+            (self._line_flux.value > 1e-5) & (np.isfinite(self._line_flux.value))
+            ]
+        #inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e3) & (np.isfinite(self._line_flux.value))]
+
+        # What is the position of the sources relative to the field center?
+        print('Reading particle data.')
+        dx = rescale * (self._particleData['PartType0']['Coordinates'][:,0] -\
+                        np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/self.cosmo.h
+        dy = rescale * (self._particleData['PartType0']['Coordinates'][:,1] -\
+                        np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/self.cosmo.h
+        dz = rescale * (self._particleData['PartType0']['Coordinates'][:,2] -\
+                        np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/self.cosmo.h
+
+        print('Subsampling particle data.')
         dx = dx[inds]
         dy = dy[inds]
         dz = dz[inds]
@@ -192,13 +193,13 @@ class TNGsimulation(object):
         # TODO: add an optional rotation matrix operation.
         RR = Rotation.from_euler('z',45,degrees=True)
 
-        print(f"calculating velocity offsets")
+        print(f'Calculating velocity offsets')
         # Calculate the velocity offset of each particle.
         deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./(1+self.redshift)) * u.km/u.s
         deltav = deltav[inds]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
-        
+
         # Loop over the lines.
         line_spectra = np.zeros_like(lambdas) *  (self._line_flux[0]* pars['emission_lines'][0].sed(lambdas[0])).unit
 
@@ -206,14 +207,21 @@ class TNGsimulation(object):
         #    line_center = iline.line_pars['value'] * (1 + pars['z'])
         #    dlam = line_center *  (dv / const.c).to(u.dimensionless_unscaled)
         #    line_spectra = self._line_flux[:,np.newaxis]* iline.sed( lambdas / (1+pars['z']) - dlam[:,np.newaxis] )
+
         # Now put these on the pixel grid.
-        print("calculating position offsets")
-        du = (dx*u.kpc / self.cosmo.angular_diameter_distance(pars['emission_lines'][0].line_pars['z'])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
-        dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(pars['emission_lines'][0].line_pars['z'])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+        print('Calculating position offsets')
+        du = (dx*u.kpc / self.cosmo.angular_diameter_distance(
+            pars['emission_lines'][0].line_pars['z'])
+              ).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+        dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(
+            pars['emission_lines'][0].line_pars['z'])
+              ).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+
         # TODO: This is where we should apply a shear.
+
         # Round each one to the pixel center
         if center:
-            print("centering")
+            print('Centering')
             hist2d,xbins,ybins = np.histogram2d(du,dv,bins=[np.arange(-100,100),np.arange(-100,100)])
             xmax = xbins[np.argmax(np.sum(hist2d,axis=1))]
             ymax = ybins[np.argmax(np.sum(hist2d,axis=0))]
@@ -221,38 +229,42 @@ class TNGsimulation(object):
             xmax = 0.
             ymax = 0.
 
-            
-        print("discretizing positions")
+        print('Discretizing positions')
         du_int = (np.round(du - xmax)).astype(int)  + int(shape[1]/2)
         dv_int = (np.round(dv - ymax)).astype(int)  + int(shape[2]/2)
-        
+
         simcube = np.zeros(shape)
-        print("populating datacube")
+        print('Populating datacube')
         pbar = tqdm(total=shape[1]*shape[2])
-        # ipdb.set_trace() 
         for i in range(shape[1]):
             for j in range(shape[2]):
                 these = (du_int == i) & (dv_int == j)
                 for iline in pars['emission_lines']:
                     line_center = iline.line_pars['value'] * (1 + iline.line_pars['z'])
-                    #ipdb.set_trace()
                     #if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
                     if (line_center > lambdas[0]) & (line_center < lambdas[-1]):
-                        dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
+                        dlam = line_center *  (deltav[these] / const.c).to(
+                            u.dimensionless_unscaled
+                            ).value
                         #line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
-                        line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas - dlam[:,np.newaxis] )
+                        line_spectra = self._line_flux[inds[these],np.newaxis] *\
+                            iline.sed(lambdas - dlam[:,np.newaxis])
 
                 pbar.update(1)
                 simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
+
         pbar.close()
-        
+
         if psf is not None:
             for islice in range(shape[0]):
                 channelIm = galsim.Image(simcube[islice,:,:],scale=pixel_scale)
-                channelIm_conv = galsim.Convolve([psf,galsim.InterpolatedImage(channelIm)]).drawImage(image= channelIm, method='nopixel')
+                channelIm_conv = galsim.Convolve(
+                    [psf,galsim.InterpolatedImage(channelIm)]).drawImage(
+                        image= channelIm, method='nopixel'
+                        )
                 simcube[:,i,j] = channelIm_conv.array
+
         return simcube
-    
 
     def to_cube(self, pars, shape=None):
         '''
@@ -289,7 +301,6 @@ class TNGsimulation(object):
             pars['emission_lines']  = []
 
         # generate cube data given passed pars & emission lines
-        # ipdb.set_trace()
         data = self._generateCube(pars)
 
         return DataCube(data, pars=pars)
@@ -344,16 +355,16 @@ class TNGsimulation(object):
         data_cube = self.to_cube(pars)
         simcube = data_cube._data
         slit_mask = self._get_slit_mask(pars)
-        
+
         slit_spectrum = np.sum(slit_mask[np.newaxis, :, :]*simcube, axis=2)
-        
+
         return slit_spectrum
 
 
     def _get_slit_mask(self, pars):
         '''
         Creates slit mask given a list of slit parameters
-        
+
         pars: cube.CubePars
             A CubePars instance that holds all relevant slit metadata
         '''
@@ -395,7 +406,6 @@ class TNGsimulation(object):
 
         return slit_mask
 
-
     def _generate_grid(self, center, pix_scale, ngrid):
         low, high =  center - pix_scale*ngrid, center + pix_scale*ngrid
         edges = np.linspace(low, high, ngrid+1)
@@ -408,7 +418,6 @@ if __name__ == '__main__':
     sim = TNGsimulation()
     sim.set_subhalo(2)
 
-
     # Make a mock of a MUSE data cube.
     testdir = utils.get_test_dir()
     testpath = pathlib.Path(os.path.join(testdir, 'test_data'))
@@ -416,7 +425,7 @@ if __name__ == '__main__':
     spec3dPath = testpath / pathlib.Path("102021103_objcube.fits")
     catPath = testpath / pathlib.Path("MW_1-24_main_table.fits")
     emlinePath = testpath / pathlib.Path("MW_1-24_emline_table.fits")
-    
+
     # Try initializing a datacube object with these paths.
     museCube = muse.MuseDataCube(
         cubefile=spec3dPath,
@@ -426,8 +435,7 @@ if __name__ == '__main__':
         )
     # Now generate a MUSE-like mock from the datacube.
     musemock = sim.from_cube(museCube)
-    ipdb.set_trace()
-    
+
     lambdas = np.array([np.mean([l[0], l[1]]) for l in museCube.pars['wavelengths']])
     spec1d = np.sum(np.sum(musemock.data,axis=-1),axis=-1)
     lam_vel = np.sum(lambdas[:,np.newaxis,np.newaxis] * musemock.data,axis=0) / np.sum(musemock.data,axis=0)
@@ -441,3 +449,5 @@ if __name__ == '__main__':
     ax2.set_title("line-of-sight velocity")
     fig.colorbar(cax,ax=ax2,fraction=0.046,pad=0.04)
     plt.show()
+
+    return

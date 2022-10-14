@@ -123,10 +123,10 @@ class MuseDataCube(cube.DataCube):
         clean up later
         '''
 
+        # TODO: Should we put this anywhere else?
         # self.pars['z'] = self.obj_data['Z']
 
         # some are set later
-        # self.pars['specs'] = {
         specs = {
             # A guess, based on throughput here:
             # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
@@ -136,10 +136,9 @@ class MuseDataCube(cube.DataCube):
 
         Nlines = len(self.lines)
 
-        # z = float(self.pars['z'])
         z = self.obj_data['Z'].value[0]
-        # R = self.pars['specs']['resolution']
         R = specs['resolution']
+
         lines = []
         for line in self.lines:
             # TODO: We should investigate whether to use LAMBDA_SN directly,

@@ -740,7 +740,6 @@ class DataCube(DataVector):
         self.pars._bandpasses = None # Force CubePars to remake bandpass list
 
         # Reset any attributes set during initialization
-        # ipdb.set_trace()
         trunc_pars.reset()
 
         if trunc_type == 'in-place':

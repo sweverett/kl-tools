@@ -77,15 +77,21 @@ class EmissionLine(object):
         lred = sed_pars['lred']
         res = sed_pars['resolution']
         lam_unit = sed_pars['unit']
-        
+
         lambdas = np.arange(lblue, lred+res, res) * lam_unit
-        wlam = np.mean((np.array(lambdas)[1:] - np.array(lambdas)[:-1])/2.)
+
+        # Will compare the requested resolution w/ the slice delta lambda's
+        # to make sure a reasonable interpolator step size is used
+        wlam = np.mean(
+            (np.array(lambdas)[1:] - np.array(lambdas)[:-1])/2.
+            )
+
         # Model emission line SED as gaussian
         R = line_pars['R']
         z = line_pars['z']
         obs_val = line_pars['value'] * (1.+z)
         obs_std = obs_val / R
-        
+
         line_unit = line_pars['unit']
         mu  = obs_val * line_unit
         std = np.sqrt(obs_std**2 + wlam**2) * line_unit
@@ -93,11 +99,14 @@ class EmissionLine(object):
         norm = 1. / (std * np.sqrt(2.*np.pi))
         chi = ((lambdas - mu)/std).value
         gauss = norm * np.exp(-0.5*chi**2)
+
+        # This was added by Eric to convert to a numpy interpolator, but this
+        # causes pickling issues
         #def interpfunc(x):
         #    return np.interp(x,lambdas.to(lam_unit).value,gauss,left=0.,right=0.)
-        
-        return interp1d(lambdas, gauss,fill_value=0.,bounds_error=False)
         #return interpfunc
+
+        return interp1d(lambdas, gauss, fill_value=0., bounds_error=False)
 
 class SED(object):
     '''

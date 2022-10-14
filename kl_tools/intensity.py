@@ -553,68 +553,6 @@ class IntensityMapFitter(object):
 
         return
 
-    def convolve_basis_func(self, bfunc):
-        '''
-        Convolve a given basis vector/function by the stored PSF
-
-        bfunc: np.array (1D)
-            A vector of a basis function evaluated on the pixel grid
-        '''
-
-        if self.psf is None:
-            return bfunc
-
-        pix_scale = self.basis.pix_scale
-
-        # nx, ny = self.nx, self.ny
-        # nx, ny = self.ny, self.nx
-
-        if self.basis.is_complex:
-            real = bfunc.real
-            imag = bfunc.imag
-
-            if np.sum(real) != 0:
-                real_im = gs.Image(real.reshape(self.nx,self.ny), scale=pix_scale)
-                real_gs = gs.InterpolatedImage(real_im)
-                real_conv = gs.Convolve([self.psf, real_gs])
-                real_conv_b = real_conv.drawImage(
-                    scale=pix_scale, nx=self.ny, ny=self.nx, method='no_pixel'
-                ).array.reshape(self.nx*self.ny)
-            else:
-                real_conv_b = np.zeros(self.nx*self.ny)
-            if np.sum(imag) != 0:
-                imag_im = gs.Image(imag.reshape(self.nx,self.ny), scale=pix_scale)
-                imag_gs = gs.InterpolatedImage(imag_im)
-                imag_conv = gs.Convolve([self.psf, imag_gs])
-                imag_conv_b = imag_conv.drawImage(
-                    scale=pix_scale, nx=self.ny, ny=self.nx, method='no_pixel'
-                ).array.reshape(self.nx*self.ny)
-            else:
-                imag_conv_b = np.zeros(self.nx*self.ny)
-
-        else:
-            pass
-        return real_conv_b + 1j*imag_conv_b
-
-    def _convolve_basis_func(self, bfunc):
-        '''
-        Handle the conversion of a basis vector to a galsim
-        interpolated image, and then colvolve by the psf
-
-        bfunc: np.array (1D)
-            A vector of a basis function evaluated on the pixel grid
-        '''
-
-        nx, ny = self.nx, self.ny
-
-        # image (nx,ny) flipped to match the return of np.meshgrid
-        real_im = gs.Image(bfunc.reshape(ny,nx), scale=pix_scale)
-        real_gs = gs.InterpolatedImage(real_im)
-        real_conv = gs.Convolve([self.psf, real_gs])
-        real_conv_b = real_conv.drawImage(
-            scale=pix_scale, nx=ny, ny=nx, method='no_pixel'
-        ).array.reshape(nx*ny)
-
     # TODO: Add @njit when ready
     def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):
         '''

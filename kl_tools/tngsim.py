@@ -45,8 +45,7 @@ def get(path, params=None):
 class TNGsimulation(object):
     def __init__(self):
         self.base_url = 'http://www.tng-project.org/api/'
-        self.cosmo = cosmology.Planck18_arXiv_v2
-
+        self.cosmo = cosmology.Planck18
         return
 
     def set_subhalo(self, subhaloid, redshift=0.5, simname = 'TNG50-1'):
@@ -239,7 +238,6 @@ class TNGsimulation(object):
                     #ipdb.set_trace()
                     #if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
                     if (line_center > lambdas[0]) & (line_center < lambdas[-1]):
-
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
                         #line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
                         line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas - dlam[:,np.newaxis] )

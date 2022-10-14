@@ -421,6 +421,8 @@ if __name__ == '__main__':
         )
     # Now generate a MUSE-like mock from the datacube.
     musemock = sim.from_cube(museCube)
+    ipdb.set_trace()
+    
     lambdas = np.array([np.mean([l[0], l[1]]) for l in museCube.pars['wavelengths']])
     spec1d = np.sum(np.sum(musemock.data,axis=-1),axis=-1)
     lam_vel = np.sum(lambdas[:,np.newaxis,np.newaxis] * musemock.data,axis=0) / np.sum(musemock.data,axis=0)

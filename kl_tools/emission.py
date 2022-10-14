@@ -1,5 +1,5 @@
 import numpy as np
-#from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d
 from numpy import interp
 import astropy.units as u
 
@@ -93,11 +93,11 @@ class EmissionLine(object):
         norm = 1. / (std * np.sqrt(2.*np.pi))
         chi = ((lambdas - mu)/std).value
         gauss = norm * np.exp(-0.5*chi**2)
-        def interpfunc(x):
-            return np.interp(x,lambdas.to(lam_unit).value,gauss,left=0.,right=0.)
+        #def interpfunc(x):
+        #    return np.interp(x,lambdas.to(lam_unit).value,gauss,left=0.,right=0.)
         
-        #return interp1d(lambdas, gauss,fill_value=0.,bounds_error=False)
-        return interpfunc
+        return interp1d(lambdas, gauss,fill_value=0.,bounds_error=False)
+        #return interpfunc
 
 class SED(object):
     '''
@@ -125,27 +125,27 @@ class SED(object):
 # NOTE: These use the MUSE convention, but we can map to these
 # for other experiments
 LINE_LAMBDAS = {
-    'O6_2': (1031.93, 1037.62) * u.Unit('A'),
-    'Lya': 1215.670 * u.Unit('A'),
-    'N5': (1238.821, 1242.804) * u.Unit('A'),
-    'C4': (1548.203, 1550.777) * u.Unit('A'),
-    'Mg2': 2796.290 * u.Unit('A'),
-    'O2': (3727.048, 3729.832) * u.Unit('A'),
-    'Ne3': 3870.115 * u.Unit('A'),
-    'Ne32': 3968.872 * u.Unit('A'),
-    'Hzet': 3890.109 * u.Unit('A'),
-    'Heps': 3971.154 * u.Unit('A'),
-    'Hd': 4102.852 * u.Unit('A'),
-    'Hg': 4341.647 * u.Unit('A'),
-    'O3_3': 4364.400 * u.Unit('A'),
-    'Hb': 4862.650 * u.Unit('A'),
-    'O3_1': 4960.263 * u.Unit('A'),
-    'O3_2': 5008.208 * u.Unit('A'),
-    'He1': 5877.217 * u.Unit('A'),
-    'O1': 6302.022 * u.Unit('A'),
-    'N2_1': 6549.825 * u.Unit('A'),
-    'Ha': 6564.589 * u.Unit('A'),
-    'N2_2': 6585.255 * u.Unit('A'),
-    'S2_1': 6718.271 * u.Unit('A'),
-    'S2_2': 6732.645 * u.Unit('A'),
+    'O6_2': (1031.93, 1037.62) * u.Unit('AA'),
+    'Lya': 1215.670 * u.Unit('AA'),
+    'N5': (1238.821, 1242.804) * u.Unit('AA'),
+    'C4': (1548.203, 1550.777) * u.Unit('AA'),
+    'Mg2': 2796.290 * u.Unit('AA'),
+    'O2': (3727.048, 3729.832) * u.Unit('AA'),
+    'Ne3': 3870.115 * u.Unit('AA'),
+    'Ne32': 3968.872 * u.Unit('AA'),
+    'Hzet': 3890.109 * u.Unit('AA'),
+    'Heps': 3971.154 * u.Unit('AA'),
+    'Hd': 4102.852 * u.Unit('AA'),
+    'Hg': 4341.647 * u.Unit('AA'),
+    'O3_3': 4364.400 * u.Unit('AA'),
+    'Hb': 4862.650 * u.Unit('AA'),
+    'O3_1': 4960.263 * u.Unit('AA'),
+    'O3_2': 5008.208 * u.Unit('AA'),
+    'He1': 5877.217 * u.Unit('AA'),
+    'O1': 6302.022 * u.Unit('AA'),
+    'N2_1': 6549.825 * u.Unit('AA'),
+    'Ha': 6564.589 * u.Unit('AA'),
+    'N2_2': 6585.255 * u.Unit('AA'),
+    'S2_1': 6718.271 * u.Unit('AA'),
+    'S2_2': 6732.645 * u.Unit('AA'),
 }

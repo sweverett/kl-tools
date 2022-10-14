@@ -45,7 +45,7 @@ def get(path, params=None):
 class TNGsimulation(object):
     def __init__(self):
         self.base_url = 'http://www.tng-project.org/api/'
-        self.cosmo = cosmology.Planck18_arXiv_v2
+        self.cosmo = cosmology.Planck18
 
         return
 

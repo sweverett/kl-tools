@@ -161,14 +161,14 @@ class TNGsimulation(object):
 
         pixel_scale = pars['pix_scale']
         shape = pars['shape']
-
+        pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
         # each element of the following list is an EmissionLine object
         lines = pars['emission_lines'] # may be an empty list
 
         # list of tuples (lambda_blue, lambda_red) w/ associated astropy unit for
         # each slice
         lambda_bounds = pars['wavelengths']
-
+        
         # get list of slice wavelength midpoints
         lambdas = [np.mean([l[0], l[1]]) for l in lambda_bounds]
 
@@ -235,6 +235,7 @@ class TNGsimulation(object):
                 these = (du_int == i) & (dv_int == j)
                 for iline in pars['emission_lines']:
                     line_center = iline.line_pars['value'] * (1 + iline.line_pars['z'])
+                    ipdb.set_trace()
                     if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
                         line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )

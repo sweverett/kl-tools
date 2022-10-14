@@ -2,6 +2,7 @@ from abc import abstractmethod
 import types
 import numpy as np
 import os
+from astropy.table import Table
 from multiprocessing import Pool
 import schwimmbad
 # from schwimmbad import SerialPool, MultiPool, MPIPool
@@ -310,6 +311,9 @@ class MCMCRunner(object):
 
         return
 
+    def get_chain(self, *args, **kwargs):
+        return sampler.get_chain(*args, **kwargs)
+
     def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         '''
         loglike: np.ndarray, list
@@ -344,7 +348,7 @@ class MCMCRunner(object):
 
         if loglike is None:
             # don't know actual min of loglikelihood, so do best we can
-            chain = self.sampler.get_chain(
+            chain = self.get_chain(
                 flat=True, discard=discard, thin=thin
                 )
 
@@ -355,7 +359,7 @@ class MCMCRunner(object):
             for i in range(self.ndim):
                 self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
         else:
-            chain = self.sampler.get_chain()
+            chain = self.get_chain()
             self.MAP_indx = np.unravel_index(loglike.argmax(), loglike.shape)
             self.MAP_true = chain[self.MAP_indx]
 
@@ -380,7 +384,7 @@ class MCMCRunner(object):
             print('Warning: Cannot plot chains until mcmc has been run!')
             return
 
-        chain = self.sampler.get_chain()
+        chain = self.get_chain()
 
         ndim = self.ndim
         if size is None:
@@ -439,7 +443,7 @@ class MCMCRunner(object):
                 raise ValueError('Must passs a value for discard if ' +\
                                  'burn_in is not set!')
 
-        chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
+        chain = self.get_chain(flat=True, discard=discard, thin=thin)
 
         if use_derived is True:
             # add derived quantity sini*vcirc
@@ -1001,8 +1005,8 @@ class KLensUltranestRunner(UltranestRunner):
 
         return
 
-    def get_chains(self, equal_weighted=True):
-        chain_dir = os.path.join(self.log_dir, 'chains/')
+    def get_chain(self, equal_weighted=True):
+        chain_dir = os.path.join(self.sampler.logs['run_dir'], 'chains/')
 
         if equal_weighted is True:
             fname = 'equal_weighted_post.txt'
@@ -1010,7 +1014,15 @@ class KLensUltranestRunner(UltranestRunner):
             # must account for differently weighted samples of posterior
             fname = 'weighted_post.txt'
 
-        chain = Table.read(fname, format='ascii')
+        chain_file = os.path.join(chain_dir, fname)
+
+        chain_rec = Table.read(chain_file, format='ascii')
+
+        # need to convert rec array to np array
+        chain = np.zeros((len(chain_rec), len(chain_rec.colnames)))
+
+        for i, col in enumerate(chain_rec.colnames):
+            chain[:,i] = chain_rec[col]
 
         return chain
 

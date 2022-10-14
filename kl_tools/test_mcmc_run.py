@@ -84,8 +84,8 @@ def main(args, pool):
         'vcirc': 200,
         'rscale': 5,
         # 'beta': np.NaN,
-        'flux': true_flux,
-        'hlr': true_hlr,
+        # 'flux': true_flux,
+        # 'hlr': true_hlr,
         # 'x0': 0.5,
         # 'y0': -1,
     }
@@ -111,16 +111,16 @@ def main(args, pool):
             # 'x0': priors.UniformPrior(-3, 3),
             # 'y0': priors.UniformPrior(-3, 3),
             # 'beta': priors.UniformPrior(0, 0.5),
-            'hlr': priors.UniformPrior(0, 8),
-            'flux': priors.UniformPrior(5e3, 7e4),
+            # 'hlr': priors.UniformPrior(0, 8),
+            # 'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
             'type': 'inclined_exp',
-            # 'flux': true_flux, # counts
-            # 'hlr': true_hlr, # counts
-            'flux': 'sampled', # counts
-            'hlr': 'sampled', # pixels
+            'flux': true_flux, # counts
+            'hlr': true_hlr, # counts
+            # 'flux': 'sampled', # counts
+            # 'hlr': 'sampled', # pixels
             # 'type': 'basis',
             # # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
@@ -268,8 +268,10 @@ def main(args, pool):
             log_posterior.log_likelihood._call_no_args,
             log_posterior.log_prior,
             datacube,
-            pars
+            pars,
         ]
+
+        kwargs['out_dir'] = outdir
 
     runner = build_mcmc_runner(sampler, args, kwargs)
 

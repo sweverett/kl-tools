@@ -170,8 +170,8 @@ class TNGsimulation(object):
         lambda_bounds = pars['wavelengths']
         
         # get list of slice wavelength midpoints
-        lambdas = [np.mean([l[0], l[1]]) for l in lambda_bounds]
-
+        lambdas = np.array([np.mean([l[0], l[1]]) for l in lambda_bounds])
+        # ipdb.set_trace()
         if 'psf' in pars:
             psf = pars['psf']
         else:
@@ -200,7 +200,7 @@ class TNGsimulation(object):
         # https://www.tng-project.org/data/docs/specifications/#parttype0
         
         # Loop over the lines.
-        line_spectra = np.zeros_like(lambdas)
+        line_spectra = np.zeros_like(lambdas) *  (self._line_flux[0]* pars['emission_lines'][0].sed(lambdas[0])).unit
 
         #for iline in pars['emission_lines']:
         #    line_center = iline.line_pars['value'] * (1 + pars['z'])
@@ -226,10 +226,10 @@ class TNGsimulation(object):
         du_int = (np.round(du - xmax)).astype(int)  + int(shape[1]/2)
         dv_int = (np.round(dv - ymax)).astype(int)  + int(shape[2]/2)
         
-        
         simcube = np.zeros(shape)
         print("populating datacube")
         pbar = tqdm(total=shape[1]*shape[2])
+        # ipdb.set_trace() 
         for i in range(shape[1]):
             for j in range(shape[2]):
                 these = (du_int == i) & (dv_int == j)
@@ -240,20 +240,16 @@ class TNGsimulation(object):
                         dlam = line_center *  (deltav[these] / const.c).to(u.dimensionless_unscaled).value
                         line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
                 pbar.update(1)
-                simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value,axis=0)
+                simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
         pbar.close()
+        
         if psf is not None:
             for islice in range(shape[0]):
                 channelIm = galsim.Image(simcube[islice,:,:],scale=pixel_scale)
-                channelIm_conv = galsim.Convolve([psf,galsim.InterpolatedImage(channelIm)]).drawImage(image= channelIm)
+                channelIm_conv = galsim.Convolve([psf,galsim.InterpolatedImage(channelIm)]).drawImage(image= channelIm, method='nopixel')
                 simcube[:,i,j] = channelIm_conv.array
         return simcube
     
-    def from_slit(self):
-        pass
-
-    def to_slit(self):
-        pass
 
     def to_cube(self, pars, shape=None):
         '''
@@ -290,6 +286,7 @@ class TNGsimulation(object):
             pars['emission_lines']  = []
 
         # generate cube data given passed pars & emission lines
+        # ipdb.set_trace()
         data = self._generateCube(pars)
 
         return DataCube(data, pars=pars)
@@ -321,6 +318,88 @@ class TNGsimulation(object):
         datacube.set_data(data)
 
         return datacube
+
+    def from_slit(self):
+        '''
+        To Do:
+        Method for generating slit spectrum from mock data
+        '''
+        pass
+
+    def to_slit(self, pars):
+        '''
+        Generates slit spectrum given meta data
+
+        pars: cube.CubePars
+            A CubePars instance that holds all relevant metadata about the
+            desired instrument and DataCube parameters needed to render the
+            TNG object
+
+        To Do:
+        Implement an abstract class for the slit spectrum and return instance instead of slit spectrum
+        '''
+        data_cube = self.to_cube(pars)
+        simcube = data_cube._data
+        slit_mask = self._get_slit_mask(pars)
+        
+        slit_spectrum = np.sum(slit_mask[np.newaxis, :, :]*simcube, axis=2)
+        
+        return slit_spectrum
+
+
+    def _get_slit_mask(self, pars):
+        '''
+        Creates slit mask given a list of slit parameters
+        
+        pars: cube.CubePars
+            A CubePars instance that holds all relevant slit metadata
+        '''
+
+        ###
+        # slit_width: float
+        #     Slit width (in arcsec)
+
+        # slit_angle: float
+        #     Slit angle w.r.t. to the x-axis of the observed/image plane
+
+        # shape: (ngrid_x, ngrid_y) tuple
+        #     Number of grid points in the pixelized mask
+
+        # pix_scale: float
+        #     Pixel scale (in arcsec/pix)
+
+        # offset_x: float
+        #     x-offset of the slit mask from grid center (in arcsec)
+
+        # offset_y: float
+        #     y-offset of the slit mask from grid center (in arcsec)
+
+        slit_width, slit_angle
+        shape = (pars['shape'][1], pars['shape'][2])
+        pix_scale = pars['pixscale']
+        offset_x, offset_y = pars['offset_x'], pars['offset_y']
+
+        slit_mask = np.ones((ngrid, ngrid))
+        grid_x = self.generate_grid(0, pix_scale, shape[0])
+        grid_y = self.generate_grid(0, pix_scale, shape[1])
+
+        xx, yy = np.meshgrid(grid_x, grid_y)
+
+        xx_new = (xx - offset_x) * np.cos(slit_angle) - (yy - offset_y) * np.sin(slit_angle)
+        yy_new = (xx - offset_x) * np.sin(slit_angle) + (yy - offset_y) * np.cos(slit_angle)
+
+        slit_mask[np.abs(yy_new) > slit_width/2.] = 0.
+
+        return slit_mask
+
+
+    def _generate_grid(self, center, pix_scale, ngrid):
+        low, high =  center - pix_scale*ngrid, center + pix_scale*ngrid
+        edges = np.linspace(low, high, ngrid+1)
+
+        centers = (edges[1:] + edges[:-1])/2
+
+        return centers
 
 if __name__ == '__main__':
     sim = TNGsimulation()

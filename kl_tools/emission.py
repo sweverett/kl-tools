@@ -106,7 +106,7 @@ class EmissionLine(object):
         #    return np.interp(x,lambdas.to(lam_unit).value,gauss,left=0.,right=0.)
         #return interpfunc
 
-        return interp1d(lambdas, gauss)
+        return interp1d(lambdas, gauss, fill_value=0., bounds_error=False)
 
 class SED(object):
     '''

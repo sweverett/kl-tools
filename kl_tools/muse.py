@@ -123,10 +123,11 @@ class MuseDataCube(cube.DataCube):
         clean up later
         '''
 
-        self.pars['z'] = self.obj_data['Z']
+        # TODO: Should we put this anywhere else?
+        # self.pars['z'] = self.obj_data['Z']
 
         # some are set later
-        self.pars['specs'] = {
+        specs = {
             # A guess, based on throughput here:
             # https://www.eso.org/sci/facilities/paranal/instruments/muse/inst.html
             'throughput': 0.2,
@@ -135,8 +136,9 @@ class MuseDataCube(cube.DataCube):
 
         Nlines = len(self.lines)
 
-        z = float(self.pars['z'])
-        R = self.pars['specs']['resolution']
+        z = self.obj_data['Z'].value[0]
+        R = specs['resolution']
+
         lines = []
         for line in self.lines:
             # TODO: We should investigate whether to use LAMBDA_SN directly,
@@ -289,7 +291,11 @@ def main(args):
         linefile=emlinePath
         )
 
+    # check that selecting max line s2n works correctly
     muse.set_line()
+
+    # check that redshift acessing works correctly
+    muse.z
 
     outdir = os.path.join(utils.TEST_DIR, 'muse')
     utils.make_dir(outdir)

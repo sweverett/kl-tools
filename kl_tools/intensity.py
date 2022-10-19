@@ -201,7 +201,7 @@ class InclinedExponential(IntensityMap):
         g1 = pars.get('g1', theta_pars['g1'])
         g2 = pars.get('g2', theta_pars['g2'])
         theta_int = pars.get('theta_int', theta_pars['theta_int'])
-        
+
         inc = Angle(np.arcsin(sini), radians)
 
         gal = gs.InclinedExponential(

@@ -838,7 +838,7 @@ class GrismLikelihood(LogLikelihood):
         i_array, gal = imap.render(theta_pars, datavector, _pars)
         self.i_array = i_array
         self._construct_model_datacube(theta_pars, v_array, i_array, gal)
-    
+        
     def setup_imap(self, theta_pars, datavector):
         '''
         theta_pars: dict
@@ -1201,6 +1201,7 @@ class GrismLikelihood_test(LogLikelihood):
         Outputs:
         ========
         psf_model: GalSim PSF object
+
         '''
         _type = config.get('psf_type', 'none').lower()
         if _type != 'none':

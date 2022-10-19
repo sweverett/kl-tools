@@ -134,7 +134,8 @@ def main(args, pool):
                 }
             },
         # 'marginalize_intensity': True,
-        'psf': gs.Gaussian(fwhm=.8, flux=1.0)
+        'psf': gs.Gaussian(fwhm=.8, flux=1.0) # fwhm in arcsec
+        # 'psf': gs.Moffat(fwhm=.8, beta=2.5, flux=1.0), # fwhm in arcsec
         'run_options': {
             'remove_continuum': True,
             'use_numba': False

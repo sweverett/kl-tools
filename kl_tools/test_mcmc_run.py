@@ -120,17 +120,17 @@ def main(args, pool):
             # 'type': 'basis',
             # # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
-            # 'basis_type': 'exp_shapelets',
+            # # 'basis_type': 'exp_shapelets',
             # 'basis_kwargs': {
-            #     # 'Nmax': 12, revert to this
-            #     'Nmax': 12,
+            #     # 'Nmax': 12, fiducial
+            #     'Nmax': 7,
             #     # 'plane': 'disk',
             #     'plane': 'obs',
             #     'beta': 0.37, # n12-exp_shapelet
             #     # 'beta': 1.45, # n20-sersiclet
             #     # 'beta': 'sampled',
             #     'index': 1,
-            #    'b': 1,
+            #     'b': 1,
             #     }
         },
         'velocity': {

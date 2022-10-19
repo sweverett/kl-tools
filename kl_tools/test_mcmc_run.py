@@ -122,7 +122,7 @@ def main(args, pool):
             # 'basis_type': 'sersiclets',
             # # 'basis_type': 'exp_shapelets',
             # 'basis_kwargs': {
-            #     # 'Nmax': 12, fiducial
+            #     # 'Nmax': 12, # fiducial
             #     'Nmax': 7,
             #     # 'plane': 'disk',
             #     'plane': 'obs',

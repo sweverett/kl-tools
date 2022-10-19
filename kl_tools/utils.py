@@ -165,7 +165,7 @@ def set_cache_dir():
     basedir = get_base_dir()
     cachedir = os.path.join(basedir, '.cache/')
     make_dir(cachedir) # will only create if it does not exist
-    return
+    return cachedir
 
 BASE_DIR = get_base_dir()
 MODULE_DIR = get_module_dir()

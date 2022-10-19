@@ -1,8 +1,11 @@
 import numpy as np
 from scipy.interpolate import interp1d
+from numpy import interp
 import astropy.units as u
 
 import utils
+
+import ipdb
 
 class EmissionLine(object):
     '''
@@ -77,6 +80,12 @@ class EmissionLine(object):
 
         lambdas = np.arange(lblue, lred+res, res) * lam_unit
 
+        # Will compare the requested resolution w/ the slice delta lambda's
+        # to make sure a reasonable interpolator step size is used
+        wlam = np.mean(
+            (np.array(lambdas)[1:] - np.array(lambdas)[:-1])/2.
+            )
+
         # Model emission line SED as gaussian
         R = line_pars['R']
         z = line_pars['z']
@@ -85,11 +94,17 @@ class EmissionLine(object):
 
         line_unit = line_pars['unit']
         mu  = obs_val * line_unit
-        std = obs_std * line_unit
+        std = np.sqrt(obs_std**2 + wlam**2) * line_unit
 
         norm = 1. / (std * np.sqrt(2.*np.pi))
         chi = ((lambdas - mu)/std).value
         gauss = norm * np.exp(-0.5*chi**2)
+
+        # This was added by Eric to convert to a numpy interpolator, but this
+        # causes pickling issues
+        #def interpfunc(x):
+        #    return np.interp(x,lambdas.to(lam_unit).value,gauss,left=0.,right=0.)
+        #return interpfunc
 
         return interp1d(lambdas, gauss)
 

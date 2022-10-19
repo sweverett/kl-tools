@@ -68,7 +68,7 @@ class CubePars(parameters.MetaPars):
 
         # sometimes it is already set in the parameter dict
         if (remake is False) & (self._bandpasses is not None):
-            return self._bandpasses
+            return
 
         bp = self.pars['bandpasses']
 
@@ -98,8 +98,9 @@ class CubePars(parameters.MetaPars):
             bandpasses = setup_simple_bandpasses(*args, **kwargs)
 
         self._bandpasses = bandpasses
+        self['bandpasses'] = bandpasses
 
-        return bandpasses
+        return
 
     def build_wavelength_list(self):
         '''
@@ -148,6 +149,7 @@ class CubePars(parameters.MetaPars):
     def set_shape(self, shape):
         '''
         Store the datacube shape in CubePars
+        
         shape: (Nspec, Nx, Ny) tuple
         '''
 
@@ -250,7 +252,6 @@ class DataCube(DataVector):
 
         self.pars = pars
         self.pix_scale = pars['pix_scale']
-        #self.bandpasses = pars.build_bandpasses()
 
         if len(data.shape) != 3:
             # Handle the case of 1 slice
@@ -305,15 +306,14 @@ class DataCube(DataVector):
 
     @property
     def bandpasses(self):
-        return self.pars._bandpasses
+        return self.pars.bandpasses
 
     @property
     def lambdas(self):
         return self.pars.lambdas
-
     @property
     def lambda_unit(self):
-        self.pars._lambda_unit
+        return self.pars._lambda_unit
 
     @property
     def slices(self):
@@ -745,7 +745,7 @@ class DataCube(DataVector):
         trunc_weights = self.weights[cut,:,:]
         trunc_masks = self.masks[cut,:,:]
 
-        trunc_pars = self.pars.copy()
+        trunc_pars = self.pars.copy() # is a deep copy
 
         # Have to do it this way as lists cannot be indexed by np arrays
         trunc_pars['bandpasses'] = [self.bandpasses[i]
@@ -778,12 +778,14 @@ class DataCube(DataVector):
         '''
         This method overwrites the existing datacube slice data, while
         keeping all existing metadata
+        
         data: np.ndarray
             The 3-dimensional numpy array to set as the new slice data
         weights: float, list, np.ndarray
             Pass if you want to overwrite the weight maps as well
         masks: float, list, np.ndarray
             Pass if you want to overwrite the mask maps as well
+        
         see _set_maps() for details for weight & masks
         '''
 

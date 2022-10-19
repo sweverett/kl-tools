@@ -149,7 +149,7 @@ class CubePars(parameters.MetaPars):
     def set_shape(self, shape):
         '''
         Store the datacube shape in CubePars
-        
+
         shape: (Nspec, Nx, Ny) tuple
         '''
 
@@ -778,14 +778,14 @@ class DataCube(DataVector):
         '''
         This method overwrites the existing datacube slice data, while
         keeping all existing metadata
-        
+
         data: np.ndarray
             The 3-dimensional numpy array to set as the new slice data
         weights: float, list, np.ndarray
             Pass if you want to overwrite the weight maps as well
         masks: float, list, np.ndarray
             Pass if you want to overwrite the mask maps as well
-        
+
         see _set_maps() for details for weight & masks
         '''
 

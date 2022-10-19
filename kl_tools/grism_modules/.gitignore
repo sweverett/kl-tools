@@ -1,0 +1,6 @@
+src/.idea/*
+src/cmake-build-debug/*
+src/build/*
+src/dist/*
+src/kltools_grism_module_2.egg-info/*
+__pycache__

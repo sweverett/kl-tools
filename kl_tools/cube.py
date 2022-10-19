@@ -66,6 +66,7 @@ class CubePars(parameters.MetaPars):
         Build a bandpass list from pars if not provided directly
         '''
 
+        # sometimes it is already set in the parameter dict
         if (remake is False) & (self._bandpasses is not None):
             return
 

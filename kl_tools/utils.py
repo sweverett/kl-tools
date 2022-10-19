@@ -41,7 +41,7 @@ def read_yaml(yaml_file):
     with open(yaml_file, 'r') as stream:
         return yaml.safe_load(stream)
 
-def build_map_grid(Nx, Ny):
+def build_map_grid(Nx, Ny, indexing='ij', scale=1.0):
     '''
     We define the grid positions as the center of pixels
 
@@ -54,13 +54,13 @@ def build_map_grid(Nx, Ny):
     Rx = (Nx // 2) - 0.5 * ((Nx-1) % 2)
     Ry = (Ny // 2) - 0.5 * ((Ny-1) % 2)
 
-    x = np.arange(-Rx, Rx+1, 1)
-    y = np.arange(-Ry, Ry+1, 1)
+    x = np.arange(-Rx, Rx+1, 1) * scale
+    y = np.arange(-Ry, Ry+1, 1) * scale
 
     assert len(x) == Nx
     assert len(y) == Ny
 
-    X, Y = np.meshgrid(x, y, indexing='ij')
+    X, Y = np.meshgrid(x, y, indexing=indexing)
 
     return X, Y
 
@@ -166,6 +166,7 @@ def set_cache_dir():
     cachedir = os.path.join(basedir, '.cache/')
     make_dir(cachedir) # will only create if it does not exist
     return cachedir
+
 
 BASE_DIR = get_base_dir()
 MODULE_DIR = get_module_dir()

@@ -1,5 +1,0 @@
-/home/jiachuan/kl-tools_spencer/kl_tools/src/cmake-build-debug/CMakeFiles/kltools_grism_module_2.dir
-/home/jiachuan/kl-tools_spencer/kl_tools/src/cmake-build-debug/CMakeFiles/edit_cache.dir
-/home/jiachuan/kl-tools_spencer/kl_tools/src/cmake-build-debug/CMakeFiles/rebuild_cache.dir
-/home/jiachuan/kl-tools_spencer/kl_tools/src/cmake-build-debug/pybind11/CMakeFiles/edit_cache.dir
-/home/jiachuan/kl-tools_spencer/kl_tools/src/cmake-build-debug/pybind11/CMakeFiles/rebuild_cache.dir

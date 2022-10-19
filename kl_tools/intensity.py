@@ -147,7 +147,7 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux, hlr,
+    def __init__(self, datavector, flux, hlr,
         theory_Nx = None, theory_Ny = None, scale = None):
 
         '''
@@ -173,7 +173,6 @@ class InclinedExponential(IntensityMap):
 
         self.flux = flux
         self.hlr = hlr
-
         self.pix_scale = scale if scale is not None else datavector.pix_scale
 
         # same as default, but to make it explicit
@@ -233,7 +232,6 @@ class InclinedExponential(IntensityMap):
         self.image = gal.drawImage(
             nx=self.nx, ny=self.ny, scale=self.pix_scale
             ).array
-
         if pars.get('run_options', {}).get('imap_return_gal', False):
             return self.image, self.gal
         else:

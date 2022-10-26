@@ -84,7 +84,7 @@ class CubePars(parameters.MetaPars):
 
             # already checked it is a list or dict
             bandpass_req = ['lambda_blue', 'lambda_red', 'dlambda']
-            bandpass_opt = ['throughput', 'zp', 'unit']
+            bandpass_opt = ['throughput', 'zp', 'unit', 'file']
             utils.check_fields(bp_dict, bandpass_req, bandpass_opt)
 
             args = [
@@ -916,7 +916,7 @@ class Slice(object):
         return
 
 def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
-                            throughput=1., zp=30., unit='nm'):
+                            throughput=1., zp=30., unit='nm', file=None):
     '''
     Setup list of bandpasses needed to instantiate a DataCube
     given the simple case of constant spectral resolution, throughput,
@@ -942,10 +942,17 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
     lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
 
     bandpasses = []
-    for l1, l2 in lambdas:
-        bandpasses.append(galsim.Bandpass(
-            throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-            ))
+    if file is None:
+        for l1, l2 in lambdas:
+            bandpasses.append(galsim.Bandpass(
+                throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
+                ))
+    else:
+        # build bandpass from file
+        assert os.path.exists(file), f'Bandpass file {file} does not exist!'
+        _bandpass = galsim.Bandpass(file, wave_type = unit)
+        for l1, l2 in lambdas:
+            bandpasses.append(_bandpass.truncate(blue_limit=l1, red_limit=l2))
 
     return bandpasses
 

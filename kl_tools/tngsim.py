@@ -362,6 +362,23 @@ class TNGsimulation(object):
 
         return slit_spectrum
 
+    def to_grism(self, pars):
+        ''' 
+        Generate grism spectrum given meta data
+
+        pars: any classes that subclass from cube.CubePars
+            A CubePars or its derived class that holds all relevant metadata
+            about the desired instrument and DataCube parameters needed to
+            render the TNG object.
+            The this particular function, it is grism.GrismPars object. 
+        '''
+        # adjust GrismPars object
+        
+        # build data cube
+        simcube = self._generateCube(pars)
+        # dispersed into grism image
+
+        # return the grism data
 
     def _get_slit_mask(self, pars):
         '''

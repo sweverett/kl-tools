@@ -31,45 +31,17 @@ using namespace std;
 
 int _MPI_SIZE = -1;
 int _MPI_RANK = -1;
-/** test how global variable works when called by Python MPI **/
-struct parcel{
-    int x;
-    int y;
-    int z;
-    double val;
-};
-parcel global_parcel{.x=1,.y=2,.z=3,.val=114.514};
-void print_parcel(){
-    cout << "GP = " << global_parcel.x << ", " << global_parcel.y << ", " <<\
-    global_parcel.z << ", " << global_parcel.val << endl;
-}
-void set_parcel(int i, int j, int k, double val){
-    global_parcel.x = i;
-    global_parcel.y = j;
-    global_parcel.z = k;
-    global_parcel.val = val;
-    print_parcel();
-}
-
-
-/** end testing python MPI **/
 
 /** wrapper function interface **/
-/*
-void cpp_add_disperse_helper(const py::dict &config,
-                             const ndarray lambdas,
-                             const ndarray bandpasses);
-void cpp_get_dispersed_image(int index, const ndarray theory_data,
-                             ndarray dispersed_data);
-*/
-void cpp_add_grism_observation(const py::dict &config,
+void cpp_add_observation(const py::dict &config,
                          const ndarray lambdas,
                          const ndarray bandpasses,
                          const ndarray data, const ndarray noise);
-void cpp_add_image_observation(const py::dict &config,
-                               const ndarray data, const ndarray noise);
 void cpp_get_dispersed_image(int index, const ndarray theory_data,
                              ndarray dispersed_data);
+void cpp_get_image(int index,
+                   const ndarray theory_data, ndarray image,
+                   const ndarray lambdas, const ndarray bandpasses);
 double cpp_get_chi2(int index, const ndarray modelImage);
 void cpp_clear_observation();
 int cpp_get_Nobs();
@@ -106,14 +78,17 @@ namespace interface_mpp_aux {
                         const ndarray lambdas,
                         const ndarray bandpasses);
 
-        disperse_helper(const py::dict &config);
-
         void set_disperse_helper(const py::dict &config,
                                  const ndarray lambdas,
                                  const ndarray bandpasses);
 
         void get_dispersed_image(const ndarray theory_data,
                                  ndarray dispersed_data) const;
+
+        void get_photometry_image(const ndarray theory_data,
+                                  ndarray photometry_data,
+                                  const ndarray lambdas,
+                                  const ndarray bandpasses) const;
 
         int getNx() const { return this->Nx; }
 
@@ -129,8 +104,11 @@ namespace interface_mpp_aux {
 
         double getModelScale() const { return this->model_scale; }
 
+        int getObsType() const {return this->obstype;}
+
     private:
         // configuration parameters
+        int obstype; // observation type: 0 = photometry; 1 = grism
         int model_Nx, model_Ny, model_Nlam; // theory model cube dimension
         double model_scale; // theory model cube pixel scale
         int Nx, Ny; // observed image dimension
@@ -155,35 +133,76 @@ namespace interface_mpp_aux {
 
     disperse_helper::disperse_helper(const py::dict &config, const ndarray lambdas,
                                      const ndarray bandpasses) {
-        model_Nx = py::int_(config["model_Nx"]);
-        model_Ny = py::int_(config["model_Ny"]);
-        model_Nlam = py::int_(config["model_Nlam"]);
-        model_scale = py::float_(config["model_scale"]);
-        Nx = py::int_(config["Nx"]);
-        Ny = py::int_(config["Ny"]);
-        pix_scale = py::float_(config["pix_scale"]);
-        R_spec = py::float_(config["R_spec"]);
-        disp_ang = py::float_(config["disp_ang"]);
-        offset = py::float_(config["offset"]);
-        diameter = py::float_(config["diameter"]);
-        exp_time = py::float_(config["exp_time"]);
-        gain = py::float_(config["gain"]);
+        /* Initialize disperse helper
+         * This function set the parameters needed to generate simulated images
+         * TODO:
+         *      - Unify the interface such that the constructor can deal with
+         *        both the broadband image and grism image.
+         *      - Rename the configuration parameter keys such that it fits the
+         *        FITS convention
+         *          - INSTNAME: instrument name
+         *          - OBSTYPE : type of observation, grism or photometry
+         *          - BANDPASS: bandpass file name
+         *          - MDNAXIS1: number of pixels along 3d model cube x-axis
+         *          - MDNAXIS2: number of pixels along 3d model cube y-axis
+         *          - MDNAXIS3: number of pixels along 3d model cube lambda-axis
+         *          - MDSCALE : pixel scale of the 3d model cube
+         *          [ MDCD1_1 : partial of the 1st axis w.r.t. x, 3d modelcube
+         *          [ MDCD1_2 : partial of the 1st axis w.r.t. y, 3d modelcube
+         *          [ MDCD2_1 : partial of the 2nd axis w.r.t. x, 3d modelcube
+         *          [ MDCD2_2 : partial of the 2nd axis w.r.t. y, 3d modelcube
+         *          - CONFFILE: instrument configuration file *.conf
+         *          - NAXIS   : number of array dimensions
+         *          - NAXIS1  : number of pixels along x
+         *          - NAXIS2  : number of pixels along y
+         *          - CRPIX1  : x-coordinate of the reference pixel
+         *          - CRPIX2  : y-coordinate of the reference pixel
+         *          - CRVAL1  : first axis value at the reference pixel
+         *          - CRVAL2  : second axis value at the reference pixel
+         *          - CTYPE1  : the coordinate type for the first axis
+         *          - CTYPE2  : the coordinate type for the second axis
+         *          - PIXSCALE: the pixel scale of observed image
+         *          [ CD1_1   : partial of the 1st axis w.r.t. x
+         *          [ CD1_2   : partial of the 1st axis w.r.t. y
+         *          [ CD2_1   : partial of the 2nd axis w.r.t. x
+         *          [ CD2_2   : partial of the 2nd axis w.r.t. y
+         *          - DIAMETER: aperture diameter in cm
+         *          - EXPTIME : exposure time in seconds
+         *          - GAIN    : detector gain
+         *          - NOISETYP: noise model type
+         *          - SKYLEVEL: sky level
+         *          - RDNOISE : read noise in e/s
+         *          - ADDNOISE: flag for adding noise or not
+         *          - PSFTYPE : PSF model type
+         *          - PSFFWHM : FWHM of the PSF model
+         *          - RSPEC   : spectral resolution
+         *          - DISPANG : dispersion angle in rad
+         *          - OFFSET  : offset of the dispersed frame center to the
+         *                      pointing center
+         * */
+        obstype = py::int_(config["OBSTYPE"]);
+        model_Nx = py::int_(config["MDNAXIS1"]);
+        model_Ny = py::int_(config["MDNAXIS2"]);
+        model_Nlam = py::int_(config["MDNAXIS3"]);
+        model_scale = py::float_(config["MDSCALE"]);
+        Nx = py::int_(config["NAXIS1"]);
+        Ny = py::int_(config["NAXIS2"]);
+        pix_scale = py::float_(config["PIXSCALE"]);
+        diameter = py::float_(config["DIAMETER"]);
+        exp_time = py::float_(config["EXPTIME"]);
+        gain = py::float_(config["GAIN"]);
+        if(obstype==1) {
+            R_spec = py::float_(config["RSPEC"]);
+            disp_ang = py::float_(config["DISPANG"]);
+            offset = py::float_(config["OFFSET"]);
+        }
+        else{
+            R_spec = 0.0;
+            disp_ang = 0.0;
+            offset = 0.0;
+        }
         int status = set_pixel_response(lambdas, bandpasses);
         assert(status == 0);
-    }
-
-// this is used for photometry data, an empty placeholder
-    disperse_helper::disperse_helper(const py::dict &config) {
-        model_Nx = py::int_(config["model_Nx"]);
-        model_Ny = py::int_(config["model_Ny"]);
-        model_Nlam = py::int_(config["model_Nlam"]);
-        model_scale = py::float_(config["model_scale"]);
-        Nx = py::int_(config["Nx"]);
-        Ny = py::int_(config["Ny"]);
-        pix_scale = py::float_(config["pix_scale"]);
-        diameter = py::float_(config["diameter"]);
-        exp_time = py::float_(config["exp_time"]);
-        gain = py::float_(config["gain"]);
     }
 
     void disperse_helper::set_disperse_helper(const py::dict &config,
@@ -283,13 +302,17 @@ namespace interface_mpp_aux {
         cout << "\tdimension = (" << Ny << ", " << Nx << ")" << endl;
         if (pixel_response_table.size() > 0) { pixel_response_table.clear(); }
         for (i = 0; i < model_Nlam; i++) {
+            // break the loop if it is photometry obs
+            if((obstype==0) and (i>0)) break;
+
             vector<double> shift{0.0, 0.0}; // in units of pixel
             double blue_limit = ptr_l[2 * i + 0];
             double red_limit = ptr_l[2 * i + 1];
             double mean_wave = (blue_limit + red_limit) / 2.;
             // take the linear average of the bandpass.
             // Note that this only works when the lambda grid is fine enough.
-            double mean_bp = (ptr_bp[2 * i + 0] + ptr_bp[2 * i + 1]) / 2.0;
+            double mean_bp = 1.0; // the bandpass is counted seperately
+            if(obstype==1) mean_bp = (ptr_bp[2*i] + ptr_bp[2*i+1])/2.0;
             // for each slice, disperse & interpolate
             get_dispersion(mean_wave, shift);
             if (_DEBUG_PRINTS_) {
@@ -367,6 +390,59 @@ namespace interface_mpp_aux {
         return 0;
     }
 
+    void disperse_helper::get_photometry_image(const ndarray theory_data,
+                                               ndarray photometry_data,
+                                               const ndarray lambdas,
+                                               const ndarray bandpasses) const{
+        // sanity check on the numpy array buffer
+        py::buffer_info buf_td = theory_data.request();
+        py::buffer_info buf_ph = photometry_data.request();
+        py::buffer_info buf_l  = lambdas.request();
+        py::buffer_info buf_bp = bandpasses.request();
+        // dimension check on theoretical model cube
+        if (buf_td.ndim != 3)
+            throw runtime_error("`theory_data` dimension must be 3!");
+        if (buf_td.shape[0] != model_Nlam)
+            throw runtime_error("`theory_data`, must have the same Nlam!");
+        if ((buf_td.shape[1] != model_Ny) || (buf_td.shape[2] != model_Nx))
+            throw runtime_error("`theory_data` dimension wrong!");
+        // dimension check on photometry data
+        if (buf_ph.ndim != 2)
+            throw runtime_error("`photometry_data` dimension must be 2!");
+        if (buf_ph.shape[0] != Ny || buf_ph.shape[1] != Nx)
+            throw runtime_error("`photometry_data` dimension wrong!");
+        // dimension check on lambdas and bandpass
+        if (buf_l.ndim != 2)
+            throw runtime_error("`lambdas` dimension must be 2!");
+        if (buf_bp.ndim != 2)
+            throw runtime_error("`bandpasses` dimension must be 2!");
+        if ((buf_l.shape[0] != model_Nlam) || (buf_bp.shape[0] != model_Nlam))
+            throw runtime_error("`lambdas` has wrong Nlam!");
+        // get pointer to the buffer data memory
+        auto *ptr_l = static_cast<double *>(buf_l.ptr);
+        auto *ptr_bp = static_cast<double *>(buf_bp.ptr);
+        auto *ptr_td = static_cast<double *>(buf_td.ptr);
+        auto *ptr_ph = static_cast<double *>(buf_ph.ptr);
+
+        // init photometry data
+        for (size_t index = 0; index < buf_ph.size; index++) ptr_ph[index] = .0;
+
+        // Loop through the pixel response table
+        // Note that for photometry data, the pixel response table only contains
+        // the mapping between 2d cube slice and 2d image.
+        for (int k = 0; k < pixel_response_table.size(); k++){
+            const auto &item = pixel_response_table[k];
+            size_t ph_id = photometry_data.index_at(item.image_y, item.image_x);
+            // loop through wavelength grid
+            for (int il = 0; il < pixel_response_table.size(); il++){
+                size_t td_id = theory_data.index_at(il, item.cube_y, item.cube_x);
+
+                double mean_bp = (ptr_bp[2 * il + 0] + ptr_bp[2 * il + 1]) / 2.0;
+                ptr_ph[ph_id] += ptr_td[td_id] * item.weight * mean_bp;
+            }
+        }
+    }
+
     void disperse_helper::get_dispersed_image(const ndarray theory_data,
                                               ndarray dispersed_data) const {
         // sanity check
@@ -394,10 +470,10 @@ namespace interface_mpp_aux {
         omp_set_num_threads(thread_qty);
 
 #pragma omp parallel shared(dispersed_data, theory_data, ptr_dd, \
-    ptr_td, pixel_response_table)
+        ptr_td, pixel_response_table)
         {
             vector<double> local_copy(Ny * Nx, 0.0);
-            #pragma omp for
+#pragma omp for
             for (int k = 0; k < pixel_response_table.size(); k++) {
                 const auto &item = pixel_response_table[k];
                 // record the response here
@@ -412,7 +488,7 @@ namespace interface_mpp_aux {
             for (int j = 0; j < Ny; j++) {
                 for (int i = 0; i < Nx; i++) {
                     size_t dd_id = dispersed_data.index_at(j, i);
-                    #pragma omp critical
+#pragma omp critical
                     {
                         ptr_dd[dd_id] += local_copy[j * Nx + i];
                     }
@@ -420,28 +496,7 @@ namespace interface_mpp_aux {
             }
         }
     }
-/*
-class HelperCollection{
-public:
-    static HelperCollection& get_instance(){
-        static HelperCollection instance;
-        return instance;
-    }
-    ~HelperCollection() = default;
-    void push_back(const disperse_helper& item){
-        cout << "Adding disperse_helper to the collection." << endl;
-        this->helper_list.push_back(item);
-        cout << this->helper_list.size() << " helper in this list" << endl;
-    }
-    const disperse_helper& get_helper(int index) const{
-        return this->helper_list.at(index);
-    }
-private:
-    vector<disperse_helper> helper_list;
-    HelperCollection() = default;
-    HelperCollection(HelperCollection const&) = delete;
-};
-*/
+
 
 
 /* Singleton class of data vector
@@ -566,7 +621,7 @@ private:
 // =============================================================================
 namespace ima = interface_mpp_aux;
 
-void cpp_add_grism_observation(const py::dict &config,
+void cpp_add_observation(const py::dict &config,
                          const ndarray lambdas,
                          const ndarray bandpasses,
                          const ndarray data, const ndarray noise)
@@ -575,13 +630,7 @@ void cpp_add_grism_observation(const py::dict &config,
     const ima::disperse_helper item = ima::disperse_helper(config, lambdas, bandpasses);
     instance.add_observation(data, noise, item);
 }
-void cpp_add_image_observation(const py::dict &config,
-                               const ndarray data, const ndarray noise)
-{
-    ima::DataVector& instance = ima::DataVector::get_instance();
-    const ima::disperse_helper item = ima::disperse_helper(config);
-    instance.add_observation(data, noise, item);
-}
+
 void cpp_clear_observation(){
     ima::DataVector& instance = ima::DataVector::get_instance();
     instance.clear_observation();
@@ -599,6 +648,22 @@ void cpp_get_dispersed_image(int index, const ndarray theory_data,
     assert(index < _Nobs);
     const ima::disperse_helper& item = instance.get_helper(index);
     item.get_dispersed_image(theory_data, dispersed_data);
+}
+
+void cpp_get_image(int index,
+                   const ndarray theory_data, ndarray image,
+                   const ndarray lambdas, const ndarray bandpasses){
+    const ima::DataVector& instance = ima::DataVector::get_instance();
+    int _Nobs = instance.get_Nobs();
+    //cout << "cpp_get_dispersed_image "<< index << " out of " << _Nobs << endl;
+    assert(index < _Nobs);
+    const ima::disperse_helper& item = instance.get_helper(index);
+    if(item.getObsType() == 1) {
+        item.get_dispersed_image(theory_data, image);
+    }
+    else{
+        item.get_photometry_image(theory_data, image, lambdas, bandpasses);
+    }
 }
 
 double cpp_get_chi2(int index, const ndarray modelImage){
@@ -626,42 +691,27 @@ PYBIND11_MODULE(kltools_grism_module_2, m) {
         py::arg("index"),
         py::arg("theory_data"),
         py::arg("dispersed_image"));
-
-  m.def("add_grism_observation",
-        &cpp_add_grism_observation,
+  m.def("get_image",
+        &cpp_get_image,
+        "Get simulated image",
+        py::arg("index"),
+        py::arg("theory_data"),
+        py::arg("image"),
+        py::arg("lambdas"),
+        py::arg("bandpasses"));
+  m.def("add_observation",
+        &cpp_add_observation,
         "Add data vector (observed images) to the C++ singleton",
         py::arg("config"),
         py::arg("lambdas"),
         py::arg("bandpasses"),
         py::arg("data"),
         py::arg("noise"));
-
-  m.def("add_image_observation",
-        &cpp_add_image_observation,
-        "Add data vector (observed images) to the C++ singleton",
-        py::arg("config"),
-        py::arg("data"),
-        py::arg("noise"));
-
   m.def("get_chi2",
         &cpp_get_chi2,
         "Get the chi2 for the ith observation with the input model image",
         py::arg("index"),
         py::arg("modelImage"));
-
-  /* Test how global variable works with Python MPI */
-
-  m.def("set_parcel",
-        &set_parcel,
-        "Set the global_parcel object",
-        py::arg("x"),
-        py::arg("y"),
-        py::arg("z"),
-        py::arg("value"));
-  m.def("print_parcel",
-        &print_parcel,
-        "Print the global_parcel object");
-
   m.def("clear_observation",
         &cpp_clear_observation,
         "Clear all the existing observations");

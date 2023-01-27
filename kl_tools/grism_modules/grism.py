@@ -23,6 +23,7 @@ import utils as utils
 #import parameters as parameters
 import cube as cube
 from emission import EmissionLine, LINE_LAMBDAS, SED
+import kltools_grism_module_2 as m
 
 import ipdb
 
@@ -63,7 +64,7 @@ class GrismPars(cube.CubePars):
                 - wave_type
                 - flux_type
                 - z
-                - wave_range
+                - spectral_range
                 - obs_cont_norm
                 - lines
                 - line_sigma_int
@@ -109,7 +110,7 @@ class GrismPars(cube.CubePars):
                 - unit
                 - file
         '''
-        self._check_pars(cls, pars)
+        self._check_pars(pars)
         if obs_conf is None and pars.get('obs_conf', None) is None:
             raise ValueError('Observation configuration is not set!')
         if obs_conf is not None:
@@ -122,10 +123,10 @@ class GrismPars(cube.CubePars):
         # across branches
         _lrange = pars['model_dimension']['lambda_range']
         _Nlam = (_lrange[1]-_lrange[0])/pars['model_dimension']['lambda_res']
-        _Nlam = ceil(_Nlam)
-        pars['shape'] = [_Nlam, 
+        _Nlam = np.ceil(_Nlam)
+        pars['shape'] = np.array([_Nlam, 
                          pars['model_dimension']['Nx'], 
-                         pars['model_dimension']['Ny']]
+                         pars['model_dimension']['Ny']], dtype=int)
         pars['pix_scale'] = pars['model_dimension']['scale']
         pars['bandpasses'] = {
             'lambda_blue': _lrange[0],
@@ -143,9 +144,9 @@ class GrismPars(cube.CubePars):
 
         self.obs_index = pars['obs_conf']['OBSINDEX']
         # update the obs_conf with the theoretical model cube parameters
-        self.pars['obs_conf']['MDNAXIS1'] = pars['shape'][0]
-        self.pars['obs_conf']['MDNAXIS2'] = pars['shape'][1]
-        self.pars['obs_conf']['MDNAXIS3'] = pars['shape'][2]
+        self.pars['obs_conf']['MDNAXIS1'] = pars['shape'][0]# Nlam
+        self.pars['obs_conf']['MDNAXIS2'] = pars['shape'][1]# Nx
+        self.pars['obs_conf']['MDNAXIS3'] = pars['shape'][2]# Ny
         self.pars['obs_conf']['MDSCALE'] = pars['pix_scale']
 
         return
@@ -183,7 +184,7 @@ class GrismModelCube(cube.DataCube):
             - ndarray bandpasses: the 2D bandpass grid
         '''
         # get simulated image
-        _img = np.zeros(self.pars.conf['NAXIS1'], self.pars.conf['NAXIS2'],
+        _img = np.zeros([self.pars.conf['NAXIS2'], self.pars.conf['NAXIS1']],
                        dtype=np.float64, order='C')
         m.get_image(self.pars.obs_index, self.data, _img, 
                     self.lambdas, self.bp_array)
@@ -225,7 +226,7 @@ class GrismModelCube(cube.DataCube):
     def stack(self, axis=0):
         return np.sum(self._data, axis=axis)
 
-    def set_psf(self, config, **kwargs):
+    def set_psf(self, **kwargs):
         ''' Generate PSF model
 
         Inputs:
@@ -239,59 +240,59 @@ class GrismModelCube(cube.DataCube):
         psf_model: GalSim PSF object
 
         '''
-        _type = config.get('PSFTYPE', 'none').lower()
+        _type = self.pars.conf.get('PSFTYPE', 'none').lower()
         if _type != 'none':
             if _type == 'airy':
                 lam = kwargs.get('lam', 1000) # nm
                 scale_unit = kwargs.get('scale_unit', gs.arcsec)
                 self.pars['psf'] = gs.Airy(
-                    lam=lam, diam=config['DIAMETER']/100,
+                    lam=lam, diam=self.pars.conf['DIAMETER']/100,
                     scale_unit=scale_unit)
             elif _type == 'airy_mean':
                 scale_unit = kwargs.get('scale_unit', gs.arcsec)
-                #return gs.Airy(config['psf_fwhm']/1.028993969962188, 
-                #               scale_unit=scale_unit)
-                lam = kwargs.get("lam_mean", 1000) # nm
-                self.pars['psf'] = gs.Airy(
-                    lam=lam, diam=config['DIAMETER']/100,
+                self.pars['psf'] = gs.Airy(self.pars.conf['PSFFWHM']/1.029, 
                     scale_unit=scale_unit)
+                #lam = kwargs.get("lam_mean", 1000) # nm
+                #self.pars['psf'] = gs.Airy(
+                #    lam=lam, diam=self.pars.conf['DIAMETER']/100,
+                #    scale_unit=scale_unit)
             elif _type == 'moffat':
-                beta = config.get('PSFBETA', 2.5)
-                fwhm = config.get('PSFFWHM', 0.5)
+                beta = self.pars.conf.get('PSFBETA', 2.5)
+                fwhm = self.pars.conf.get('PSFFWHM', 0.5)
                 self.pars['psf'] = gs.Moffat(beta=beta, fwhm=fwhm)
             else:
-                raise ValueError(f'{psf_type} has not been implemented yet!')
+                raise ValueError(f'{_type} has not been implemented yet!')
         else:
             self.pars['psf'] = None
         return
 
-    def set_noise(self, config):
+    def set_noise(self):
         ''' Generate image noise based on parameter settings
 
         Outputs:
         ========
         noise: GalSim Noise object
         '''
-        random_seed = config.get('RANDSEED', int(time()))
+        random_seed = self.pars.conf.get('RANDSEED', int(time()))
         rng = gs.BaseDeviate(random_seed+1)
 
-        _type = config.get('NOISETYP', 'ccd').lower()
+        _type = self.pars.conf.get('NOISETYP', 'ccd').lower()
         if _type == 'ccd':
-            sky_level = config.get('SKYLEVEL', 0.65*1.2)
-            read_noise = config.get('RDNOISE', 8.5)
-            gain = config.get('GAIN', 1.0)
-            exp_time = config.get('EXPTIME', 1.0)
-            noise = gs.CCDNoise(rng=rng, gain=self.gain, 
+            sky_level = self.pars.conf.get('SKYLEVEL', 0.65*1.2)
+            read_noise = self.pars.conf.get('RDNOISE', 8.5)
+            gain = self.pars.conf.get('GAIN', 1.0)
+            exp_time = self.pars.conf.get('EXPTIME', 1.0)
+            noise = gs.CCDNoise(rng=rng, gain=gain, 
                                 read_noise=read_noise, 
                                 sky_level=sky_level*exp_time/gain)
         elif _type == 'gauss':
-            sigma = config.get('NOISESIG', 1.0)
+            sigma = self.pars.conf.get('NOISESIG', 1.0)
             noise = gs.GaussianNoise(rng=rng, sigma=sigma)
         elif _type == 'poisson':
-            sky_level = config.get('SKYLEVEL', 0.65*1.2)
+            sky_level = self.pars.conf.get('SKYLEVEL', 0.65*1.2)
             noise = gs.PoissonNoise(rng=rng, sky_level=sky_level)
         else:
-            raise ValueError(f'{self.noise_type} not implemented yet!')
+            raise ValueError(f'{_type} not implemented yet!')
         self.pars['noise'] = noise
         return
 
@@ -739,7 +740,7 @@ class GrismDataVector(cube.DataVector):
         '''
         _h = self.data_header[idx].copy()
         for k in _required_keys:
-            if k is not in _h.keys():
+            if(not k in _h):
                 _h[k] = _default_data_header[k]
         _h["OBSINDEX"] = idx
         return _h
@@ -791,9 +792,9 @@ class GrismSED(SED):
         # spectral resolution at 1 micron, assuming dispersion per pixel
         #'resolution': 3000,
         # a dict of line names and obs-frame flux values (erg/s/cm2)
-        'lines': {'Halpha': 1e-15},
+        'lines': {'Ha': 1e-15},
         # intrinsic linewidth in nm
-        'line_sigma_int': {'Halpha': 0.5,},
+        'line_sigma_int': {'Ha': 0.5,},
         #'line_hlr': (0.5, Unit('arcsec')),
         'thin': -1,
     }
@@ -801,11 +802,7 @@ class GrismSED(SED):
     _h = constants.h.to('erg s').value
     _c = constants.c.to('nm/s').value
     # build-in emission line species and info
-    _valid_lines = {
-        'Halpha': 656.461,
-        'OII': [372.7092, 372.9875],
-        'OIII': [496.0295, 500.8240],
-    }
+    _valid_lines = {k:v.to('nm').value for k,v in LINE_LAMBDAS.items()}
     
     def __init__(self, pars):
         '''
@@ -813,11 +810,19 @@ class GrismSED(SED):
         '''
         self.pars = GrismSED._default_pars.copy()
         self.updatePars(pars)
-        continuum = self._addContinuum()
-        emission = self._addEmissionLines()
-        self.spectrum = continuum + emission
+        _con = self._addContinuum()
+        _emi = self._addEmissionLines()
+        self.spectrum = _con + _emi
         if self.pars['thin'] > 0:
             self.spectrum = self.spectrum.thin(rel_err=self.pars['thin'])
+        super(GrismSED, self).__init__(
+            self.pars['spectral_range'][0], self.pars['spectral_range'][1], 
+            3000, 'nm')
+
+    def __call__(self, wave):
+        if isinstance(wave, u.Quantity):
+            wave = wave.to(self.spectrum.wave_type).value
+        return self.spectrum(wave)
         
         
     def updatePars(self, pars):
@@ -928,8 +933,8 @@ def initialize_observations(Nobs, pars_list, datavector=None):
                 _data = datavector.get_data(i)
                 _noise = datavector.get_noise(i)
             else:
-                _data = np.zeros(pars.conf['NAXIS1'], pars.conf['NAXIS2'])
-                _noise = np.ones(pars.conf['NAXIS1'], pars.conf['NAXIS2'])
+                _data = np.zeros([pars.conf['NAXIS2'], pars.conf['NAXIS1']])
+                _noise = np.ones([pars.conf['NAXIS2'], pars.conf['NAXIS1']])
             m.add_observation(pars.conf, pars.lambdas, pars.bp_array,
                 _data, _noise)
     assert (m.get_Nobs() == Nobs), "Inconsistent # of observations!"

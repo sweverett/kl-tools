@@ -9,6 +9,7 @@ import galsim
 sys.path.insert(0, '../')
 import parameters as parameters
 import emission as emission
+from emission import LINE_LAMBDAS
 
 class Spectrum(emission.SED):
     '''
@@ -45,9 +46,9 @@ class Spectrum(emission.SED):
         # spectral resolution at 1 micron, assuming dispersion per pixel
         #'resolution': 3000,
         # a dict of line names and obs-frame flux values (erg/s/cm2)
-        'lines': {'Halpha': 1e-15},
+        'lines': {'Ha': 1e-15},
         # intrinsic linewidth in nm
-        'line_sigma_int': {'Halpha': 0.5,},
+        'line_sigma_int': {'Ha': 0.5,},
         #'line_hlr': (0.5, Unit('arcsec')),
         'thin': -1,
     }
@@ -55,11 +56,7 @@ class Spectrum(emission.SED):
     _h = constants.h.to('erg s').value
     _c = constants.c.to('nm/s').value
     # build-in emission line species and info
-    _valid_lines = {
-        'Halpha': 656.461,
-        'OII': [372.7092, 372.9875],
-        'OIII': [496.0295, 500.8240],
-    }
+    _valid_lines = {k:v.to('nm').value for k,v in LINE_LAMBDAS.items()}
     
     def __init__(self, pars):
         '''
@@ -67,9 +64,9 @@ class Spectrum(emission.SED):
         '''
         self.pars = Spectrum._default_pars.copy()
         self.updatePars(pars)
-        continuum = self._addContinuum()
-        emission = self._addEmissionLines()
-        self.spectrum = continuum + emission
+        _con = self._addContinuum()
+        _emi = self._addEmissionLines()
+        self.spectrum = _con + _emi
         if self.pars['thin'] > 0:
             self.spectrum = self.spectrum.thin(rel_err=self.pars['thin'])
         super(Spectrum, self).__init__(self.pars['spectral_range'][0],

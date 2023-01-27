@@ -123,6 +123,7 @@ class CubePars(parameters.MetaPars):
             # Make sure units are consistent
             # (could generalize, but not necessary)
             assert bp.wave_type == self._lambda_unit
+        self._lambdas = np.array(self._lambdas)
 
         self['wavelengths'] = self._lambdas
 
@@ -177,7 +178,7 @@ class CubePars(parameters.MetaPars):
     @property
     def lambdas(self):
         if self._lambdas is None:
-            self.build_lambdas()
+            self.build_wavelength_list()
 
         return self._lambdas
 

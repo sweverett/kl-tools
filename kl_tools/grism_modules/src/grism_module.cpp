@@ -126,12 +126,14 @@ namespace interface_mpp_aux {
 
         void get_dispersion(double lam, vector<double> &shift);
 
-        double img2cube_arcsec(double center, int edge, double shift_in_pix, double ref) {
+        double img2cube_arcsec(double center, int edge,
+                               double shift_in_pix, double ref) {
             return center + (edge * 0.5 - shift_in_pix) * pix_scale - ref;
         }
     };
 
-    disperse_helper::disperse_helper(const py::dict &config, const ndarray lambdas,
+    disperse_helper::disperse_helper(const py::dict &config,
+                                     const ndarray lambdas,
                                      const ndarray bandpasses) {
         /* Initialize disperse helper
          * This function set the parameters needed to generate simulated images
@@ -143,9 +145,9 @@ namespace interface_mpp_aux {
          *          - INSTNAME: instrument name
          *          - OBSTYPE : type of observation, grism or photometry
          *          - BANDPASS: bandpass file name
-         *          - MDNAXIS1: number of pixels along 3d model cube x-axis
-         *          - MDNAXIS2: number of pixels along 3d model cube y-axis
-         *          - MDNAXIS3: number of pixels along 3d model cube lambda-axis
+         *          - MDNAXIS1: number of pixels along 3d model cube lambda-axis
+         *          - MDNAXIS2: number of pixels along 3d model cube x-axis
+         *          - MDNAXIS3: number of pixels along 3d model cube y-axis
          *          - MDSCALE : pixel scale of the 3d model cube
          *          [ MDCD1_1 : partial of the 1st axis w.r.t. x, 3d modelcube
          *          [ MDCD1_2 : partial of the 1st axis w.r.t. y, 3d modelcube
@@ -180,10 +182,16 @@ namespace interface_mpp_aux {
          *          - OFFSET  : offset of the dispersed frame center to the
          *                      pointing center
          * */
+        set_disperse_helper(config, lambdas, bandpasses);
+    }
+
+    void disperse_helper::set_disperse_helper(const py::dict &config,
+                                              const ndarray lambdas,
+                                              const ndarray bandpasses) {
         obstype = py::int_(config["OBSTYPE"]);
-        model_Nx = py::int_(config["MDNAXIS1"]);
-        model_Ny = py::int_(config["MDNAXIS2"]);
-        model_Nlam = py::int_(config["MDNAXIS3"]);
+        model_Nx = py::int_(config["MDNAXIS2"]);//Nx?
+        model_Ny = py::int_(config["MDNAXIS3"]);//Ny?
+        model_Nlam = py::int_(config["MDNAXIS1"]);//Nlam
         model_scale = py::float_(config["MDSCALE"]);
         Nx = py::int_(config["NAXIS1"]);
         Ny = py::int_(config["NAXIS2"]);
@@ -205,30 +213,9 @@ namespace interface_mpp_aux {
         assert(status == 0);
     }
 
-    void disperse_helper::set_disperse_helper(const py::dict &config,
-                                              const ndarray lambdas,
-                                              const ndarray bandpasses) {
-        model_Nx = py::int_(config["model_Nx"]);
-        model_Ny = py::int_(config["model_Ny"]);
-        model_Nlam = py::int_(config["model_Nlam"]);
-        model_scale = py::float_(config["model_scale"]);
-        Nx = py::int_(config["Nx"]);
-        Ny = py::int_(config["Ny"]);
-        pix_scale = py::float_(config["pix_scale"]);
-        R_spec = py::float_(config["R_spec"]);
-        disp_ang = py::float_(config["disp_ang"]);
-        offset = py::float_(config["offset"]);
-        diameter = py::float_(config["diameter"]);
-        exp_time = py::float_(config["exp_time"]);
-        gain = py::float_(config["gain"]);
-        // update the pixel response
-        int status = set_pixel_response(lambdas, bandpasses);
-        assert(status == 0);
-    }
-
     void disperse_helper::get_dispersion(double lam, vector<double> &shift) {
-        shift[0] = (lam * (R_spec / 500.0) + offset) * cos(disp_ang);
-        shift[1] = (lam * (R_spec / 500.0) + offset) * sin(disp_ang);
+        shift[0] = (lam * (R_spec / 500.0) + offset) * cos(disp_ang);// x
+        shift[1] = (lam * (R_spec / 500.0) + offset) * sin(disp_ang);// y
     }
 
     int disperse_helper::set_pixel_response(const ndarray lambdas,
@@ -255,8 +242,12 @@ namespace interface_mpp_aux {
         double Ry_theory = (int) (model_Ny / 2) - 0.5 * ((model_Ny - 1) % 2);
         vector<double> origin_Xgrid(model_Nx, 0.0);
         vector<double> origin_Ygrid(model_Ny, 0.0);
-        for (i = 0; i < model_Nx; i++) { origin_Xgrid[i] = (i - Rx_theory) * model_scale; }
-        for (i = 0; i < model_Ny; i++) { origin_Ygrid[i] = (i - Ry_theory) * model_scale; }
+        for (i = 0; i < model_Nx; i++) {
+            origin_Xgrid[i] = (i - Rx_theory) * model_scale;
+        }
+        for (i = 0; i < model_Ny; i++) {
+            origin_Ygrid[i] = (i - Ry_theory) * model_scale;
+        }
         double ob_x = origin_Xgrid[0] - 0.5 * model_scale;
         double ob_y = origin_Ygrid[0] - 0.5 * model_scale;
         // observed image
@@ -295,17 +286,18 @@ namespace interface_mpp_aux {
         cout << "[" << _MPI_RANK << "/" << _MPI_SIZE << "] ";
         cout << "Theory model cube:" << endl;
         cout << "\tscale = " << model_scale;
-        cout << "\tdimension = (" << model_Nlam << ", " << model_Ny << ", " << model_Nx << ")" << endl;
+        cout << "\tdimension = (Nlam=" << model_Nlam << ", Nx=";
+        cout << model_Nx << ", Ny=" << model_Ny << ")" << endl;
         cout << "[" << _MPI_RANK << "/" << _MPI_SIZE << "] ";
         cout << "Dispersed image dimension:" << endl;
         cout << "\tscale = " << pix_scale;
-        cout << "\tdimension = (" << Ny << ", " << Nx << ")" << endl;
+        cout << "\tdimension = (Ny=" << Ny << ", Nx=" << Nx << ")" << endl;
         if (pixel_response_table.size() > 0) { pixel_response_table.clear(); }
         for (i = 0; i < model_Nlam; i++) {
             // break the loop if it is photometry obs
             if((obstype==0) and (i>0)) break;
 
-            vector<double> shift{0.0, 0.0}; // in units of pixel
+            vector<double> shift{0.0, 0.0}; // in units of pixel, x & y
             double blue_limit = ptr_l[2 * i + 0];
             double red_limit = ptr_l[2 * i + 1];
             double mean_wave = (blue_limit + red_limit) / 2.;
@@ -323,20 +315,23 @@ namespace interface_mpp_aux {
 
             // loop through the dispersed image
             for (j = 0; j < Ny; j++) {
-                for (k = 0; k < Nx; k++) {
+                for (k = 0; k < Nx; k++){
                     // For each pixel in the dispersed image, find its original
-                    // pixels who contribute its flux. Then distribute the photons
-                    // from the theory cube to the observed image. If part of the
-                    // cell is involved, linear interpolation is applied.
-                    // For dispersed pixel (j,k), find its corners position in
-                    // arcsec, then map these corners to theory model cube, in units
-                    // of arcsec w.r.t. the lower-left corner of the theory model
-                    // cube pixel.
-
-                    l = img2cube_arcsec(target_Xgrid[k], -1, shift[0], ob_x);
-                    r = img2cube_arcsec(target_Xgrid[k], 1, shift[0], ob_x);
-                    b = img2cube_arcsec(target_Ygrid[j], -1, shift[1], ob_y);
-                    t = img2cube_arcsec(target_Ygrid[j], 1, shift[1], ob_y);
+                    // pixels who contribute its flux. Then distribute the
+                    // photons from the theory cube to the observed image.
+                    // If part of the cell is involved, linear interpolation is
+                    // applied. For dispersed pixel (j,k), find its corners
+                    // position in arcsec, then map these corners to theory
+                    // model cube, in units of arcsec w.r.t. the lower-left
+                    // corner of the theory model cube pixel.
+                    l = img2cube_arcsec(target_Xgrid[k], -1,
+                                        shift[0], ob_x);
+                    r = img2cube_arcsec(target_Xgrid[k], 1,
+                                        shift[0], ob_x);
+                    b = img2cube_arcsec(target_Ygrid[j], -1,
+                                        shift[1], ob_y);
+                    t = img2cube_arcsec(target_Ygrid[j], 1,
+                                        shift[1], ob_y);
                     lb = fmin(fmax(l / model_scale, 0), model_Nx);
                     rb = fmin(fmax(r / model_scale, 0), model_Nx);
                     bb = fmin(fmax(b / model_scale, 0), model_Ny);
@@ -363,19 +358,19 @@ namespace interface_mpp_aux {
                         } else { y_weight[0] = tb - bb; }
                         // linear interpolation
                         for (int p = 0; p < _ny; p++) {
-                            for (int q = 0; q < _nx; q++) {
-                                int _k = p + bi;
-                                int _l = q + li;
+                            for (int q = 0; q < _nx; q++){
+                                int _k = p + bi;// y
+                                int _l = q + li;// x
                                 // record the response here
                                 // dispersed image index: y=j, x=k
                                 // theory cube index: lam=i, y=_k, x=_l
                                 // weight: x_weight[q]*y_weight[p]*mean_bp*flux_scale
                                 pixel_response _res;
-                                _res.image_x = k;
                                 _res.image_y = j;
-                                _res.cube_x = _l;
-                                _res.cube_y = _k;
+                                _res.image_x = k;
                                 _res.cube_z = i;
+                                _res.cube_y = _k;
+                                _res.cube_x = _l;
                                 _res.weight = x_weight[q] * y_weight[p] * mean_bp * flux_scale;
                                 pixel_response_table.push_back(_res);
                             }
@@ -404,7 +399,7 @@ namespace interface_mpp_aux {
             throw runtime_error("`theory_data` dimension must be 3!");
         if (buf_td.shape[0] != model_Nlam)
             throw runtime_error("`theory_data`, must have the same Nlam!");
-        if ((buf_td.shape[1] != model_Ny) || (buf_td.shape[2] != model_Nx))
+        if ((buf_td.shape[1] != model_Nx) || (buf_td.shape[2] != model_Ny))
             throw runtime_error("`theory_data` dimension wrong!");
         // dimension check on photometry data
         if (buf_ph.ndim != 2)
@@ -435,7 +430,7 @@ namespace interface_mpp_aux {
             size_t ph_id = photometry_data.index_at(item.image_y, item.image_x);
             // loop through wavelength grid
             for (int il = 0; il < pixel_response_table.size(); il++){
-                size_t td_id = theory_data.index_at(il, item.cube_y, item.cube_x);
+                size_t td_id = theory_data.index_at(il, item.cube_x, item.cube_y);
 
                 double mean_bp = (ptr_bp[2 * il + 0] + ptr_bp[2 * il + 1]) / 2.0;
                 ptr_ph[ph_id] += ptr_td[td_id] * item.weight * mean_bp;
@@ -448,27 +443,33 @@ namespace interface_mpp_aux {
         // sanity check
         py::buffer_info buf_td = theory_data.request();
         py::buffer_info buf_dd = dispersed_data.request();
-
+        cout << "Checking input dimension" << endl;
         if (buf_td.ndim != 3)
             throw runtime_error("`theory_data` dimension must be 3!");
         if (buf_dd.ndim != 2)
             throw runtime_error("`dispersed_data` dimension must be 2!");
         if (buf_td.shape[0] != model_Nlam)
             throw runtime_error("`theory_data`, must have the same Nlam!");
-        if ((buf_td.shape[1] != model_Ny) || (buf_td.shape[2] != model_Nx))
+        if ((buf_td.shape[1] != model_Nx) || (buf_td.shape[2] != model_Ny))
             throw runtime_error("`theory_data` dimension wrong!");
         if (buf_dd.shape[0] != Ny || buf_dd.shape[1] != Nx)
             throw runtime_error("`dispersed_data` dimension wrong!");
         // get pointer to the buffer data memory
         auto *ptr_td = static_cast<double *>(buf_td.ptr);
         auto *ptr_dd = static_cast<double *>(buf_dd.ptr);
-
+        cout << "Clean the output image" << endl;
         // init dispersed_data
         for (size_t index = 0; index < buf_dd.size; index++) { ptr_dd[index] = 0.0; }
         // begin distribution
-        unsigned int thread_qty = max(atoi(getenv("OMP_NUM_THREADS")), 1);
-        omp_set_num_threads(thread_qty);
-
+        // set OMP threads
+        unsigned int Nthread = 1;
+        char* _OMP_NUM_THREADS_ = getenv("OMP_NUM_THREADS");
+        if(_OMP_NUM_THREADS_) {
+            Nthread = max(atoi(_OMP_NUM_THREADS_), 1);
+        }
+        cout << "Setting OMP thread to " << Nthread << endl;
+        omp_set_num_threads(Nthread);
+        cout << "Looping" << endl;
 #pragma omp parallel shared(dispersed_data, theory_data, ptr_dd, \
         ptr_td, pixel_response_table)
         {
@@ -481,12 +482,15 @@ namespace interface_mpp_aux {
                 // theory cube index: lam=i, y=_k, x=_l
                 // weight: x_weight[q]*y_weight[p]*mean_bp*flux_scale
                 size_t local_copy_id = item.image_y * Nx + item.image_x;
-                size_t td_id = theory_data.index_at(item.cube_z, item.cube_y, item.cube_x);
-
+                size_t td_id = theory_data.index_at(item.cube_z,
+                                                    item.cube_x, item.cube_y);
+                //cout << item.image_x << item.image_y << item.cube_x;
+                //cout << item.cube_y << item.cube_z << item.weight << endl;
                 local_copy[local_copy_id] += ptr_td[td_id] * item.weight;
             }
-            for (int j = 0; j < Ny; j++) {
-                for (int i = 0; i < Nx; i++) {
+            cout << "Dump local copy to the final answer" << endl;
+            for (int j = 0; j < Ny; j++) {// slow axis
+                for (int i = 0; i < Nx; i++) {// fast axis
                     size_t dd_id = dispersed_data.index_at(j, i);
 #pragma omp critical
                     {
@@ -655,13 +659,15 @@ void cpp_get_image(int index,
                    const ndarray lambdas, const ndarray bandpasses){
     const ima::DataVector& instance = ima::DataVector::get_instance();
     int _Nobs = instance.get_Nobs();
-    //cout << "cpp_get_dispersed_image "<< index << " out of " << _Nobs << endl;
+    cout << "cpp_get_dispersed_image "<< index << " out of " << _Nobs << endl;
     assert(index < _Nobs);
     const ima::disperse_helper& item = instance.get_helper(index);
     if(item.getObsType() == 1) {
+        cout << "Calling get_dispersed_image" << endl;
         item.get_dispersed_image(theory_data, image);
     }
     else{
+        cout << "Calling get_photometry_image" << endl;
         item.get_photometry_image(theory_data, image, lambdas, bandpasses);
     }
 }

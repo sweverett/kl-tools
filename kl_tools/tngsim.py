@@ -5,16 +5,19 @@ import astropy.units as u
 import astropy.constants as const
 from astropy import cosmology
 from scipy.spatial.transform import Rotation
+from scipy.stats import binned_statistic_2d
 import h5py
 
 import requests
 from io import BytesIO
 import os
 import pathlib
-
+import sys
+sys.path.insert(0, './grism_modules')
 import utils
 from cube import DataCube, CubePars
 import muse
+import grism
 
 from tqdm import tqdm
 import ipdb
@@ -48,7 +51,16 @@ class TNGsimulation(object):
         self.cosmo = cosmology.Planck18
         return
 
-    def set_subhalo(self, subhaloid, redshift=0.5, simname = 'TNG50-1'):
+    @property
+    def gasPrtl(self):
+        return self._particleData['PartType0']
+
+    @property
+    def starPrtl(self):
+        return self._particleData['PartType4']
+
+    def set_subhalo(self, subhaloid, redshift=0.5, simname = 'TNG50-1',
+                    move_to_redshift = None):
         # Set the _subhalo attribute by querying the TNG catalogs.
         # Then, pull the corresponding particle data.
         self.redshift = redshift
@@ -65,6 +77,11 @@ class TNGsimulation(object):
         print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")
         self._subhalo = get(suburl)
         self._getIllustrisTNGData()
+        if move_to_redshift is not None:
+            self.redshift = move_to_redshift
+        else:
+            self.redshift = redshift
+        self.DA = self.cosmo.angular_diameter_distance(self.redshift)
 
         return
 
@@ -139,7 +156,7 @@ class TNGsimulation(object):
         self._starFlux = self._star_particle_flux(h)
         #mags = h['PartType4']['GFM_StellarPhotometrics'][:]
         #starflux = 10**(-mags[:,4]/2.5)
-        self._line_flux = self._gas_line_flux(h)
+        self._line_flux = self._gas_line_flux(h) # photons rate per particle
 
         return
 
@@ -241,6 +258,8 @@ class TNGsimulation(object):
         for i in range(shape[1]):
             for j in range(shape[2]):
                 these = (du_int == i) & (dv_int == j)
+
+                
                 for iline in pars['emission_lines']:
                     line_center = iline.line_pars['value'] * (1 + iline.line_pars['z'])
                     #if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
@@ -266,6 +285,143 @@ class TNGsimulation(object):
                         )
                 simcube[:,i,j] = channelIm_conv.array
 
+        return simcube
+
+    def generateVelocityMap(self, pars, rescale=.25):
+        '''
+        pars: grism.GrismPars
+            A GrismPars instance that holds all relevant metadata about the
+            desired instrument and GrismModelCube parameters needed to 
+            render the TNG object
+        rescale: float
+            TODO: ask Eric
+        center: bool
+            TODO: ask Eric
+        '''
+        pixel_scale = pars['pix_scale']
+        shape = pars['shape']
+        pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
+        x_range = [-shape[1]/2., shape[1]/2.]
+        y_range = [-shape[2]/2., shape[2]/2.]
+
+        # choose gas particles with flux above some threshold
+        print('Selecting gas particles')
+        _crt = (self._line_flux.value > 1e-5) & \
+                (np.isfinite(self._line_flux.value))
+        inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
+
+        # get the field center, weighted by line flux
+        # we'll be lazy and do not mask NaN here, see if we'll meet any
+        gas_cen = np.average(self.gasPrtl['Coordinates'], axis=0, 
+                            weights=self._line_flux)
+        dpos = rescale * (self.gasPrtl['Coordinates'] - gas_cen)/self.cosmo.h
+
+        print('Subsampling particle data.')
+        dx = dpos[inds, 0]
+        dy = dpos[inds, 1]
+        print('Calculating position offsets')
+        # angular position
+        du = (dx*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        print('Discretizing positions')
+        du_int = (np.round(du)).astype(int)  + int(shape[1]/2)
+        dv_int = (np.round(dv)).astype(int)  + int(shape[2]/2)
+
+        # TODO: add an optional rotation matrix operation.
+        RR = Rotation.from_euler('z',45,degrees=True)
+
+        print(f'Calculating velocity offsets')
+        # Calculate the velocity offset of each particle.
+        deltav = self.gasPrtl['Velocities'][:,2][inds] * \
+                    np.sqrt(1./(1+self.redshift))
+        v_sys = np.average(deltav, axis=0, weights=self._line_flux[inds])
+        print(f'Systematic velocity = {v_sys} km/s')
+        # get physical velocities from TNG by multiplying by sqrt(a)
+        # https://www.tng-project.org/data/docs/specifications/#parttype0
+
+        # TODO: This is where we should apply a shear.
+        v_ary, x_edge, y_edge, binID = binned_statistic_2d(du, dv,
+            deltav - v_sys, statistic=np.nanmedian, bins=shape[1:], 
+            range=[x_range, y_range]
+            )
+
+        return v_ary
+
+    def _generateGrismCube(self, pars, rescale=.25):
+        '''
+        pars: grism.GrismPars
+            A GrismPars instance that holds all relevant metadata about the
+            desired instrument and GrismModelCube parameters needed to 
+            render the TNG object
+        rescale: float
+            TODO: ask Eric
+        center: bool
+            TODO: ask Eric
+        '''
+        pixel_scale = pars['pix_scale']
+        shape = pars['shape']
+        pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
+
+        # get list of slice wavelength midpoints (observer-frame)
+        lambda_bounds = pars['wavelengths'] * pars._lambda_unit
+        lambdas = np.mean(lambda_bounds, axis=1)
+        # get observer-frame sed
+        _obs_sed = grism.GrismSED(pars['sed'])
+
+        # choose gas particles with flux above some threshold
+        print('Selecting gas particles')
+        _crt = (self._line_flux.value > 1e-5) & \
+                (np.isfinite(self._line_flux.value))
+        inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
+
+        # get the field center, weighted by line flux
+        # we'll be lazy and do not mask NaN here, see if we'll meet any
+        gas_cen = np.average(self.gasPrtl['Coordinates'], axis=0, 
+                            weights=self._line_flux)
+        dpos = rescale * (self.gasPrtl['Coordinates'] - gas_cen)/self.cosmo.h
+
+        print('Subsampling particle data.')
+        dx = dpos[inds, 0]
+        dy = dpos[inds, 1]
+        dz = dpos[inds, 2]
+        flux_frac = self._line_flux[inds]/np.sum(self._line_flux[inds])
+        print('Calculating position offsets')
+        # angular position
+        du = (dx*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        print('Discretizing positions')
+        du_int = (np.round(du)).astype(int)  + int(shape[1]/2)
+        dv_int = (np.round(dv)).astype(int)  + int(shape[2]/2)
+
+        # TODO: add an optional rotation matrix operation.
+        RR = Rotation.from_euler('z',45,degrees=True)
+
+        print(f'Calculating velocity offsets')
+        # Calculate the velocity offset of each particle.
+        deltav = self.gasPrtl['Velocities'][:,2][inds] * \
+                    np.sqrt(1./(1+self.redshift)) * u.km/u.s
+        # get physical velocities from TNG by multiplying by sqrt(a)
+        # https://www.tng-project.org/data/docs/specifications/#parttype0
+
+        # TODO: This is where we should apply a shear.
+        
+        simcube = np.zeros(shape)
+        print('Populating datacube with emission lines flux')
+        
+        pbar = tqdm(total=shape[1]*shape[2])
+        for i in range(shape[1]):
+            for j in range(shape[2]):
+                these = (du_int == i) & (dv_int == j)
+                if any(these):
+                    # get the LoS-shifted SED
+                    Doppler = 1.0 - (deltav[these]/const.c).to('1').value
+                    #ipdb.set_trace()
+                    DopLam = lambdas*Doppler[:,np.newaxis] # [these, Nlam]
+                    line_spectra = flux_frac[these, np.newaxis] * _obs_sed(DopLam)
+                    pbar.update(1)
+                    simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
+        pbar.close()
+        
         return simcube
 
     def to_cube(self, pars, shape=None):
@@ -362,7 +518,7 @@ class TNGsimulation(object):
 
         return slit_spectrum
 
-    def to_grism(self, pars):
+    def to_grism(self, pars, rescale=0.25):
         ''' 
         Generate grism spectrum given meta data
 
@@ -372,13 +528,14 @@ class TNGsimulation(object):
             render the TNG object.
             The this particular function, it is grism.GrismPars object. 
         '''
-        # adjust GrismPars object
-        
         # build data cube
-        simcube = self._generateCube(pars)
-        # dispersed into grism image
-
+        print('Generating 3d data cube')
+        _simcube = self._generateGrismCube(pars, rescale = rescale)
+        self.simGrismCube = grism.GrismModelCube(_simcube, pars=pars)
+        print('Generating simulated grism image')
+        image, noise = self.simGrismCube.observe(force_noise_free=False)
         # return the grism data
+        return image, noise
 
     def _get_slit_mask(self, pars):
         '''

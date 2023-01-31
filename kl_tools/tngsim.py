@@ -6,6 +6,7 @@ import astropy.constants as const
 from astropy import cosmology
 from scipy.spatial.transform import Rotation
 import h5py
+import json
 
 import requests
 from io import BytesIO
@@ -14,6 +15,7 @@ import pathlib
 
 import utils
 from cube import DataCube, CubePars
+from tngslit import TNGSlit
 import muse
 
 from tqdm import tqdm
@@ -48,7 +50,7 @@ class TNGsimulation(object):
         self.cosmo = cosmology.Planck18
         return
 
-    def set_subhalo(self, subhaloid, redshift=0.5, simname = 'TNG50-1'):
+    def set_subhalo(self, subhalo_id, redshift=0.5, simname = 'TNG50-1'):
         # Set the _subhalo attribute by querying the TNG catalogs.
         # Then, pull the corresponding particle data.
         self.redshift = redshift
@@ -61,10 +63,12 @@ class TNGsimulation(object):
         snap_redshifts = np.array([snap['redshift'] for snap in snaps])
         self._snapshot = snaps[np.argmin(np.abs(snap_redshifts - redshift))]
         snapurl = self._snapshot['url']
-        suburl = snapurl+f'subhalos/{subhaloid}'
+        suburl = snapurl+f'subhalos/{subhalo_id}'
         print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")
         self._subhalo = get(suburl)
-        self._getIllustrisTNGData()
+
+        self._getIllustrisTNGSubfindData()
+        self._getIllustrisTNGParticleData()
 
         return
 
@@ -83,6 +87,9 @@ class TNGsimulation(object):
         return temperature
 
     def _gas_line_flux(self, h5data):
+		'''
+        TO DO: Replace with a more physical recipe based on SFR
+		'''
         T = self._calculate_gas_temperature(h5data)
         h = self.cosmo.h # hubble parameter
         alpha = 2.6e-13 * (T/1e4)**(-0.7)  * u.cm**3 / u.s
@@ -108,7 +115,38 @@ class TNGsimulation(object):
 
         return spec_norm
 
-    def _getIllustrisTNGData(self):
+
+    def _getIllustrisTNGSubfindData(self):
+        '''
+        Get the Subfind data for the given subhalo.
+
+        The galaxy center from the catalog is used to recenter the particles grid.
+        '''
+        sub  = self._subhalo
+        subfind_cachepath = pathlib.Path(
+            f'{utils.CACHE_DIR}/{self._sim_name}_subhalo_{sub["id"]}_{self._snapshot["number"]}_info.json'
+            )
+
+        if not subfind_cachepath.exists():
+            url = f'http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub["snap"]}/subhalos/{sub["id"]}/info.json'
+            hdr = gethdr()
+
+            r = requests.get(url,headers=hdr)
+            h = r.json()
+            with open(subfind_cachepath, 'w') as ff:
+                json.dump(h, ff)
+
+        else:
+            with open(subfind_cachepath, 'r') as ff:
+                h = json.load(ff)
+
+        self._subhaloCenter = h['SubhaloPos']
+        self._SubhaloStellarPhotometricsRad = h['SubhaloStellarPhotometricsRad']
+        self._peculiar_velocity = h['SubhaloVel']*u.km/u.s
+        return
+
+
+    def _getIllustrisTNGParticleData(self):
         '''
         For a chosen haloid and snapshot, get the ingredients necessary to build a simulated datacube.
         This means stellar continuum (flat across our SED) and a line that traces the gas.
@@ -121,6 +159,7 @@ class TNGsimulation(object):
         cachepath = pathlib.Path(
             f'{utils.CACHE_DIR}/{self._sim_name}_subhalo_{sub["id"]}_{self._snapshot["number"]}.hdf5'
             )
+
         if not cachepath.exists():
             url = f'http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub["snap"]}/subhalos/{sub["id"]}/cutout.hdf5'
             hdr = gethdr()
@@ -128,6 +167,7 @@ class TNGsimulation(object):
             r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all'})
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
+            # ipdb.set_trace()
             with open(cachepath, 'wb') as ff:
                 ff.write(r.content)
         else:
@@ -143,7 +183,7 @@ class TNGsimulation(object):
 
         return
 
-    def _generateCube(self, pars, rescale=.25, center=True):
+    def _generateCube(self, pars, rescale=0.1):
         '''
         pars: cube.CubePars
             A CubePars instance that holds all relevant metadata about the
@@ -154,7 +194,6 @@ class TNGsimulation(object):
         center: bool
             TODO: ask Eric
         '''
-
         pixel_scale = pars['pix_scale']
         shape = pars['shape']
         pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
@@ -172,22 +211,28 @@ class TNGsimulation(object):
         else:
             psf = None
 
-        print('Choosing  indices')
-        inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[
-            (self._line_flux.value > 1e-5) & (np.isfinite(self._line_flux.value))
-            ]
+
         #inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e3) & (np.isfinite(self._line_flux.value))]
 
         # What is the position of the sources relative to the field center?
-        print('Reading particle data.')
-        dx = rescale * (self._particleData['PartType0']['Coordinates'][:,0] -\
-                        np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/self.cosmo.h
-        dy = rescale * (self._particleData['PartType0']['Coordinates'][:,1] -\
-                        np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/self.cosmo.h
-        dz = rescale * (self._particleData['PartType0']['Coordinates'][:,2] -\
-                        np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/self.cosmo.h
+        print('Reading particle data...')
+        dx = rescale*(self._particleData['PartType0']['Coordinates'][:,0] - self._subhaloCenter[0])/self.cosmo.h
+        dy = rescale*(self._particleData['PartType0']['Coordinates'][:,1] - self._subhaloCenter[1])/self.cosmo.h
+        dz = rescale*(self._particleData['PartType0']['Coordinates'][:,2] - self._subhaloCenter[2])/self.cosmo.h
 
-        print('Subsampling particle data.')
+        radius = rescale*self._SubhaloStellarPhotometricsRad/self.cosmo.h
+
+        print('Choosing  indices...')
+		## NOTE: experiment with cutoff radius
+        cutoff = 10
+        particles_not_in_galaxy = np.where((dx<-cutoff*radius) | (dx>cutoff*radius) | (dy<-cutoff*radius) | (dy>cutoff*radius) | (dz<-cutoff*radius) | (dz>cutoff*radius))
+        self._line_flux.value[particles_not_in_galaxy] = 0.0
+
+        inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[
+            (self._line_flux.value > 1e-5) & (np.isfinite(self._line_flux.value))
+            ]        
+        self._line_flux.value[inds] = 1
+        print('Subsampling particle data...')
         dx = dx[inds]
         dy = dy[inds]
         dz = dz[inds]
@@ -195,10 +240,10 @@ class TNGsimulation(object):
         # TODO: add an optional rotation matrix operation.
         RR = Rotation.from_euler('z',45,degrees=True)
 
-        print(f'Calculating velocity offsets')
+        print(f'Calculating velocity offsets...')
         # Calculate the velocity offset of each particle.
         deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./(1+self.redshift)) * u.km/u.s
-        deltav = deltav[inds]
+        deltav = deltav[inds] - self._peculiar_velocity[2]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
 
@@ -211,32 +256,21 @@ class TNGsimulation(object):
         #    line_spectra = self._line_flux[:,np.newaxis]* iline.sed( lambdas / (1+pars['z']) - dlam[:,np.newaxis] )
 
         # Now put these on the pixel grid.
-        print('Calculating position offsets')
-        du = (dx*u.kpc / self.cosmo.angular_diameter_distance(
-            pars['emission_lines'][0].line_pars['z'])
-              ).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
-        dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(
-            pars['emission_lines'][0].line_pars['z'])
-              ).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+        print('Converting to positions on sky...')
+        conversion_factor = (u.kpc / self.cosmo.angular_diameter_distance(
+            pars['emission_lines'][0].line_pars['z'])).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
 
+        du = dx * conversion_factor
+        dv = dy * conversion_factor
         # TODO: This is where we should apply a shear.
 
         # Round each one to the pixel center
-        if center:
-            print('Centering')
-            hist2d,xbins,ybins = np.histogram2d(du,dv,bins=[np.arange(-100,100),np.arange(-100,100)])
-            xmax = xbins[np.argmax(np.sum(hist2d,axis=1))]
-            ymax = ybins[np.argmax(np.sum(hist2d,axis=0))]
-        else:
-            xmax = 0.
-            ymax = 0.
-
-        print('Discretizing positions')
-        du_int = (np.round(du - xmax)).astype(int)  + int(shape[1]/2)
-        dv_int = (np.round(dv - ymax)).astype(int)  + int(shape[2]/2)
+        print('Discretizing positions...')
+        # Grid still centered at zero, need to offset by shape/2
+        du_int, dv_int = np.round(du) + shape[1]/2, np.round(dv) + shape[2]/2
 
         simcube = np.zeros(shape)
-        print('Populating datacube')
+        print('Populating datacube...')
         pbar = tqdm(total=shape[1]*shape[2])
         for i in range(shape[1]):
             for j in range(shape[2]):
@@ -246,11 +280,10 @@ class TNGsimulation(object):
                     #if (line_center > np.min(lambdas/(1+iline.line_pars['z']))) & (line_center < np.max(lambdas/(1+iline.line_pars['z']))):
                     if (line_center > lambdas[0]) & (line_center < lambdas[-1]):
                         dlam = line_center *  (deltav[these] / const.c).to(
-                            u.dimensionless_unscaled
-                            ).value
+                            u.dimensionless_unscaled).value
                         #line_spectra = self._line_flux[inds[these],np.newaxis]* iline.sed( lambdas / (1+iline.line_pars['z']) - dlam[:,np.newaxis] )
-                        line_spectra = self._line_flux[inds[these],np.newaxis] *\
-                            iline.sed(lambdas - dlam[:,np.newaxis])
+                        line_spectra = self._line_flux[inds[these],np.newaxis]*iline.sed(lambdas - dlam[:,np.newaxis]) #*np.exp(-(dlam[:, np.newaxis])**2/10**2)\
+                            
 
                 pbar.update(1)
                 simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
@@ -335,6 +368,7 @@ class TNGsimulation(object):
 
         return datacube
 
+
     def from_slit(self):
         '''
         To Do:
@@ -342,7 +376,8 @@ class TNGsimulation(object):
         '''
         pass
 
-    def to_slit(self, pars):
+
+    def to_slit(self, pars, **kwargs):
         '''
         Generates slit spectrum given meta data
 
@@ -354,21 +389,28 @@ class TNGsimulation(object):
         To Do:
         Implement an abstract class for the slit spectrum and return instance instead of slit spectrum
         '''
-        data_cube = self.to_cube(pars)
-        simcube = data_cube._data
-        slit_mask = self._get_slit_mask(pars)
+        simcube = self.to_cube(pars).data
+        tngslit = TNGSlit(pars)
+        
+        slit_mask, slit_pars = self._get_slit_mask(pars, **kwargs)
 
         slit_spectrum = np.sum(slit_mask[np.newaxis, :, :]*simcube, axis=2)
 
-        return slit_spectrum
+        tngslit.datavector = slit_spectrum
+        tngslit.slit_pars = slit_pars
+        
+        return tngslit
 
 
-    def _get_slit_mask(self, pars):
+    def _get_slit_mask(self, pars, slit_width=0.5, slit_angle=0., offset_x=0., offset_y=0.):
         '''
         Creates slit mask given a list of slit parameters
 
         pars: cube.CubePars
-            A CubePars instance that holds all relevant slit metadata
+            A CubePars instance that holds all relevant metadata
+            
+        slit_pars: dict
+            For now slit metadata is passed as a keyword arguments
         '''
 
         ###
@@ -390,14 +432,19 @@ class TNGsimulation(object):
         # offset_y: float
         #     y-offset of the slit mask from grid center (in arcsec)
 
-        slit_width, slit_angle
+        # Pack keyword arguments into a dict, which is returned and then saved
+        # as an attribute in the TNGSlit class
+        slit_pars = {'slit_width' : slit_width, 
+                     'slit_angle' : slit_angle,
+                     'offset_x' : offset_x,
+                     'offset_y' : offset_y}
+        
         shape = (pars['shape'][1], pars['shape'][2])
-        pix_scale = pars['pixscale']
-        offset_x, offset_y = pars['offset_x'], pars['offset_y']
+        pix_scale = pars['pix_scale']
 
-        slit_mask = np.ones((ngrid, ngrid))
-        grid_x = self.generate_grid(0, pix_scale, shape[0])
-        grid_y = self.generate_grid(0, pix_scale, shape[1])
+        slit_mask = np.ones((shape[0], shape[1]))
+        grid_x = self._generate_grid(0, pix_scale, shape[0])
+        grid_y = self._generate_grid(0, pix_scale, shape[1])
 
         xx, yy = np.meshgrid(grid_x, grid_y)
 
@@ -406,7 +453,7 @@ class TNGsimulation(object):
 
         slit_mask[np.abs(yy_new) > slit_width/2.] = 0.
 
-        return slit_mask
+        return slit_mask, slit_pars
 
     def _generate_grid(self, center, pix_scale, ngrid):
         low, high =  center - pix_scale*ngrid, center + pix_scale*ngrid

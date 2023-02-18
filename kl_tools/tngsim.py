@@ -1,12 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pickle
 from astropy.io import fits
 import astropy.units as u
 import astropy.constants as const
 from astropy import cosmology
+from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
 from scipy.stats import binned_statistic_2d
 import h5py
+import fsps
 
 import requests
 from io import BytesIO
@@ -18,6 +21,8 @@ import utils
 from cube import DataCube, CubePars
 import muse
 import grism
+import emission
+from emission import LINE_LAMBDAS
 
 from tqdm import tqdm
 import ipdb
@@ -28,6 +33,8 @@ def gethdr():
 
 def get(path, params=None):
     # make HTTP GET request to path
+
+    
     headers = gethdr()#{"api-key":"b703779c1f099efed6f47b91607b1bb1"}
     r = requests.get(path, params=params, headers=headers)
 
@@ -59,11 +66,21 @@ class TNGsimulation(object):
     def starPrtl(self):
         return self._particleData['PartType4']
 
+    @property
+    def dmPrtl(self):
+        return self._particleData['PartType1']
+
     def set_subhalo(self, subhaloid, redshift=0.5, simname = 'TNG50-1',
                     move_to_redshift = None):
         # Set the _subhalo attribute by querying the TNG catalogs.
         # Then, pull the corresponding particle data.
         self.redshift = redshift
+        if move_to_redshift is not None:
+            self.move_to_z = move_to_redshift
+        else:
+            self.move_to_z = self.redshift
+        self.DA = self.cosmo.angular_diameter_distance(self.move_to_z)
+        self.dL = self.cosmo.luminosity_distance(self.move_to_z)
         rbase = get(self.base_url)
         self._sim_name = simname
         names = [sim['name'] for sim in rbase['simulations']]
@@ -77,12 +94,6 @@ class TNGsimulation(object):
         print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")
         self._subhalo = get(suburl)
         self._getIllustrisTNGData()
-        if move_to_redshift is not None:
-            self.redshift = move_to_redshift
-        else:
-            self.redshift = redshift
-        self.DA = self.cosmo.angular_diameter_distance(self.redshift)
-
         return
 
     def _calculate_gas_temperature(self,h5data):
@@ -112,18 +123,112 @@ class TNGsimulation(object):
         nr = alpha * ne * nH * V
 
         # What's the flux from this particle at the observer?
-        dL = self.cosmo.luminosity_distance(self.redshift)
-        photon_flux = ( nr / (4 * np.pi * dL**2) ).to(1/u.cm**2/u.s)
+        photon_flux = ( nr / (4 * np.pi * self.dL**2) ).to(1/u.cm**2/u.s)
         return photon_flux
 
+    def ObsSED(self, pars, h5data, method=2, gas_weight=1):
+        _crt = (self._line_flux.value > 1e-5) & \
+                (np.isfinite(self._line_flux.value))
+        inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
+        
+        lambdas = pars['wavelengths']*pars._lambda_unit
+        waves = np.mean(lambdas, axis=1).to('nm').value
+        _sed = np.zeros(waves.shape)
+        _gas_interp = self.gasObsSED(pars, h5data, method)
+        _star_interp = self.starObsSED(pars, h5data)
+        _sed += _gas_interp(waves) * np.sum(self._line_flux[inds].value) * gas_weight
+        _sed += _star_interp(waves) * np.sum(self.starPrtl['Masses'][self._starIDs]*1e10/self.cosmo.h)
+        return interp1d(waves, _sed)
+        
+    
+    def gasObsSED(self, pars, h5data, method=2):
+        ''' Calculate obs-frame SED of gas particles
+        Return: GrismSED object, FLAM [photons/s/cm2/nm]
+        '''
+        if method==1:
+            return grism.GrismSED(pars['sed'])
+        
+        elif method==2:
+            lambdas = pars['wavelengths']*pars._lambda_unit
+            lr, lb = lambdas[-1,1].to('nm').value, lambdas[0,0].to('nm').value
+            dl = np.mean(lambdas[:,1] - lambdas[:,0]).to('nm').value
+            waves = np.mean(lambdas, axis=1).to('nm').value
+            print(lb, lr)
+            _sed_pars = {
+                'lblue': lb,
+                'lred': lr,
+                'resolution': dl,
+                'unit': u.nm,
+            }
+            elines = []
+            _sed = np.zeros(waves.shape)
+            for k,v in pars['sed']['lines'].items():
+                _line_pars = {
+                    'value': LINE_LAMBDAS[k].to('nm').value,
+                    'R': LINE_LAMBDAS[k].to('nm').value/pars['sed']['line_sigma_int'][k],
+                    'z': self.move_to_z,
+                    'unit': u.nm,
+                } 
+                _line = emission.EmissionLine(_line_pars, _sed_pars) # /nm
+                elines.append(_line)
+                _sed += _line.sed(waves) # 1/nm
+            return interp1d(waves, _sed, bounds_error=False, fill_value = 0)
+        
+    def starObsSED(self, pars, h5data):
+        ''' Calculate obs-frame SED of star particles (not including winds)
+        Return: scipy.interpolate.interp1d object, FLAM/Msol [photons/s/cm2/nm/Msol]
+        '''
+        self._starIDs = np.where(self.starPrtl['GFM_StellarFormationTime'][:]>0)[0]
+        # get the mean star formation time, metalicity, and stellar mass
+        GFM_SFT = self.starPrtl['GFM_StellarFormationTime'][:]
+        GFM_SM  = self.starPrtl['GFM_InitialMass'][:]
+        GFM_Z   = np.log10(self.starPrtl['GFM_Metallicity'][:]/0.0127)
+        mean_SFT = np.average(GFM_SFT[self._starIDs], 
+            weights=GFM_SM[self._starIDs])
+        mean_Z = np.average(GFM_Z[self._starIDs],
+            weights=GFM_SM[self._starIDs])
+        # set up FSPS & get continuum per solar mass
+        rest_spec = fsps.StellarPopulation(compute_vega_mags=False, zcontinuous=1,
+                            sfh=0, logzsol=mean_Z, nebemlineinspec=False, 
+                            add_agb_dust_model=False,add_dust_emission=False,
+                            smooth_velocity=False,
+                            dust_type=2, dust2=0.2, imf_type=1)
+        _wave, _spec = rest_spec.get_spectrum(tage=mean_SFT, peraa=True)
+        _photon_rate = _spec * (const.L_sun) / (4*np.pi*self.dL**2) / (const.h*const.c/_wave) 
+        #Fsun = (const.L_sun/(4*np.pi*self.dL**2)).to('erg s-1 cm-2')
+        # F_lambda per Msun (photons/s/cm2/nm/Msol), as a function of wavelength in nm
+        sed_continuum = interp1d(_wave*(1+self.move_to_z)/10, _photon_rate.to('cm-2 s-1 nm-1'))
+
+        return sed_continuum
     def _star_particle_flux(self, h5data):
         # This should just return continuum proportional to stellar mass.
         # Maybe an age correction.
         # Normalize a solar spectrum:
-        norm = 1 * u.Watt / u.m**2 / u.nm / const.M_sun
-        spec_norm = norm * (h5data['PartType4']['Masses'][:]*u.M_sun)
+        # select star particles
+        self._starIDs = np.where(self.starPrtl['GFM_StellarFormationTime'][:]>0)[0]
+        # get the mean star formation time, metalicity, and stellar mass
+        GFM_SFT = self.starPrtl['GFM_StellarFormationTime'][:]
+        GFM_SM  = self.starPrtl['GFM_InitialMass'][:]
+        GFM_Z   = np.log10(self.starPrtl['GFM_Metallicity'][:]/0.0127)
+        mean_SFT = np.average(GFM_SFT[self._starIDs], 
+            weights=GFM_SM[self._starIDs])
+        mean_Z = np.average(GFM_Z[self._starIDs],
+            weights=GFM_SM[self._starIDs])
+        # set up FSPS & get continuum per solar mass
+        sp = fsps.StellarPopulation(compute_vega_mags=False, zcontinuous=1,
+                            sfh=0, logzsol=mean_Z, nebemlineinspec=False, 
+                            add_agb_dust_model=False,add_dust_emission=False,
+                            smooth_velocity=False,
+                            dust_type=2, dust2=0.2, imf_type=1)
+        _wave, _spec = sp.get_spectrum(tage=mean_SFT, peraa=True)
+        Fsun = ((const.L_sun/(4*np.pi*self.dL**2)).to('erg s-1 cm-2')).value
+        # F_lambda per M_sun
+        sed_continuum = interp1d(_wave, _spec * Fsun)
 
-        return spec_norm
+        #norm = 1 * u.Watt / u.m**2 / u.nm / const.M_sun
+        #spec_norm = norm * (h5data['PartType4']['Masses'][:]*u.M_sun)
+
+        return sed_continuum
 
     def _getIllustrisTNGData(self):
         '''
@@ -151,9 +256,11 @@ class TNGsimulation(object):
             h = h5py.File(cachepath,mode='r')
             self._cachefile = cachepath
 
+        self.header = dict(h['Header'].attrs.items())
         self._particleData = h
+        self.CoM = np.average(self.dmPrtl['Coordinates'], axis=0)
         self._particleTemp = self._calculate_gas_temperature(h)
-        self._starFlux = self._star_particle_flux(h)
+        #self._starFlux = self._star_particle_flux(h)
         #mags = h['PartType4']['GFM_StellarPhotometrics'][:]
         #starflux = 10**(-mags[:,4]/2.5)
         self._line_flux = self._gas_line_flux(h) # photons rate per particle
@@ -346,18 +453,10 @@ class TNGsimulation(object):
             )
 
         return v_ary
-
-    def _generateGrismCube(self, pars, rescale=.25):
+    def _generateGrismCube_gas(self, pars, rescale=.25, method=2):
+        ''' Generate grism cube for gas particles
         '''
-        pars: grism.GrismPars
-            A GrismPars instance that holds all relevant metadata about the
-            desired instrument and GrismModelCube parameters needed to 
-            render the TNG object
-        rescale: float
-            TODO: ask Eric
-        center: bool
-            TODO: ask Eric
-        '''
+        # setup grids
         pixel_scale = pars['pix_scale']
         shape = pars['shape']
         pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
@@ -365,8 +464,9 @@ class TNGsimulation(object):
         # get list of slice wavelength midpoints (observer-frame)
         lambda_bounds = pars['wavelengths'] * pars._lambda_unit
         lambdas = np.mean(lambda_bounds, axis=1)
+        
         # get observer-frame sed
-        _obs_sed = grism.GrismSED(pars['sed'])
+        _obs_sed = self.gasObsSED(pars, None, method=method)
 
         # choose gas particles with flux above some threshold
         print('Selecting gas particles')
@@ -374,16 +474,14 @@ class TNGsimulation(object):
                 (np.isfinite(self._line_flux.value))
         inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
 
-        # get the field center, weighted by line flux
-        # we'll be lazy and do not mask NaN here, see if we'll meet any
-        gas_cen = np.average(self.gasPrtl['Coordinates'], axis=0, 
-                            weights=self._line_flux)
-        dpos = rescale * (self.gasPrtl['Coordinates'] - gas_cen)/self.cosmo.h
+        # get the field center
+        dpos = rescale * (self.gasPrtl['Coordinates'] - self.CoM)/self.cosmo.h
 
         print('Subsampling particle data.')
         dx = dpos[inds, 0]
         dy = dpos[inds, 1]
         dz = dpos[inds, 2]
+        total_flux = np.sum(self._line_flux[inds])
         flux_frac = self._line_flux[inds]/np.sum(self._line_flux[inds])
         print('Calculating position offsets')
         # angular position
@@ -407,7 +505,6 @@ class TNGsimulation(object):
         
         simcube = np.zeros(shape)
         print('Populating datacube with emission lines flux')
-        
         pbar = tqdm(total=shape[1]*shape[2])
         for i in range(shape[1]):
             for j in range(shape[2]):
@@ -417,13 +514,121 @@ class TNGsimulation(object):
                     Doppler = 1.0 - (deltav[these]/const.c).to('1').value
                     #ipdb.set_trace()
                     DopLam = lambdas*Doppler[:,np.newaxis] # [these, Nlam]
-                    line_spectra = flux_frac[these, np.newaxis] * _obs_sed(DopLam)
-                    pbar.update(1)
+                    if method==1:
+                        line_spectra = flux_frac[these, np.newaxis] * _obs_sed(DopLam)
+                    elif method==2:
+                        line_spectra = flux_frac[these, np.newaxis] * _obs_sed(DopLam) * total_flux
                     simcube[:,i,j] = simcube[:,i,j] + np.sum(line_spectra.value, axis=0)
-        pbar.close()
-        
+                pbar.update(1)
         return simcube
+    
+    def _generateGrismCube_star(self, pars, rescale=.25):
+        ''' Generate grism cube for star particles
+        '''
+        # setup grids
+        pixel_scale = pars['pix_scale']
+        shape = pars['shape']
+        pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
 
+        # get list of slice wavelength midpoints (observer-frame)
+        lambda_bounds = pars['wavelengths'] * pars._lambda_unit
+        lambdas = np.mean(lambda_bounds, axis=1)
+        
+        # get observer-frame sed
+        # stellar continuum 
+        _obs_sed = self.starObsSED(pars, None)
+
+        # choose gas particles with flux above some threshold
+        print('Selecting star particles')
+        inds = self._starIDs
+
+        # get the field center
+        dpos = rescale * (self.starPrtl['Coordinates'] - self.CoM)/self.cosmo.h
+        SMs = self.starPrtl['Masses'][self._starIDs]*1e10/self.cosmo.h # Msol
+        print('Subsampling particle data.')
+        dx = dpos[inds, 0]
+        dy = dpos[inds, 1]
+        dz = dpos[inds, 2]
+        print('Calculating position offsets')
+        # angular position
+        du = (dx*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        print('Discretizing positions')
+        du_int = (np.round(du)).astype(int)  + int(shape[1]/2)
+        dv_int = (np.round(dv)).astype(int)  + int(shape[2]/2)
+
+        # TODO: add an optional rotation matrix operation.
+        RR = Rotation.from_euler('z',45,degrees=True)
+
+        print(f'Calculating velocity offsets')
+        # Calculate the velocity offset of each particle.
+        deltav = self.starPrtl['Velocities'][:,2][inds] * \
+                    np.sqrt(1./(1+self.redshift)) * u.km/u.s
+        # get physical velocities from TNG by multiplying by sqrt(a)
+        # https://www.tng-project.org/data/docs/specifications/#parttype0
+
+        # TODO: This is where we should apply a shear.
+        
+        simcube = np.zeros(shape)
+        print('Populating datacube with stellar continuum flux')
+        pbar = tqdm(total=shape[1]*shape[2])
+        for i in range(shape[1]):
+            for j in range(shape[2]):
+                these = (du_int == i) & (dv_int == j)
+                if any(these):
+                    # get the LoS-shifted SED
+                    Doppler = 1.0 - (deltav[these]/const.c).to('1').value
+                    #ipdb.set_trace()
+                    DopLam = lambdas*Doppler[:,np.newaxis] # [these, Nlam]
+                    continuum_spectra = SMs[these, np.newaxis] * _obs_sed(DopLam)
+                    simcube[:,i,j] = simcube[:,i,j] + np.sum(continuum_spectra, axis=0)
+                pbar.update(1)
+        return simcube
+        
+    def _generateGrismCube(self, pars, rescale=.25, method=2, gas_weight=1, cached=False):
+        '''
+        pars: grism.GrismPars
+            A GrismPars instance that holds all relevant metadata about the
+            desired instrument and GrismModelCube parameters needed to 
+            render the TNG object
+        rescale: float
+            TODO: ask Eric
+        center: bool
+            TODO: ask Eric
+        '''
+        _cached_fname_pars = '.cache/pars.pkl'
+        _cached_fname_gascube = '.cache/gascube.pkl'
+        _cached_fname_starcube = '.cache/starcube.pkl'
+        _cache_exists = os.path.exists(_cached_fname_pars) and \
+                       os.path.exists(_cached_fname_gascube) and \
+                       os.path.exists(_cached_fname_starcube)
+        if cached:
+            if _cache_exists:
+                with open(_cached_fname_pars, 'rb') as fp:
+                    _cached_pars = pickle.load(fp)
+                with open(_cached_fname_gascube, 'rb') as fp:
+                    _cached_gascube = pickle.load(fp)
+                with open(_cached_fname_starcube, 'rb') as fp:
+                    _cached_starcube = pickle.load(fp)
+                self.cube_gas = _cached_gascube
+                self.cube_star = _cached_starcube
+                #if _cached_pars == pars:
+                #    self.cube_gas = _cached_gascube
+                #    self.cube_star = _cached_starcube
+            else:
+                self.cube_gas = self._generateGrismCube_gas(pars, rescale, method=method)
+                self.cube_star = self._generateGrismCube_star(pars, rescale)
+            with open(_cached_fname_pars, 'wb') as fp:
+                pickle.dump(pars, fp)
+            with open(_cached_fname_gascube, 'wb') as fp:
+                pickle.dump(self.cube_gas, fp)
+            with open(_cached_fname_starcube, 'wb') as fp:
+                pickle.dump(self.cube_star, fp)
+        else:
+            self.cube_gas = self._generateGrismCube_gas(pars, rescale, method=method)
+            self.cube_star = self._generateGrismCube_star(pars, rescale)
+
+        return self.cube_gas*gas_weight + self.cube_star
     def to_cube(self, pars, shape=None):
         '''
         This method is used to render the TNG object onto a fresh datacube,
@@ -518,7 +723,7 @@ class TNGsimulation(object):
 
         return slit_spectrum
 
-    def to_grism(self, pars, rescale=0.25):
+    def to_grism(self, pars, rescale=0.25, method=2, gas_weight=1, cached=False):
         ''' 
         Generate grism spectrum given meta data
 
@@ -530,7 +735,7 @@ class TNGsimulation(object):
         '''
         # build data cube
         print('Generating 3d data cube')
-        _simcube = self._generateGrismCube(pars, rescale = rescale)
+        _simcube = self._generateGrismCube(pars, rescale = rescale, method=method, gas_weight=gas_weight, cached=cached)
         self.simGrismCube = grism.GrismModelCube(_simcube, pars=pars)
         print('Generating simulated grism image')
         image, noise = self.simGrismCube.observe(force_noise_free=False)

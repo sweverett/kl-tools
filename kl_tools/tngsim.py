@@ -7,7 +7,8 @@ import astropy.constants as const
 from astropy import cosmology
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
-from scipy.stats import binned_statistic_2d
+from scipy.stats import binned_statistic_2d, binned_statistic
+from collections import defaultdict
 import h5py
 import fsps
 
@@ -247,7 +248,7 @@ class TNGsimulation(object):
             url = f'http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub["snap"]}/subhalos/{sub["id"]}/cutout.hdf5'
             hdr = gethdr()
 
-            r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all'})
+            r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all', 'dm':'all', })
             f = BytesIO(r.content)
             h = h5py.File(f,mode='r')
             with open(cachepath, 'wb') as ff:
@@ -258,7 +259,25 @@ class TNGsimulation(object):
 
         self.header = dict(h['Header'].attrs.items())
         self._particleData = h
-        self.CoM = np.average(self.dmPrtl['Coordinates'], axis=0)
+        # ckpc/h
+        self.CoM = np.array([sub['cm_x'],sub['cm_y'], sub['cm_z']])
+        self.CoMdm = np.mean(self.dmPrtl['Coordinates'], axis=0)
+        # (kpc/h)/(km/s)
+        self.spin = np.array([sub['spin_x'], sub['spin_y'], sub['spin_z']])
+        # kpc
+        self.hmr = sub['halfmassrad']
+        self.hmr_stars = sub['halfmassrad_stars']
+        self.hmr_gas = sub['halfmassrad_gas']
+        # peculiar velocity of the group, km/s
+        self.vel = np.array([sub['vel_x'], sub['vel_y'], sub['vel_z']])
+        self.veldm = np.mean(self.dmPrtl['Velocities'], axis=0)
+        # 3D peculiar velocity dispersion divided by sqrt{3}
+        self.veldisp = sub['veldisp']
+        # Maximum value of the spherically-averaged rotation curve, km/s
+        # for all particles
+        self.vmax = sub['vmax']
+        # Comoving radius of rotation curve maximum, ckpc/h
+        self.vmaxrad = sub['vmaxrad']
         self._particleTemp = self._calculate_gas_temperature(h)
         #self._starFlux = self._star_particle_flux(h)
         #mags = h['PartType4']['GFM_StellarPhotometrics'][:]
@@ -475,7 +494,7 @@ class TNGsimulation(object):
         inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
 
         # get the field center
-        dpos = rescale * (self.gasPrtl['Coordinates'] - self.CoM)/self.cosmo.h
+        dpos = rescale * (self.gasPrtl['Coordinates'] - self.CoMdm)/self.cosmo.h
 
         print('Subsampling particle data.')
         dx = dpos[inds, 0]
@@ -543,7 +562,7 @@ class TNGsimulation(object):
         inds = self._starIDs
 
         # get the field center
-        dpos = rescale * (self.starPrtl['Coordinates'] - self.CoM)/self.cosmo.h
+        dpos = rescale * (self.starPrtl['Coordinates'] - self.CoMdm)/self.cosmo.h
         SMs = self.starPrtl['Masses'][self._starIDs]*1e10/self.cosmo.h # Msol
         print('Subsampling particle data.')
         dx = dpos[inds, 0]
@@ -736,6 +755,7 @@ class TNGsimulation(object):
         # build data cube
         print('Generating 3d data cube')
         _simcube = self._generateGrismCube(pars, rescale = rescale, method=method, gas_weight=gas_weight, cached=cached)
+        _simcube = np.transpose(_simcube, (0, 2, 1)) # follow the convention of Spencer, Nlam, Nx, Ny
         self.simGrismCube = grism.GrismModelCube(_simcube, pars=pars)
         print('Generating simulated grism image')
         image, noise = self.simGrismCube.observe(force_noise_free=False)
@@ -794,6 +814,175 @@ class TNGsimulation(object):
         centers = (edges[1:] + edges[:-1])/2
 
         return centers
+
+    def getzdisk(self, rmax_pkpc=30):
+        a = 1.0/(1.0+self.redshift)
+        h0 = self.cosmo.h
+        mgas = self.gasPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
+        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        vgas = (self.gasPrtl['Velocities']-self.veldm)*a**0.5*u.Unit('km s-1')
+        Rgas = np.sum(rgas*rgas, axis=1)**0.5
+        gasIDs = np.where(np.logical_and(self._line_flux.value>1e-5, 
+            Rgas<rmax_pkpc*u.kpc))[0]
+        ### Angular momentum of gas particles
+        Lgas = (np.cross(rgas, vgas).T * mgas).T
+        Ldisk = np.sum(Lgas[gasIDs], axis=0)
+        # definition of z-direction: direction of the total angular momentum
+        return Ldisk/np.sqrt(Ldisk[0]**2 + Ldisk[1]**2 + Ldisk[2]**2)
+
+    def getRotationCurve(self, rmin_pkpc=0, rmax_pkpc=30, Nbins=20):
+        ''' Generate the gas rotation velocity curve given radial binning
+        '''
+        a = 1/(1+self.redshift)
+        h0 = self.cosmo.h
+        R_bins = np.linspace(rmin_pkpc, rmax_pkpc, Nbins+1)
+        mgas = self.gasPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
+        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        vgas = (self.gasPrtl['Velocities']-self.veldm)*a**0.5*u.Unit('km s-1')
+        Rgas = np.sum(rgas*rgas, axis=1)**0.5
+        gasIDs = np.where(np.logical_and(self._line_flux.value>1e-5, 
+            Rgas<rmax_pkpc*u.kpc))[0]
+        ### Angular momentum of gas particles
+        Lgas = (np.cross(rgas, vgas).T * mgas).T
+        Ldisk = np.sum(Lgas[gasIDs], axis=0)
+        # definition of z-direction: direction of the total angular momentum
+        zdisk = Ldisk/np.sqrt(np.sum(Ldisk*Ldisk))
+        Ldisk = np.sqrt(np.sum(Ldisk*Ldisk))
+        dgas = np.cross(rgas, zdisk)
+        Dgas = np.sqrt(np.sum(dgas.T*dgas.T, axis=0))
+        Lzgas = np.sum(Lgas * zdisk, axis=1)
+        SFR = self.gasPrtl['StarFormationRate'][:]
+        vtan = Lzgas/(mgas*Dgas)
+        gas2Dhist, skip, gas2Dbin_id = binned_statistic(
+            Dgas.value, Dgas.value, statistic='count', bins=R_bins)
+        gas2Dmap = defaultdict(list)
+        for i,bini in enumerate(gas2Dbin_id):
+            gas2Dmap[bini].append(i)
+        vcirc_mean = np.zeros(Nbins)
+        vcirc_std = np.zeros(Nbins)
+        for i in range(Nbins):
+            pid = gas2Dmap[i+1]
+            _vcirc = np.average(vtan[pid], weights=SFR[pid])
+            _vstd = np.average((vtan[pid]-_vcirc)**2, weights=SFR[pid])**0.5
+            vcirc_mean[i] = _vcirc.to('km s-1').value
+            vcirc_std[i] = _vstd.to('km s-1').value
+        self.vrot = vcirc_mean
+        self.vrot_err = vcirc_std
+        return (R_bins[1:]+R_bins[:-1])/2., self.vrot, self.vrot_err
+
+    def getCircularVelocity(self, rmin_pkpc=0, rmax_pkpc=30, Nbins=20):
+        ''' Generate the gas circular velocity curve given the radial binning
+        '''
+        a = 1/(1+self.redshift)
+        h0 = self.cosmo.h
+        R_bins = np.linspace(rmin_pkpc, rmax_pkpc, Nbins+1)
+        R_cen = (R_bins[1:]+R_bins[:-1])/2.
+
+        mgas = self.gasPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
+        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        Rgas = np.sum(rgas*rgas, axis=1)**0.5
+
+        mstar = self.starPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
+        rstar = (self.starPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        Rstar = np.sum(rstar*rstar, axis=1)**0.5
+
+        mdm = self.header['MassTable'][1] * 1e10*const.M_sun/h0
+        rdm = (self.dmPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        Rdm = np.sum(rdm*rdm, axis=1)**0.5
+
+        dm3Dhist, skip, dm3Dbin_id = binned_statistic(
+            Rdm.to('kpc').value, Rdm.value, statistic='count', bins=R_bins)
+        dm3Dhist = dm3Dhist*mdm
+        gas3Dhist, skip, gas3Dbin_id = binned_statistic(
+            Rgas.to('kpc').value, mgas.to('kg').value, 
+            statistic='sum', bins=R_bins)
+        gas3Dhist = gas3Dhist*u.kg
+        star3Dhist, skip, star3Dbin_id = binned_statistic(
+            Rstar.to('kpc').value, mstar.to('kg').value, 
+            statistic='sum', bins=R_bins)
+        star3Dhist = star3Dhist*u.kg
+        BH3Dhist = np.zeros(Nbins)
+        BH3Dhist[0] = self._particleData['PartType5']['Masses'][0]
+        BH3Dhist = BH3Dhist * 1e10*const.M_sun/h0
+        Menclose = dm3Dhist + gas3Dhist + star3Dhist + BH3Dhist
+        for i in range(1, Nbins):
+            Menclose[i] += Menclose[i-1]
+        self.vcirc = np.sqrt(Menclose*const.G/(R_cen*u.kpc)).to('km s-1').value
+        return (R_bins[1:]+R_bins[:-1])/2., self.vcirc
+
+    def getFaceOnDirection(self):
+        a = 1.0/(1.0+self.redshift)
+        h0 = self.cosmo.h
+        SFR = self.gasPrtl['StarFormationRate'][:]
+        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        Rgas = np.sum(rgas*rgas, axis=1)**0.5
+        _rmax = 2*self.hmr_stars/(1+self.redshift)/self.cosmo.h*u.kpc
+        inds = np.where(Rgas < _rmax)[0]
+        if len(inds)>=50:
+            Iij = np.sum(
+                [np.outer(r, r) for r,sfr in zip(rgas[inds], SFR[inds])], 
+                axis=0)
+        else:
+            mstar = self.starPrtl['Masses'][:]*1e10*const.M_sun/h0
+            rstar = (self.starPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc
+            Rstar = np.sum(rstar*rstar, axis=1)**0.5
+            inds = np.where(Rstar < _rmax/2.)[0]
+            Iij = np.sum(
+                [np.outer(r, r) for r,m in zip(rstar[inds], mstar[inds])], 
+                axis=0)
+        w,v = np.linalg.eig(Iij)
+        print(f'Eigenvals of SFR moment of inertia {w}')
+        zFaceOn = v.T[0]
+        return zFaceOn
+
+    def getStarMomentInertiaEigvals(self):
+        a = 1.0/(1.0+self.redshift)
+        h0 = self.cosmo.h
+        mstar = self.starPrtl['Masses'][:]
+        rstar = (self.starPrtl['Coordinates']-self.CoMdm)*a/h0
+        Iij = np.sum(
+            [np.outer(r, r)*m for r,m in \
+            zip(rstar[self._starIDs], mstar[self._starIDs])], axis=0)
+        Iij /= np.sum(mstar[self._starIDs])
+        w,v = np.linalg.eig(Iij)
+        print(f'Eigenvals of Stellar mass moment of inertia {w}')
+        return w
+
+    def getGasMomentInertiaEigvals(self):
+        a = 1.0/(1.0+self.redshift)
+        h0 = self.cosmo.h
+        inds = np.where( (self._line_flux.value > 1e-5) & \
+                (np.isfinite(self._line_flux.value)) )[0]
+        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0
+        sfrgas = self.gasPrtl['StarFormationRate'][:]
+        Iij = np.sum(
+            [np.outer(r, r)*s for r,s in \
+            zip(rgas[inds], sfrgas[inds])], axis=0)
+        Iij /= np.sum(sfrgas[inds])
+        w,v = np.linalg.eig(Iij)
+        print(f'Eigenvals of gas SFR moment of inertia {w}')
+        return w
+
+    def getStarHMR(self, rescale = 1.0, arcsec=True):
+        shmr = self.hmr_stars/(1+self.redshift)/self.cosmo.h*u.kpc*rescale
+        if arcsec:
+            return ((shmr/self.DA)*u.rad).to('arcsec').value
+        else:
+            return shmr.to('kpc').value
+
+    def getGasHMR(self, rescale = 1.0, arcsec=True):
+        ghmr = self.hmr_gas/(1+self.redshift)/self.cosmo.h*u.kpc*rescale
+        if arcsec:
+            return ((ghmr/self.DA)*u.rad).to('arcsec').value
+        else:
+            return ghmr.to('kpc').value
+
+    def getHMR(self, rescale=1.0, arcsec=True):
+        hmr = self.hmr/(1+self.redshift)/self.cosmo.h*u.kpc*rescale
+        if arcsec:
+            return ((hmr/self.DA)*u.rad).to('arcsec').value
+        else:
+            return hmr.to('kpc').value
 
 def main():
 

@@ -74,6 +74,7 @@ def main(args, pool):
         'v0',
         'vcirc',
         'rscale',
+        'hlr',
         ]
     sampled_pars_value = [0.0, 0.0, -1.04, 0.86, 0.0, 300.0, 0.5]
     sampled_pars_value_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_value)}

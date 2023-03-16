@@ -729,6 +729,25 @@ class GrismDataVector(cube.DataVector):
             
         hdul.close()
 
+    def to_fits(self, file, overwrite=False):
+        ''' Write the data vector obj to a fits file
+        '''
+        hdu_primary = fits.PrimaryHDU(header=fits.Header(dv.header))
+        hdu_img1 = fits.ImageHDU(self.data[0], 
+            header=fits.Header(self.data_header[0]))
+        hdu_noise1 = fits.ImageHDU(self.noise[0], 
+            header=fits.Header(self.data_header[0]))
+        hdu_img2 = fits.ImageHDU(self.data[1], 
+            header=fits.Header(self.data_header[1]))
+        hdu_noise2 = fits.ImageHDU(self.noise[1], 
+            header=fits.Header(self.data_header[1]))
+        hdu_img3 = fits.ImageHDU(self.data[2], 
+            header=fits.Header(self.data_header[2]))
+        hdu_noise3 = fits.ImageHDU(self.noise[2], 
+            header=fits.Header(self.data_header[2]))
+        hdul = fits.HDUList([hdu_primary, hdu_img1, hdu_noise1, hdu_img2, hdu_noise2, hdu_img3, hdu_noise3])
+        hdul.writeto(file, overwrite=overwrite)
+
     def get_config(self, idx=0):
         ''' Get the configuration of the idx image
 

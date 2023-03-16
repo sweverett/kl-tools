@@ -136,6 +136,100 @@ class IntensityMap(object):
 
         return
 
+class GMixModel(IntensityMap):
+    '''
+    This class use the mixture of Gaussian to fit inclined exponential or 
+    inclined Sersic profile, see NGMIX and Hogg & Lang (2012). 
+    The model has two components: emission line (exponential disk) and 
+    continuum (de Vaucouleurs, n=4 Sersic). The two components can have 
+    different flux and half-light radius, but the inclination and position 
+    angle are the same.
+    '''
+    def __init__(self, datavector, has_continuum = True,
+        theory_Nx = None, theory_Ny = None, scale = None):
+        '''
+        datavector: DataCube
+            While this implementation will not use the datacube
+            image explicitly (other than shape info), most will
+        xxx flux: float
+            Object flux
+        xxx hlr: float
+            Object half-light radius (in pixels)
+        '''
+        if theory_Nx is not None and theory_Ny is not None:
+            nx, ny = theory_Nx, theory_Ny
+        else:
+            nx, ny = datavector.Nx, datavector.Ny
+
+        super(GMixModel, self).__init__('inclined_gmix', nx, ny)
+
+        self.has_continuum = has_continuum
+        self.pix_scale = scale if scale is not None else datavector.pix_scale
+
+        # same as default, but to make it explicit
+        self.is_static = False
+
+        return
+
+    def _render(self, theta_pars, datacube, pars):
+        '''
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        datavector: DataCube
+            Truncated data cube of emission line
+        pars: dict
+            A dictionary of any additional parameters needed
+            to render the intensity map
+
+        return: np.ndarray
+            The rendered intensity map
+        '''
+        # update meta parameters & retrieve parameters value
+        meta_updated = pars.meta.copy_with_sampled_pars(theta_pars)
+        hlr = meta_updated['intensity']['hlr']
+        hlr_cont = meta_updated['intensity']['hlr_cont']
+        sini, theta_int = meta_updated['sini'], meta_updated['theta_int']
+        g1, g2 = meta_updated['g1'], meta_updated['g2']
+        inc = Angle(np.arcsin(sini), radians)
+        qz = 0.1
+        qobs = np.sqrt(1-(1-qz**2)*sini**2)
+        # build inclined MoGs for both the emission line and stellar continuum
+        # the shear is applied via Eqn 2.12 in Bernstein & Jarvis 2002
+        
+
+        # Only add knots if a psf is provided
+        # NOTE: no longer workds due to psf conovlution
+        # happening later in modeling
+        # if 'psf' in pars:
+        #     if 'knots' in pars:
+        #         knot_pars = pars['knots']
+        #         knots = gs.RandomKnots(**knot_pars)
+        #         gal = gal + knots
+
+        rot_angle = Angle(theta_int, radians)
+        gal = gal.rotate(rot_angle)
+
+        # TODO: still don't understand why this sometimes randomly fails
+        try:
+            gal = gal.shear(g1=g1, g2=g2)
+        except Exception as e:
+            print('imap generation failed!')
+            print(f'Shear values used: g=({g1}, {g2})')
+            raise e
+        self.gal = gal
+
+        self.image = gal.drawImage(
+            nx=self.nx, ny=self.ny, scale=self.pix_scale
+            ).array
+        if pars.get('run_options', {}).get('imap_return_gal', False):
+            return self.image, self.gal
+        else:
+            return self.image
+
+
+
+
 class InclinedExponential(IntensityMap):
     '''
     This class is mostly for testing purposes. Can give the
@@ -422,6 +516,7 @@ INTENSITY_TYPES = {
     'default': BasisIntensityMap,
     'basis': BasisIntensityMap,
     'inclined_exp': InclinedExponential,
+    'mogs': GMixModel,
     }
 
 def build_intensity_map(name, datavector, kwargs):

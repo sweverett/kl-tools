@@ -461,7 +461,7 @@ class TNGsimulation(object):
         deltav = self.gasPrtl['Velocities'][:,2][inds] * \
                     np.sqrt(1./(1+self.redshift))
         v_sys = np.average(deltav, axis=0, weights=self._line_flux[inds])
-        print(f'Systematic velocity = {v_sys} km/s')
+        print(f'Systemic velocity = {v_sys} km/s')
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
 

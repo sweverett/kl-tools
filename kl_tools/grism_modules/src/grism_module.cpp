@@ -429,7 +429,7 @@ namespace interface_mpp_aux {
             const auto &item = pixel_response_table[k];
             size_t ph_id = photometry_data.index_at(item.image_y, item.image_x);
             // loop through wavelength grid
-            for (int il = 0; il < pixel_response_table.size(); il++){
+            for (int il = 0; il < buf_td.shape[0]; il++){
                 size_t td_id = theory_data.index_at(il, item.cube_x, item.cube_y);
 
                 double mean_bp = (ptr_bp[2 * il + 0] + ptr_bp[2 * il + 1]) / 2.0;

@@ -4,6 +4,7 @@ project(grism_module)
 set(CMAKE_CXX_STANDARD 14)
 
 include_directories(.)
+include_directories(/usr/local/include)
 # add extra include directories
 #include_directories(/Users/jiachuanxu/Workspace/GalSim/include)
 #include_directories(../galsim/include)

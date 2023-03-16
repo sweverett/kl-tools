@@ -20,3 +20,4 @@ dependencies:
   - fitsio
   - ipdb
   - scipy
+  - h5py

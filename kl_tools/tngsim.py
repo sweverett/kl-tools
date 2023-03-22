@@ -87,24 +87,19 @@ class TNGsimulation(object):
         return temperature
 
     def _gas_line_flux(self, h5data):
-		'''
+        '''
         TO DO: Replace with a more physical recipe based on SFR
-		'''
-        T = self._calculate_gas_temperature(h5data)
-        h = self.cosmo.h # hubble parameter
-        alpha = 2.6e-13 * (T/1e4)**(-0.7)  * u.cm**3 / u.s
-        Xe = h5data['PartType0']['ElectronAbundance'][:]
-        XH = 0.76
-        nH =  (h5data['PartType0']['Density'][:]*1e10 * u.M_sun / u.kpc**3 * h**2 / const.m_e).to(1/u.cm**3)
-        ne = Xe * nH
-        V = (h5data['PartType0']['Masses'][:]* 1e10 * u.M_sun/h) / ( h5data['PartType0']['Density'][:] * 1e10 * u.M_sun/h / (u.kpc / h)**3)
-        # Number of recombinations in this volume element
-        nr = alpha * ne * nH * V
+        '''
+        h = self.cosmo.h
+        sfr = h5data['PartType0']['StarFormationRate'][:]
+        mass = h5data['PartType0']['Masses'][:]*1e10/h
 
+        constant = 5.5e-42  # 
+        luminosity = sfr/constant *u.erg/u.s *mass
         # What's the flux from this particle at the observer?
         dL = self.cosmo.luminosity_distance(self.redshift)
-        photon_flux = ( nr / (4 * np.pi * dL**2) ).to(1/u.cm**2/u.s)
-        return photon_flux
+        photon_flux = ( luminosity / (4 * np.pi * dL**2) ).to(u.erg/u.cm**2/u.s)
+        return sfr*u.erg/u.cm**2#photon_flux
 
     def _star_particle_flux(self, h5data):
         # This should just return continuum proportional to stellar mass.
@@ -212,8 +207,6 @@ class TNGsimulation(object):
             psf = None
 
 
-        #inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e3) & (np.isfinite(self._line_flux.value))]
-
         # What is the position of the sources relative to the field center?
         print('Reading particle data...')
         dx = rescale*(self._particleData['PartType0']['Coordinates'][:,0] - self._subhaloCenter[0])/self.cosmo.h
@@ -223,7 +216,7 @@ class TNGsimulation(object):
         radius = rescale*self._SubhaloStellarPhotometricsRad/self.cosmo.h
 
         print('Choosing  indices...')
-		## NOTE: experiment with cutoff radius
+        ## NOTE: experiment with cutoff radius
         cutoff = 10
         particles_not_in_galaxy = np.where((dx<-cutoff*radius) | (dx>cutoff*radius) | (dy<-cutoff*radius) | (dy>cutoff*radius) | (dz<-cutoff*radius) | (dz>cutoff*radius))
         self._line_flux.value[particles_not_in_galaxy] = 0.0

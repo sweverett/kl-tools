@@ -20,6 +20,7 @@ import utils
 import priors
 from likelihood import DataCubeLikelihood
 from velocity import VelocityMap
+from metropolis import MetropolisSampler
 
 import ipdb
 
@@ -153,6 +154,17 @@ class MCMCRunner(object):
     @property
     def meta(self):
         pass
+
+    def get_blobs(self):
+        return self.runner.sampler.blobs
+
+    def get_logprior(self):
+        blobs = self.get_blobs()
+        return blobs[:,:,0]
+
+    def get_loglike(self):
+        blobs = self.get_blobs()
+        return blobs[:,:,1]
 
     @abstractmethod
     def _initialize_sampler(self, pool=None):
@@ -306,13 +318,13 @@ class MCMCRunner(object):
 
         return
 
-    def set_burn_in(burn_in):
+    def set_burn_in(self, burn_in):
         self.burn_in = burn_in
 
         return
 
     def get_chain(self, *args, **kwargs):
-        return sampler.get_chain(*args, **kwargs)
+        return self.sampler.get_chain(*args, **kwargs)
 
     def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         '''
@@ -326,6 +338,9 @@ class MCMCRunner(object):
             The factor by which to thin out the samples by; i.e.
             thin=2 will only use every-other sample
         '''
+
+        if loglike is None:
+            loglike = self.get_loglike()
 
         if self.has_run is not True:
             print('Warning: Cannot compute MAP until the mcmc has been run!')
@@ -343,8 +358,7 @@ class MCMCRunner(object):
             if self.burn_in is not None:
                 discard = self.burn_in
             else:
-                raise ValueError('Must passs a value for discard if ' +\
-                                 'burn_in is not set!')
+                discard = 0
 
         if loglike is None:
             # don't know actual min of loglikelihood, so do best we can
@@ -394,7 +408,7 @@ class MCMCRunner(object):
         # for n in range(ndim):
         for name, indx in self.pars_order.items():
             plt.subplot2grid((ndim, 1), (indx, 0))
-            plt.plot(chain[burn_in:,:,indx], alpha=0.5)
+            self._plot_single_chain(chain, indx, burn_in=burn_in)
             plt.ylabel(name)
 
             if reference is not None:
@@ -411,6 +425,15 @@ class MCMCRunner(object):
         if close is True:
             plt.close()
 
+        return
+
+    @staticmethod
+    def _plot_single_chain(chain, indx, burn_in=0):
+        '''
+        Needs to be separate as nested samplers have different
+        chain access
+        '''
+        plt.plot(chain[burn_in:,:,indx], alpha=0.5)
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
@@ -440,8 +463,9 @@ class MCMCRunner(object):
             if self.burn_in is not None:
                 discard = self.burn_in
             else:
-                raise ValueError('Must passs a value for discard if ' +\
-                                 'burn_in is not set!')
+                discard = 0
+                # raise ValueError('Must pass a value for discard if ' +\
+                #                  'burn_in is not set!')
 
         chain = self.get_chain(flat=True, discard=discard, thin=thin)
 
@@ -521,6 +545,9 @@ class ZeusRunner(MCMCRunner):
             )
 
         return sampler
+
+    def get_blobs(self):
+        return self.sampler.get_blobs()
 
     @property
     def args(self):
@@ -774,6 +801,9 @@ class PocoRunner(MCMCRunner):
 
         return sampler
 
+    def get_blobs(self):
+        return None
+
 class KLensPocoRunner(PocoRunner):
     '''
     See https://pocomc.readthedocs.io/en/latest/
@@ -878,6 +908,21 @@ class UltranestRunner(MCMCRunner):
             )
 
         return sampler
+
+    def get_blobs(self):
+        return None
+
+    def get_logprior(self):
+        raise NotImplementedError('not yet implemented!')
+
+    def get_loglike(self):
+        '''
+        TODO: return actual likelihood of chain values, instead of weights
+        (propto loglike)
+        '''
+
+        weighted_chain = self.get_chain(equal_weight=False)
+        return weighted_chain[0]
 
     @property
     def args(self):
@@ -1001,11 +1046,14 @@ class KLensUltranestRunner(UltranestRunner):
 
         assert (self.burn_in == 0) or (self.burn_in is None)
 
-        super(KLUltranestRunner, self).plot_corner(*args, **kwargs)
+        super(KLensUltranestRunner, self).plot_corner(*args, **kwargs)
 
         return
 
-    def get_chain(self, equal_weighted=True):
+    def get_chain(self, equal_weighted=True, **kwargs):
+        '''
+        ignore most kwargs used for other samplers
+        '''
         chain_dir = os.path.join(self.sampler.logs['run_dir'], 'chains/')
 
         if equal_weighted is True:
@@ -1036,6 +1084,82 @@ class KLensUltranestRunner(UltranestRunner):
 
         return
 
+    @staticmethod
+    def _plot_single_chain(chain, indx, burn_in=0):
+        '''
+        Needs to be separate as nested samplers have different
+        chain access
+
+        No burn-in is used for nested sampling, so we ignore
+        '''
+        plt.plot(chain[:,indx], alpha=0.5)
+        return
+
+class MetropolisRunner(MCMCRunner):
+
+    def _initialize_sampler(self, pool=None):
+        sampler = MetropolisSampler(
+            self.nwalkers, self.ndim, posterior=self.pfunc,
+            post_args=self.args, post_kwargs=self.kwargs,
+            log=True, pool=pool
+            )
+
+        return sampler
+
+    def get_blobs(self):
+        return self.sampler.get_blobs()
+
+    @property
+    def args(self):
+        return self.logpost_args
+
+    @property
+    def kwargs(self):
+        return self.logpost_kwargs
+
+    @property
+    def pfunc(self):
+        return self.logpost
+
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+
+class KLensMetropolisRunner(MetropolisRunner):
+    '''
+    Main difference is that we assume args=[datacube] and
+    kwargs={pars:dict}
+    '''
+
+    def __init__(self, nwalkers, ndim, pfunc, datacube, pars):
+        '''
+        nwalkers: int
+            Number of MCMC walkers. Must be at least 2*ndim
+        ndim: int
+            Number of sampled dimensions
+        pfunc: function, callable()
+            Posterior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
+              covariance matrix, SED definition, etc.
+        '''
+
+        super(KLensMetropolisRunner, self).__init__(
+            nwalkers, ndim, logpost=pfunc, logpost_args=[datacube, pars],
+            )
+
+        self.datacube = datacube
+        self.pars = pars
+
+        self.pars_order = self.pars.sampled.pars_order
+
+        self.MAP_vmap = None
+
+        return
+
+
 def get_runner_types():
     return RUNNER_TYPES
 
@@ -1046,6 +1170,7 @@ RUNNER_TYPES = {
     'zeus': KLensZeusRunner,
     'poco': KLensPocoRunner,
     'ultranest': KLensUltranestRunner,
+    'metropolis': KLensMetropolisRunner,
     }
 
 def build_mcmc_runner(name, args, kwargs):

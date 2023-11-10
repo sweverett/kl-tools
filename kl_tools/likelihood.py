@@ -729,6 +729,7 @@ def get_sampler_prior_type(sampler):
         'emcee': 'prior',
         'zeus': 'prior',
         'poco': 'prior',
+        'metropolis': 'prior',
         'multinest': 'cdf_prior',
         'ultranest': 'cdf_prior'
     }

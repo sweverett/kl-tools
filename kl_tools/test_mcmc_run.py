@@ -28,13 +28,14 @@ from likelihood import LogPosterior
 from velocity import VelocityMap
 
 import ipdb
+import pudb
 
 parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
 parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco',
-                                                   'ultranest'],
+                                                   'ultranest', 'metropolis'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
@@ -244,7 +245,7 @@ def main(args, pool):
 
     print(f'Setting up {sampler} MCMCRunner')
     kwargs = {}
-    if sampler in ['zeus', 'emcee']:
+    if sampler in ['zeus', 'emcee', 'metropolis']:
         nwalkers = 2*ndims
         args = [nwalkers, ndims, log_posterior, datacube, pars]
 
@@ -317,49 +318,47 @@ def main(args, pool):
         outfile=outfile, reference=reference, show=show
         )
 
-    if sampler == 'emcee':
-        blobs = runner.sampler.blobs
-    elif sampler == 'zeus':
-        blobs = runner.sampler.get_blobs()
+    blobs = runner.get_blobs()
 
-    outfile = os.path.join(outdir, 'chain-probabilities.pkl')
-    print(f'Saving prior & likelihood values to {outfile}')
-    blob_data = {
-        'prior': blobs[:,:,0],
-        'likelihood': blobs[:,:,1]
-    }
-    with open(outfile, 'wb') as f:
-        pickle.dump(blob_data, f)
+    if blobs is not None:
+        outfile = os.path.join(outdir, 'chain-probabilities.pkl')
+        print(f'Saving prior & likelihood values to {outfile}')
+        blob_data = {
+            'prior': blobs[:,:,0],
+            'likelihood': blobs[:,:,1]
+        }
+        with open(outfile, 'wb') as f:
+            pickle.dump(blob_data, f)
 
-    outfile = os.path.join(outdir, 'chain-probabilities.png')
-    print(f'Saving prior & likelihood value plot to {outfile}')
-    indx = np.random.randint(0, high=nwalkers)
-    prior = blobs[:,indx,0]
-    like = blobs[:,indx,1]
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 4))
-    plt.subplot(131)
-    plt.plot(prior, label='prior', c='tab:blue')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-    plt.subplot(132)
-    start = int(0.2*len(like)) # get rid of very beginning of burn in
-    plt.plot(like[start:], label='likelihood', c='tab:orange')
-    plt.ylabel('Log probability')
-    plt.legend()
-    plt.subplot(133)
-    plt.plot(prior, label='prior', c='tab:blue')
-    plt.plot(like, label='likelihood', c='tab:orange')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
+        outfile = os.path.join(outdir, 'chain-probabilities.png')
+        print(f'Saving prior & likelihood value plot to {outfile}')
+        indx = np.random.randint(0, high=nwalkers)
+        prior = blobs[:,indx,0]
+        like = blobs[:,indx,1]
+        fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 4))
+        plt.subplot(131)
+        plt.plot(prior, label='prior', c='tab:blue')
+        plt.xlabel('Sample')
+        plt.ylabel('Log probability')
+        plt.legend()
+        plt.subplot(132)
+        start = int(0.2*len(like)) # get rid of very beginning of burn in
+        plt.plot(like[start:], label='likelihood', c='tab:orange')
+        plt.ylabel('Log probability')
+        plt.legend()
+        plt.subplot(133)
+        plt.plot(prior, label='prior', c='tab:blue')
+        plt.plot(like, label='likelihood', c='tab:orange')
+        plt.xlabel('Sample')
+        plt.ylabel('Log probability')
+        plt.legend()
 
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
+        plt.savefig(outfile, bbox_inches='tight', dpi=300)
 
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+        if show is True:
+            plt.show()
+        else:
+            plt.close()
 
     outfile = os.path.join(outdir, 'corner-truth.png')
     print(f'Saving corner plot to {outfile}')
@@ -368,7 +367,7 @@ def main(args, pool):
         outfile=outfile, reference=truth, title=title, show=show
         )
 
-    runner.compute_MAP(loglike=blob_data['likelihood'])
+    runner.compute_MAP()
     map_vals = runner.MAP_true
     print('MAP values:')
     for name, indx in pars_order.items():

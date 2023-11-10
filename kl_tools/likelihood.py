@@ -103,7 +103,8 @@ class LogPosterior(LogBase):
     the passed sampled & meta parameters
     '''
 
-    def __init__(self, parameters, datavector, likelihood='default'):
+    def __init__(self, parameters, datavector, likelihood='default',
+                 prior='default'):
         '''
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
@@ -111,11 +112,17 @@ class LogPosterior(LogBase):
         datavector: DataCube, etc.
             Arbitrary data vector that subclasses from DataVector.
             If DataCube, truncated to desired lambda bounds
+        likelihood: str
+            Type of likelihood model to build; see LIKELIHOOD_TYPES
+        prior: str
+            Type of prior model to build; see PRIOR_TYPES
         '''
 
         super(LogPosterior, self).__init__(parameters, datavector)
 
-        self.log_prior = LogPrior(parameters)
+        self.log_prior = build_prior_model(
+            prior, parameters
+            )
         self.log_likelihood = build_likelihood_model(
             likelihood, parameters, datavector
             )
@@ -187,6 +194,32 @@ class LogPrior(LogBase):
             logprior += prior(theta[indx], log=True)
 
         return logprior
+
+class LogCDFPrior(LogPrior):
+    '''
+    A prior class that returns the sampled value given defined
+    cumulative probability distributions for each sampled parameter
+    '''
+
+    def __call__(self, quantile_cube):
+        '''
+        quantile_cube: np.ndarray
+            An array of CDF quantile values for each parameter. See:
+            https://johannesbuchner.github.io/UltraNest/priors.html?highlight=prior
+        '''
+
+        # prepare the output array, which has the same shape
+        transformed_pars = np.empty_like(quantile_cube)
+
+        pars_order = self.parameters.sampled.pars_order
+
+        for name, prior in self.priors.items():
+            indx = pars_order[name]
+            transformed_pars[indx] = prior(
+                quantile_cube[indx], log=True, quantile=True
+                )
+
+        return transformed_pars
 
 class LogLikelihood(LogBase):
 
@@ -265,6 +298,14 @@ class LogLikelihood(LogBase):
         return (-0.5 * log_det) + self._log_likelihood(
             theta, datavector, model
             )
+
+    def _call_no_args(self, theta):
+        '''
+        TODO: A hack to make ultranest work. Will document later if it
+        is successful
+        '''
+
+        return self(theta, self.datavector)
 
     def _compute_log_det(self, imap):
         # TODO: Adapt this to work w/ new DataCube's w/ weight maps!
@@ -689,14 +730,55 @@ class DataCubeLikelihood(LogLikelihood):
 
         return datacube.get_inv_cov_list()
 
-def get_likelihood_types():
-    return LIKELIHOOD_TYPES
+# NOTE: This is where you must register a new prior model
+PRIOR_TYPES = {
+    'default': LogPrior,
+    'prior': LogPrior,
+    'cdf_prior': LogCDFPrior
+    }
+
+def get_prior_types():
+    return PRIOR_TYPES
+
+def get_sampler_prior_type(sampler):
+    sampler_prior = {
+        'emcee': 'prior',
+        'zeus': 'prior',
+        'poco': 'prior',
+        'metropolis': 'prior',
+        'multinest': 'cdf_prior',
+        'ultranest': 'cdf_prior'
+    }
+
+    return sampler_prior[sampler]
+
+def build_prior_model(name, parameters):
+    '''
+    name: str
+        Name of prior model type
+    parameters: Pars
+        Pars instance that holds all parameters needed for MCMC
+        run, including SampledPars and MetaPars
+    '''
+
+    name = name.lower()
+
+    if name in PRIOR_TYPES.keys():
+        # User-defined input construction
+        prior = PRIOR_TYPES[name](parameters)
+    else:
+        raise ValueError(f'{name} is not a registered prior model!')
+
+    return prior
 
 # NOTE: This is where you must register a new likelihood model
 LIKELIHOOD_TYPES = {
     'default': DataCubeLikelihood,
     'datacube': DataCubeLikelihood
     }
+
+def get_likelihood_types():
+    return LIKELIHOOD_TYPES
 
 def build_likelihood_model(name, parameters, datavector):
     '''

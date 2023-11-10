@@ -90,6 +90,8 @@ class SampledPars(object):
 
         self.pars_order = pars_order
 
+        self.names = [*self.pars_order]
+
         return
 
     def theta2pars(self, theta):

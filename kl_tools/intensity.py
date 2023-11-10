@@ -217,9 +217,19 @@ class InclinedExponential(IntensityMap):
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
 
-        self.image = gal.drawImage(
-            nx=self.nx, ny=self.ny, scale=self.pix_scale
-            ).array
+        try:
+            self.image = gal.drawImage(
+                nx=self.nx, ny=self.ny, scale=self.pix_scale
+                ).array
+        except:
+            # Can fail if no PSF & very inclined
+            try:
+                self.image = gal.drawImage(
+                    nx=self.nx, ny=self.ny, scale=self.pix_scale, method='real'
+                ).array
+            except:
+                print('Rendering failed! Making blank image')
+                self.image = np.zeros((self.nx, self.ny))
 
         return
 

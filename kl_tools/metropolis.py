@@ -10,14 +10,13 @@ class MetropolisSampler(object):
     '''
 
     def __init__(self, nwalkers, ndims,
-                 posterior, posterior_args=None, posterior_kwargs=None,
+                 posterior, post_args=None, post_kwargs=None,
                  # TODO: cleanup after refactor
                  # posterior=None, likelihood=None, prior=None,
                  # post_args=None, post_kwargs=None,
                  # like_args=None, like_kwargs=None,
                  # prior_args=None, prior_kwargs=None,
-                 # log=True,
-                 pool=None):
+                 log=True, pool=None):
         '''
         Must pass *either* a posterior or likelihood + prior
 
@@ -28,10 +27,10 @@ class MetropolisSampler(object):
         posterior: callable
             The posterior distribution to sample from, callable in the form
             of posterior(args, kwargs) where args=[theta, *posterior_args]
-        posterior_args: list
+        post_args: list
             List of additional args needed to evaluate corresponding
             distribution, such as the data vector, covariance matrix, etc.
-        posterior_kwargs: dict (or subclass, such as Pars, MetaPars, etc.)
+        post_kwargs: dict (or subclass, such as Pars, MetaPars, etc.)
             Dictionary of additional kwargs needed to evaluate corresponding
             distribution, such as the meta parameters
         pool: Pool
@@ -62,15 +61,20 @@ class MetropolisSampler(object):
         self.pool = pool
 
         self._posterior = posterior
-        self.posterior_args = posterior_args
-        self.posterior_kwargs = posterior_kwargs
 
-        self.blob = None
+        if post_args is None:
+            post_args = []
+        if post_kwargs is None:
+            post_kwargs = {}
+        self.post_args = post_args
+        self.post_kwargs = post_kwargs
+
+        self.chains = None
+        self.blobs = None
 
         return
 
-    # def posterior(theta, return_blob=True):
-    def posterior(theta, return_blob=True):
+    def posterior(self, theta, return_blob=True):
         '''
         theta: list
             The list of sampled parameters, in order
@@ -79,7 +83,6 @@ class MetropolisSampler(object):
             Returns the tuple of posterior probability and the blob
         '''
 
-        # TODO: fix this to not be nested!
         post_args = [theta, *self.post_args]
 
         # not all posterior calls will return a blob
@@ -87,7 +90,7 @@ class MetropolisSampler(object):
             posterior, blob = self._posterior(
                 *post_args, **self.post_kwargs
                 )
-        except Exception as e:
+        except ValueError as e:
             print(e)
             print('No blob returned; check this!')
             posterior = self._posterior(
@@ -100,7 +103,7 @@ class MetropolisSampler(object):
         else:
             return posterior, (None, None)
 
-    def proposal(theta0, sigma=None):
+    def proposal(self, theta0, sigma=None):
         '''
         Generates proposal parameter values given the current state theta0
 
@@ -117,8 +120,9 @@ class MetropolisSampler(object):
             sigma = np.ones(N)
 
         theta = np.zeros(N)
-        for i, t, s in enumerate(zip(theta0, sigma)):
-            theta[i](np.normal(t, s, 1).item())
+        for i, z in enumerate(zip(theta0, sigma)):
+            t, s = z
+            theta[i] = np.random.normal(t, s, 1).item()
 
         return theta
 
@@ -158,7 +162,7 @@ class MetropolisSampler(object):
             Set to display the approximate progress during the run
         '''
 
-        self.blob = np.zeros((self.nwalkers, 2, nsteps))
+        self.blobs = np.zeros((self.nwalkers, 2, nsteps))
         self.chain = np.zeros((self.nwalkers, self.ndims, nsteps))
 
         if self.pool is None:
@@ -171,15 +175,16 @@ class MetropolisSampler(object):
         for i in range(self.nwalkers):
             if progress is True:
                 print(f'Starting walker {i}')
-            pudb.set_trace()
-            chain, blob = self._run_walker(start[i], nsteps)
+            chain, blobs = self._run_walker(i, start[i], nsteps)
             self.chain[i, :, :] = chain
-            self.blob[i, :, :] = blob
+            self.blobs[i, :, :] = blobs
 
         return
 
-    def _run_walker(self, start, nsteps, progress=True):
+    def _run_walker(self, n, start, nsteps, progress=True):
         '''
+        n: int
+            The walker number
         start: list / np.ndarray
             The starting value of each sampled parameter for this walker
         nsteps: int
@@ -192,13 +197,12 @@ class MetropolisSampler(object):
         blobs = np.zeros((2, nsteps))
 
         theta0 = start
-        p_theta0, b = self.posterior(theta0)
+        p_theta0, b0 = self.posterior(theta0)
 
         for i in range(nsteps):
-            import pudb
-            pudb.set_trace()
-            if ((100*i/nsteps) % 1 == 0) and (progress is True):
-                print(f'Starting walker {i}')
+            percent = (100*i/nsteps)
+            if ( (percent % 1) == 0) and (progress is True):
+                print(f'Walker {n} at {int(percent)}%')
             theta = self.proposal(theta0)
             p_theta, b = self.posterior(theta)
 
@@ -211,4 +215,14 @@ class MetropolisSampler(object):
                 chain[:, i] = theta0
                 blobs[:, i] = b0
 
-        return chain, blob
+        return chain, blobs
+
+    def get_chain(self, flat=False, discard=None, thin=None):
+        chain = self.chain
+
+        # ...
+
+        return chain
+
+    def get_blobs(self):
+        return selfblobs

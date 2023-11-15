@@ -170,7 +170,7 @@ class MCMCRunner(object):
     def _initialize_sampler(self, pool=None):
         pass
 
-    def _initialize_walkers(self, scale=0.1):
+    def _initialize_walkers(self, init_scale=0.001):
         ''''
         TODO: Not obvious that this scale factor is reasonable
         for our problem, should experiment & test further
@@ -180,6 +180,10 @@ class MCMCRunner(object):
 
         Might want to base this as some fractional scale for the width of
         each prior, centered at the max of the prior
+
+        init_scale: float
+            The initialization scale for the prior ball to sample from,
+            multiplied by the prior.scale
         '''
 
         if 'priors' in self.meta:
@@ -193,11 +197,11 @@ class MCMCRunner(object):
                 base = peak if peak is not None else cen
 
                 if prior.scale is not None:
-                    radius = prior.scale
+                    radius = init_scale * prior.scale
                 elif base != 0:
-                    radius = base*scale
+                    radius = base * init_scale
                 else:
-                    radius = scale
+                    radius = init_scale
 
                 # random ball about base value
                 ball = radius * np.random.randn(self.nwalkers)
@@ -1100,8 +1104,7 @@ class MetropolisRunner(MCMCRunner):
     def _initialize_sampler(self, pool=None):
         sampler = MetropolisSampler(
             self.nwalkers, self.ndim, posterior=self.pfunc,
-            post_args=self.args, post_kwargs=self.kwargs,
-            log=True, pool=pool
+            post_args=self.args, post_kwargs=self.kwargs, pool=pool
             )
 
         return sampler

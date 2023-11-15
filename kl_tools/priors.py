@@ -36,7 +36,10 @@ class UniformPrior(Prior):
         # There is no defined peak for a uniform dist
         self.peak = None
         self.cen = np.mean([left, right])
-        self.scale = None
+
+        # while there is not a strict scale to give, some fraction of the
+        # support is good enough for determining our initial sampling
+        self.scale = abs(right - left) / 4.
 
         return
 

@@ -97,8 +97,8 @@ def main(args, pool):
             'r_unit': Unit('kpc'),
         },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
+            'g1': priors.GaussPrior(0., 0.02, clip_sigmas=10),
+            'g2': priors.GaussPrior(0., 0.02, clip_sigmas=10),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
@@ -246,7 +246,10 @@ def main(args, pool):
     print(f'Setting up {sampler} MCMCRunner')
     kwargs = {}
     if sampler in ['zeus', 'emcee', 'metropolis']:
-        nwalkers = 2*ndims
+        if sampler == 'emcee':
+            nwalkers = 10*ndims
+        else:
+            nwalkers = 2*ndims
         args = [nwalkers, ndims, log_posterior, datacube, pars]
 
     elif sampler == 'poco':

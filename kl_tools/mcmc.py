@@ -170,7 +170,7 @@ class MCMCRunner(object):
     def _initialize_sampler(self, pool=None):
         pass
 
-    def _initialize_walkers(self, scale=0.1):
+    def _initialize_walkers(self, init_scale=0.001):
         ''''
         TODO: Not obvious that this scale factor is reasonable
         for our problem, should experiment & test further
@@ -180,6 +180,10 @@ class MCMCRunner(object):
 
         Might want to base this as some fractional scale for the width of
         each prior, centered at the max of the prior
+
+        init_scale: float
+            The initialization scale for the prior ball to sample from,
+            multiplied by the prior.scale
         '''
 
         if 'priors' in self.meta:
@@ -193,11 +197,11 @@ class MCMCRunner(object):
                 base = peak if peak is not None else cen
 
                 if prior.scale is not None:
-                    radius = prior.scale
+                    radius = init_scale * prior.scale
                 elif base != 0:
-                    radius = base*scale
+                    radius = base * init_scale
                 else:
-                    radius = scale
+                    radius = init_scale
 
                 # random ball about base value
                 ball = radius * np.random.randn(self.nwalkers)
@@ -899,12 +903,24 @@ class KLensPocoRunner(PocoRunner):
 
 class UltranestRunner(MCMCRunner):
 
+    def __init__(self, *args, **kwargs):
+        try:
+            self.resume = kwargs['resume']
+            kwargs.pop('resume')
+        except KeyError:
+            self.resume = False
+
+        super(UltranestRunner, self).__init__(*args, **kwargs)
+
+        return
+
     def _initialize_sampler(self, pool=None):
         sampler = ultranest.ReactiveNestedSampler(
             self.pars.sampled.names,
             self.loglike,
             transform=self.logprior,
-            log_dir=self.log_dir
+            log_dir=self.log_dir,
+            resume=self.resume
             )
 
         return sampler
@@ -949,7 +965,7 @@ class KLensUltranestRunner(UltranestRunner):
                  datacube, pars,
                  loglike_args=None, loglike_kwargs=None,
                  logprior_args=None, logprior_kwargs=None,
-                 out_dir='temp_ultranest'):
+                 out_dir='temp_ultranest', resume=False):
         '''
         loglike: function / callable
             Log likelihood function to sample from
@@ -974,6 +990,8 @@ class KLensUltranestRunner(UltranestRunner):
             such as meta parameters, etc.
         out_dir: str
             Where to store intermediate & final outputs
+        resume: bool
+            Whether to resume the previous run in the same directory
 
         NOTE: to make this consistent w/ the other mcmc runner classes,
         you must pass datacube & pars separately from the rest of the
@@ -990,6 +1008,7 @@ class KLensUltranestRunner(UltranestRunner):
             loglike=loglike, logprior=logprior,
             loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
             logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+            resume=resume
             )
 
         self.datacube = datacube
@@ -1007,7 +1026,7 @@ class KLensUltranestRunner(UltranestRunner):
         return
 
     def _run_sampler(self, start, nsteps=None, progress=True,
-                     min_num_live_points=25, print_results=True,
+                     min_num_live_points=100, print_results=True,
                      make_plots=True, show_status=True):
         '''
         The ultranest-specific way to run the sampler object. Here,
@@ -1100,8 +1119,7 @@ class MetropolisRunner(MCMCRunner):
     def _initialize_sampler(self, pool=None):
         sampler = MetropolisSampler(
             self.nwalkers, self.ndim, posterior=self.pfunc,
-            post_args=self.args, post_kwargs=self.kwargs,
-            log=True, pool=pool
+            post_args=self.args, post_kwargs=self.kwargs, pool=pool
             )
 
         return sampler

@@ -11,6 +11,7 @@ import intensity
 import utils
 
 import ipdb
+import pudb
 
 def setup_likelihood_test(true_pars, meta):
     '''
@@ -57,7 +58,7 @@ def setup_likelihood_test(true_pars, meta):
         raise KeyError('Can only pass one of sky_sigma and s2n!')
 
     if 's2n' in meta:
-        sky_sigma = meta['true_flux'] / meta['s2n']
+        sky_sigma = meta['intensity']['true_flux'] / meta['s2n']
         meta['sky_sigma'] = sky_sigma
 
     # setup mock bandpasses
@@ -100,8 +101,8 @@ def _fill_test_datacube(datacube, true_pars, pars):
 
     # make true light profile an exponential disk
     imap_pars = {
-        'flux': pars['true_flux'],
-        'hlr': pars['true_hlr'],
+        'flux': pars['intensity']['true_flux'],
+        'hlr': pars['intensity']['true_hlr'],
     }
 
     if 'psf' in pars:
@@ -115,28 +116,29 @@ def _fill_test_datacube(datacube, true_pars, pars):
     true_im = imap.render(true_pars, datacube, pars)
 
     # TODO: TESTING!!!
-    #This alows us to draw the test datacube from shapelets instead
-    # if pars['intensity']['type'] == 'basis':
-    #     try:
-    #         use_basis = pars['intensity']['use_basis_as_truth']
+    # This alows us to draw the test datacube from shapelets instead
+    if pars['intensity']['type'] == 'basis':
+        try:
+            use_basis = pars['intensity']['use_basis_as_truth']
 
-    #         if use_basis is True:
-    #             print('WARNING: Using basis for true image as test')
-    #             ps = pars['pix_scale']
-    #             dc = DataCube(
-    #                 shape=(1,Nx,Ny), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
-    #                 )
+            if use_basis is True:
+                print('WARNING: Using basis for true image as test')
+                ps = pars['pix_scale']
+                dc = DataCube(
+                    shape=(1,Nx,Ny), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
+                    )
 
-    #             basis_type = pars['intensity']['basis_type']
-    #             kwargs = pars['intensity']['basis_kwargs']
-    #             shapelet_imap = intensity.BasisIntensityMap(
-    #                 dc, basis_type, basis_kwargs=kwargs)
+                basis_type = pars['intensity']['basis_type']
+                kwargs = pars['intensity']['basis_kwargs']
+                shapelet_imap = intensity.BasisIntensityMap(
+                    dc, basis_type, basis_kwargs=kwargs
+                    )
 
-    #             # Now make new truth image from shapelet MLE fit
-    #             true_im = shapelet_imap.render(true_pars, dc, pars)
+                # Now make new truth image from shapelet MLE fit
+                true_im = shapelet_imap.render(true_pars, dc, pars)
 
-    #     except KeyError:
-    #         pass
+        except KeyError:
+            pass
 
     vel_pars = {}
     for name in true_pars.keys():

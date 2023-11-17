@@ -1,18 +1,22 @@
 import numpy as np
 from multiprocessing import Pool
 
+import pudb
+
 class MetropolisSampler(object):
     '''
     A simple Metropolis Hastings implementation for debugging
     purposes
     '''
 
-    def __init__(self, nwalkers, ndims, log=True,
-                 posterior=None, likelihood=None, prior=None,
-                 post_args=None, post_kwargs=None,
-                 like_args=None, like_kwargs=None,
-                 prior_args=None, prior_kwargs=None,
-                 pool=None):
+    def __init__(self, nwalkers, ndims,
+                 posterior, post_args=None, post_kwargs=None,
+                 # TODO: cleanup after refactor
+                 # posterior=None, likelihood=None, prior=None,
+                 # post_args=None, post_kwargs=None,
+                 # like_args=None, like_kwargs=None,
+                 # prior_args=None, prior_kwargs=None,
+                 log=True, pool=None):
         '''
         Must pass *either* a posterior or likelihood + prior
 
@@ -20,54 +24,57 @@ class MetropolisSampler(object):
             The number of walkers to initialize
         ndims: int
             The number of sampled parameters
-        log: bool
-            Whether the passed probability densities are their log versions
+        posterior: callable
+            The posterior distribution to sample from, callable in the form
+            of posterior(args, kwargs) where args=[theta, *posterior_args]
+        post_args: list
+            List of additional args needed to evaluate corresponding
+            distribution, such as the data vector, covariance matrix, etc.
+        post_kwargs: dict (or subclass, such as Pars, MetaPars, etc.)
+            Dictionary of additional kwargs needed to evaluate corresponding
+            distribution, such as the meta parameters
         pool: Pool
             The multiprocessing pool, if desired
 
-        NOTE: The following are sets of callable functions & their args/kwargs
-        needed to compute a (possibly log) probablility density. The user
-        should provide *either* a posterior or likelihood + prior, not both
-        {func} is one of {post, like, prior}
+        # TODO: cleanup after refactor
+        # NOTE: The following are sets of callable functions & their args/kwargs
+        # needed to compute a (possibly log) probablility density. The user
+        # should provide *either* a posterior or likelihood + prior, not both
+        # {func} is one of {post, like, prior}
 
-        {func}: function or callable()
-            Callable function to sample from the posterior, likelihood,
-            or prior
-        {func}_args: list
-            List of additional args needed to evaluate corresponding
-            distribution, such as the data vector, covariance matrix, etc.
-        {func}_kwargs: dict (or subclass, such as Pars, MetaPars, etc.)
-            Dictionary of additional kwargs needed to evaluate corresponding
-            distribution, such as the meta parameters
+        # {func}: function or callable()
+        #     Callable function to sample from the posterior, likelihood,
+        #     or prior
+        # {func}_args: list
+        #     List of additional args needed to evaluate corresponding
+        #     distribution, such as the data vector, covariance matrix, etc.
+        # {func}_kwargs: dict (or subclass, such as Pars, MetaPars, etc.)
+        #     Dictionary of additional kwargs needed to evaluate corresponding
+        #     distribution, such as the meta parameters
+        # log: bool
+        #     Whether the passed probability densities are their log versions
         '''
-
-        if posterior is None:
-            if (likelihood is None) or (prior is None):
-                return ValueError('Must pass both a likelihood and prior ' +
-                                  'if a posterior is not passed!')
-        else:
-            if (likelihood is not None) or (prior is not None):
-                return ValueError('Cannot pass a likelihood or prior ' +
-                                  'if a posterior is passed!')
 
         self.nwalkers = nwalkers
         self.ndims = ndims
         self.log = log
         self.pool = pool
 
-        self.posterior = posterior
-        self.likelihood = likelihood
-        self.prior = prior
-        self.like_args = like_args
-        self.like_kwargs = like_kwargs
-        self.prior_args = prior_args
-        self.prior_kwargs = prior_kwargs
+        self._posterior = posterior
 
-        self.blob = None
+        if post_args is None:
+            post_args = []
+        if post_kwargs is None:
+            post_kwargs = {}
+        self.post_args = post_args
+        self.post_kwargs = post_kwargs
+
+        self.chains = None
+        self.blobs = None
 
         return
 
-    def posterior(theta):
+    def posterior(self, theta, return_blob=True):
         '''
         theta: list
             The list of sampled parameters, in order
@@ -76,22 +83,27 @@ class MetropolisSampler(object):
             Returns the tuple of posterior probability and the blob
         '''
 
-        prior = self.prior(theta)
+        post_args = [theta, *self.post_args]
 
-        if prior == -np.inf:
-            return -np.inf, (-np.inf, -np.inf)
-
-        likelihood = self.likelihood(theta)
-
-        if self.log is True:
-            posterior = likelihood + prior
-        else:
-            posterior = likelihood * prior
+        # not all posterior calls will return a blob
+        try:
+            posterior, blob = self._posterior(
+                *post_args, **self.post_kwargs
+                )
+        except ValueError as e:
+            print(e)
+            print('No blob returned; check this!')
+            posterior = self._posterior(
+                *post_args, **self.post_kwargs
+                )
+            blob = None
 
         if return_blob is True:
-            return posterior, (likelihood, prior)
+            return posterior, blob
+        else:
+            return posterior, (None, None)
 
-    def proposal(theta0, sigma=None):
+    def proposal(self, theta0, sigma=None):
         '''
         Generates proposal parameter values given the current state theta0
 
@@ -108,8 +120,9 @@ class MetropolisSampler(object):
             sigma = np.ones(N)
 
         theta = np.zeros(N)
-        for i, t, s in enumerate(zip(theta0, sigma)):
-            theta[i](np.normal(t, s, 1).item())
+        for i, z in enumerate(zip(theta0, sigma)):
+            t, s = z
+            theta[i] = np.random.normal(t, s, 1).item()
 
         return theta
 
@@ -149,7 +162,7 @@ class MetropolisSampler(object):
             Set to display the approximate progress during the run
         '''
 
-        self.blob = np.zeros((self.nwalkers, 2, nsteps))
+        self.blobs = np.zeros((self.nwalkers, 2, nsteps))
         self.chain = np.zeros((self.nwalkers, self.ndims, nsteps))
 
         if self.pool is None:
@@ -162,14 +175,16 @@ class MetropolisSampler(object):
         for i in range(self.nwalkers):
             if progress is True:
                 print(f'Starting walker {i}')
-            chain, blob = self._run_walker(start[i], nsteps)
+            chain, blobs = self._run_walker(i, start[i], nsteps)
             self.chain[i, :, :] = chain
-            self.blob[i, :, :] = blob
+            self.blobs[i, :, :] = blobs
 
         return
 
-    def _run_walker(self, start, nsteps, progress=True):
+    def _run_walker(self, n, start, nsteps, progress=True):
         '''
+        n: int
+            The walker number
         start: list / np.ndarray
             The starting value of each sampled parameter for this walker
         nsteps: int
@@ -182,15 +197,14 @@ class MetropolisSampler(object):
         blobs = np.zeros((2, nsteps))
 
         theta0 = start
-        p_theta0, b = self.posterior(theta0, return_blob=True)
+        p_theta0, b0 = self.posterior(theta0)
 
         for i in range(nsteps):
-            import pudb
-            pudb.set_trace()
-            if ((100*i/nsteps) % 1 == 0) and (progress is True):
-                print(f'Starting walker {i}')
+            percent = (100*i/nsteps)
+            if ( (percent % 1) == 0) and (progress is True):
+                print(f'Walker {n} at {int(percent)}%')
             theta = self.proposal(theta0)
-            p_theta, b = self.posterior(theta, return_blob=True)
+            p_theta, b = self.posterior(theta)
 
             if self.accept(p_theta, p_theta0):
                 chain[:, i] = theta
@@ -201,4 +215,14 @@ class MetropolisSampler(object):
                 chain[:, i] = theta0
                 blobs[:, i] = b0
 
-        return chain, blob
+        return chain, blobs
+
+    def get_chain(self, flat=False, discard=None, thin=None):
+        chain = self.chain
+
+        # ...
+
+        return chain
+
+    def get_blobs(self):
+        return selfblobs

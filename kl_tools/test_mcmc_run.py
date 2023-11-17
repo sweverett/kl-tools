@@ -40,8 +40,8 @@ parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
-parser.add_argument('--continue_previous', action='store_true', default=False,
-                    help='Set to continue previous run (if sampler allows)')
+parser.add_argument('--resume', action='store_true', default=False,
+                    help='Set to resume previous run (if sampler allows)')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 
@@ -61,8 +61,12 @@ def main(args, pool):
     ncores = args.ncores
     mpi = args.mpi
     run_name = args.run_name
-    continue_previous = args.continue_previous
+    resume = args.resume
     show = args.show
+
+    if resume is False:
+        # makes a new subdir for each repeated run of the same name
+        resume = 'subfolder'
 
     outdir = os.path.join(
         utils.TEST_DIR, 'test-mcmc-run', run_name
@@ -97,8 +101,8 @@ def main(args, pool):
             'r_unit': Unit('kpc'),
         },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
+            'g1': priors.GaussPrior(0., 0.02, clip_sigmas=10),
+            'g2': priors.GaussPrior(0., 0.02, clip_sigmas=10),
             # 'theta_int': priors.UniformPrior(0., np.pi),
             'theta_int': priors.UniformPrior(0., np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
@@ -154,8 +158,14 @@ def main(args, pool):
         'Ny': 40, # pixels
         'pix_scale': 0.5, # arcsec / pixel
         # intensity meta pars
-        'true_flux': true_flux, # counts
-        'true_hlr': true_hlr, # pixels
+        'intensity': {
+            'true_flux': true_flux, # counts
+            'true_hlr': true_hlr, # pixels
+            # 'type': 'inclined_exp',
+            'type': 'basis',
+            'basis': 'shapelets',
+            'use_basis_as_truth': True
+        },
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
         'v_unit': mcmc_pars['units']['v_unit'],
@@ -165,9 +175,10 @@ def main(args, pool):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        's2n': 1000000,
-        # 'sky_sigma': 0.01, # pixel counts for mock data vector
-        #'psf': gs.Gaussian(fwhm=1, flux=1.)
+        # 's2n': 1000000,
+        's2n': 10000,
+        # # 'sky_sigma': 0.01, # pixel counts for mock data vector
+        'psf': gs.Gaussian(fwhm=3, flux=1.)
     }
 
     print('Setting up test datacube and true Halpha image')
@@ -176,7 +187,7 @@ def main(args, pool):
         )
     Nspec, Nx, Ny = datacube.shape
     lambdas = datacube.lambdas
-    #datacube.set_psf(datacube_pars['psf'])
+    datacube.set_psf(datacube_pars['psf'])
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')
@@ -246,7 +257,10 @@ def main(args, pool):
     print(f'Setting up {sampler} MCMCRunner')
     kwargs = {}
     if sampler in ['zeus', 'emcee', 'metropolis']:
-        nwalkers = 2*ndims
+        if sampler == 'emcee':
+            nwalkers = 10*ndims
+        else:
+            nwalkers = 2*ndims
         args = [nwalkers, ndims, log_posterior, datacube, pars]
 
     elif sampler == 'poco':
@@ -262,7 +276,7 @@ def main(args, pool):
 
     elif sampler == 'ultranest':
         # we will equate "walkers" with "live points" for ultranest
-        nwalkers = 100
+        nwalkers = 400
         args = [
             nwalkers,
             ndims,
@@ -272,7 +286,10 @@ def main(args, pool):
             pars,
         ]
 
-        kwargs['out_dir'] = outdir
+        kwargs = {
+            'out_dir': outdir,
+            'resume': resume
+        }
 
     runner = build_mcmc_runner(sampler, args, kwargs)
 
@@ -392,6 +409,13 @@ def main(args, pool):
     runner.plot_corner(
         outfile=outfile, reference=runner.MAP_medians, title=title, show=show
         )
+
+    # pickle all relevant pars for posterity
+    with open(os.path.join(outdir, 'pars.pkl'), 'wb') as outfile:
+        pickle.dump(pars, outfile)
+
+    with open(os.path.join(outdir, 'datacube_pars.pkl'), 'wb') as outfile:
+        pickle.dump(datacube_pars, outfile)
 
     return 0
 

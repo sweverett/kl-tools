@@ -903,12 +903,24 @@ class KLensPocoRunner(PocoRunner):
 
 class UltranestRunner(MCMCRunner):
 
+    def __init__(self, *args, **kwargs):
+        try:
+            self.resume = kwargs['resume']
+            kwargs.pop('resume')
+        except KeyError:
+            self.resume = False
+
+        super(UltranestRunner, self).__init__(*args, **kwargs)
+
+        return
+
     def _initialize_sampler(self, pool=None):
         sampler = ultranest.ReactiveNestedSampler(
             self.pars.sampled.names,
             self.loglike,
             transform=self.logprior,
-            log_dir=self.log_dir
+            log_dir=self.log_dir,
+            resume=self.resume
             )
 
         return sampler
@@ -953,7 +965,7 @@ class KLensUltranestRunner(UltranestRunner):
                  datacube, pars,
                  loglike_args=None, loglike_kwargs=None,
                  logprior_args=None, logprior_kwargs=None,
-                 out_dir='temp_ultranest'):
+                 out_dir='temp_ultranest', resume=False):
         '''
         loglike: function / callable
             Log likelihood function to sample from
@@ -978,6 +990,8 @@ class KLensUltranestRunner(UltranestRunner):
             such as meta parameters, etc.
         out_dir: str
             Where to store intermediate & final outputs
+        resume: bool
+            Whether to resume the previous run in the same directory
 
         NOTE: to make this consistent w/ the other mcmc runner classes,
         you must pass datacube & pars separately from the rest of the
@@ -994,6 +1008,7 @@ class KLensUltranestRunner(UltranestRunner):
             loglike=loglike, logprior=logprior,
             loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
             logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+            resume=resume
             )
 
         self.datacube = datacube
@@ -1011,7 +1026,7 @@ class KLensUltranestRunner(UltranestRunner):
         return
 
     def _run_sampler(self, start, nsteps=None, progress=True,
-                     min_num_live_points=25, print_results=True,
+                     min_num_live_points=100, print_results=True,
                      make_plots=True, show_status=True):
         '''
         The ultranest-specific way to run the sampler object. Here,

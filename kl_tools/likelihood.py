@@ -627,7 +627,7 @@ class DataCubeLikelihood(LogLikelihood):
         for i in range(Nspec):
             data[i,:,:] = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array, cont_array,
-                psf=psf, pix_scale=datacube.pix_scale
+                pix_scale=datacube.pix_scale, psf=psf
             )
 
         model_datacube = DataCube(
@@ -638,7 +638,7 @@ class DataCubeLikelihood(LogLikelihood):
 
     @classmethod
     def _compute_slice_model(cls, lambdas, sed, zfactor, imap, continuum,
-                             psf=None, pix_scale=None):
+                             pix_scale, psf=None):
         '''
         Compute datacube slice given lambda range, sed, redshift factor
         per pixel, and the intemsity map
@@ -658,15 +658,11 @@ class DataCubeLikelihood(LogLikelihood):
             at the emission line
         imap: np.ndarray (2D)
             An array corresponding to the continuum model
+        pix_scale: float
+            The image pixel scale
         psf: galsim.GSObject
             A galsim object representing the PSF to convolve by
-        pix_scale: float
-            The image pixel scale. Required if convolving by PSF
         '''
-
-        # they must come in pairs for PSF convolution
-        if (psf is not None) and (pix_scale is None):
-            raise Exception('Must pass a pix_scale if convovling by PSF!')
 
         lblue, lred = lambdas[0], lambdas[1]
 

@@ -127,20 +127,20 @@ def main(args, pool):
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
             # 'type': 'basis',
-            # # 'basis_type': 'shapelets',
+            # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
-            # # 'basis_type': 'exp_shapelets',
-            # 'basis_kwargs': {
-            #     # 'Nmax': 12, # fiducial
-            #     'Nmax': 7,
-            #     # 'plane': 'disk',
-            #     'plane': 'obs',
-            #     'beta': 0.37, # n12-exp_shapelet
-            #     # 'beta': 1.45, # n20-sersiclet
-            #     # 'beta': 'sampled',
-            #     'index': 1,
-            #     'b': 1,
-            #     }
+            # 'basis_type': 'exp_shapelets',
+            'basis_kwargs': {
+                'Nmax': 12, # fiducial
+                # 'Nmax': 7,
+                # 'plane': 'disk',
+                'plane': 'obs',
+                'beta': 0.37, # n12-exp_shapelet
+                # 'beta': 1.45, # n20-sersiclet
+                # 'beta': 'sampled',
+                # 'index': 1,
+                # 'b': 1,
+                }
         },
         'velocity': {
             # 'model': 'offset'
@@ -161,10 +161,10 @@ def main(args, pool):
         'intensity': {
             'true_flux': true_flux, # counts
             'true_hlr': true_hlr, # pixels
-            # 'type': 'inclined_exp',
-            'type': 'basis',
+            'type': 'inclined_exp',
             'basis': 'shapelets',
-            'use_basis_as_truth': True
+            'use_basis_as_truth': True,
+            'basis_kwargs': mcmc_pars['intensity']['basis_kwargs']
         },
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
@@ -175,8 +175,8 @@ def main(args, pool):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        # 's2n': 1000000,
-        's2n': 10000,
+        's2n': 1000000,
+        # 's2n': 10000,
         # # 'sky_sigma': 0.01, # pixel counts for mock data vector
         'psf': gs.Gaussian(fwhm=3, flux=1.)
     }

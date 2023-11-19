@@ -181,7 +181,7 @@ class CubePars(parameters.MetaPars):
     @property
     def lambdas(self):
         if self._lambdas is None:
-            self.build_lambdas()
+            self.build_wavelength_list()
 
         return self._lambdas
 

@@ -105,40 +105,47 @@ def _fill_test_datacube(datacube, true_pars, pars):
         'hlr': pars['intensity']['true_hlr'],
     }
 
+    imap_type = pars['intensity']['type']
+    use_basis = pars['intensity']['use_basis_as_truth']
+
     if 'psf' in pars:
         psf = pars['psf']
     else:
         psf = None
 
     # a slight abuse of API call here, passing a dummy datacube to
-    # instantiate an inclined exponential as truth
-    imap = intensity.build_intensity_map('inclined_exp', datacube, imap_pars)
+    # instantiate the desired type as truth (likely inclined exp)
+    imap = intensity.build_intensity_map(imap_type, datacube, imap_pars)
     true_im = imap.render(true_pars, datacube, pars)
 
     # TODO: TESTING!!!
     # This alows us to draw the test datacube from shapelets instead
-    if pars['intensity']['type'] == 'basis':
-        try:
-            use_basis = pars['intensity']['use_basis_as_truth']
+    if use_basis is True:
+        print('WARNING: Using basis for true image as test.')
+        print('WARNING: Make sure this is intentional!')
 
-            if use_basis is True:
-                print('WARNING: Using basis for true image as test')
-                ps = pars['pix_scale']
-                dc = DataCube(
-                    shape=(1,Nx,Ny), bandpasses=[bandpasses[0]], data=true_im, pix_scale=ps
-                    )
+        # what we're doing here is making a dummy datacube with the truth
+        # image that we then pass to the imap functions for fitting to the
+        # desired basis funcs, so we just need a single dummy lambda slice
+        basis_pars = CubePars({
+            'pix_scale': datacube.pix_scale,
+            'bandpasses': [datacube.pars['bandpasses'][0]],
+            'emission_lines': datacube.pars['emission_lines']
+        })
 
-                basis_type = pars['intensity']['basis_type']
-                kwargs = pars['intensity']['basis_kwargs']
-                shapelet_imap = intensity.BasisIntensityMap(
-                    dc, basis_type, basis_kwargs=kwargs
-                    )
+        basis_datacube = DataCube(
+            data=true_im,
+            pars=basis_pars
+            )
 
-                # Now make new truth image from shapelet MLE fit
-                true_im = shapelet_imap.render(true_pars, dc, pars)
+        basis_type = pars['intensity']['basis']
+        kwargs = pars['intensity']['basis_kwargs']
+        shapelet_imap = intensity.BasisIntensityMap(
+            basis_datacube, basis_type, basis_kwargs=kwargs
+            )
 
-        except KeyError:
-            pass
+        # Now make new truth image from shapelet MLE fit
+        true_im = shapelet_imap.render(true_pars, basis_datacube, pars)
 
     vel_pars = {}
     for name in true_pars.keys():

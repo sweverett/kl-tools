@@ -13,7 +13,7 @@ from corner import corner
 
 import zeus
 import emcee
-import pocomc as pc
+# import pocomc as pc
 import ultranest
 
 import utils

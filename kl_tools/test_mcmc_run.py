@@ -88,7 +88,7 @@ def main(args, pool):
         'v0': 5,
         'vcirc': 200,
         'rscale': 5,
-        # 'beta': np.NaN,
+        'beta': np.NaN,
         # 'flux': true_flux,
         # 'hlr': true_hlr,
         # 'x0': 0.5,
@@ -115,29 +115,29 @@ def main(args, pool):
             'rscale': priors.UniformPrior(0, 10),
             # 'x0': priors.UniformPrior(-3, 3),
             # 'y0': priors.UniformPrior(-3, 3),
-            # 'beta': priors.UniformPrior(0, 0.5),
+            'beta': priors.UniformPrior(0, .1),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': true_flux, # counts
-            'hlr': true_hlr, # counts
+            # 'type': 'inclined_exp',
+            # 'flux': true_flux, # counts
+            # 'hlr': true_hlr, # counts
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
-            # 'type': 'basis',
-            # 'basis_type': 'shapelets',
+            'type': 'basis',
+            'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
             'basis_kwargs': {
                 'Nmax': 12, # fiducial
                 # 'Nmax': 7,
-                # 'plane': 'disk',
-                'plane': 'obs',
-                'beta': 0.37, # n12-exp_shapelet
+                'plane': 'disk',
+                # 'plane': 'obs',
+                # 'beta': 0.37, # n12-exp_shapelet
                 # 'beta': 1.45, # n20-sersiclet
-                # 'beta': 'sampled',
+                'beta': 'sampled',
                 # 'index': 1,
                 # 'b': 1,
                 }
@@ -163,8 +163,6 @@ def main(args, pool):
             'true_hlr': true_hlr, # pixels
             'type': 'inclined_exp',
             'basis': 'shapelets',
-            'use_basis_as_truth': True,
-            'basis_kwargs': mcmc_pars['intensity']['basis_kwargs']
         },
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
@@ -178,8 +176,16 @@ def main(args, pool):
         's2n': 1000000,
         # 's2n': 10000,
         # # 'sky_sigma': 0.01, # pixel counts for mock data vector
-        'psf': gs.Gaussian(fwhm=3, flux=1.)
+        # 'psf': gs.Gaussian(fwhm=2, flux=1.)
     }
+
+    if mcmc_pars['intensity']['type'] == 'basis':
+        datacube_pars['intensity'].update(
+            {
+            # 'use_basis_as_truth': True,
+            'basis_kwargs': mcmc_pars['intensity']['basis_kwargs']
+            }
+            )
 
     print('Setting up test datacube and true Halpha image')
     datacube, vmap, true_im = mocks.setup_likelihood_test(
@@ -187,7 +193,9 @@ def main(args, pool):
         )
     Nspec, Nx, Ny = datacube.shape
     lambdas = datacube.lambdas
-    datacube.set_psf(datacube_pars['psf'])
+
+    if 'psf' in datacube_pars:
+        datacube.set_psf(datacube_pars['psf'])
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')

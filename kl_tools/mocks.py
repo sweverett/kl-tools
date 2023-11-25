@@ -106,7 +106,11 @@ def _fill_test_datacube(datacube, true_pars, pars):
     }
 
     imap_type = pars['intensity']['type']
-    use_basis = pars['intensity']['use_basis_as_truth']
+
+    try:
+        use_basis = pars['intensity']['use_basis_as_truth']
+    except KeyError:
+        use_basis = False
 
     if 'psf' in pars:
         psf = pars['psf']

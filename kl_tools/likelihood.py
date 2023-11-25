@@ -160,6 +160,9 @@ class LogPosterior(LogBase):
         else:
             loglike = self.log_likelihood(theta, data)
 
+        post = logprior + loglike, self.blob(logprior, loglike)
+        if (post == np.NaN) or (post == 0):
+            pudb.set_trace()
         return logprior + loglike, self.blob(logprior, loglike)
 
 class LogPrior(LogBase):

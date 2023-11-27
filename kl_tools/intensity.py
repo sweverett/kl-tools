@@ -139,37 +139,26 @@ class IntensityMap(object):
 class GMixModel(IntensityMap):
     '''
     This class use the mixture of Gaussian to fit inclined exponential or 
-    inclined Sersic profile, see NGMIX and Hogg & Lang (2012). 
-    The model has two components: emission line (exponential disk) and 
-    continuum (de Vaucouleurs, n=4 Sersic). The two components can have 
-    different flux and half-light radius, but the inclination and position 
-    angle are the same.
+    inclined Sersic profile, see NGMIX (Sheldon 2014) and Hogg & Lang (2012)
+    **Methodology:**
+    - [components]: The model has two components: emission line (exponential
+    disk) and continuum (de Vaucouleurs, n=4 Sersic). The two components can
+    have different flux and half-light radius, but the inclination and posi-
+    tion angle are the same.
+    - [projection]: To translate between inclination and ellipticity, we use 
+    the description in Cappellari (2002) (Eqn 9, the oblate axisymmetric),
+        (q')^2 = (q*sin(i))*2 + cos^2(i)
+    In this version we fix q to some reasonable value (0.1). But since the q
+    of galactic bulge and galactic disk are not necessarily the same, we might
+    release q for sampling with some prior in future.
+    - [shear transform]: Gaussian profile is so simple that it has an analy-
+    tical solution under shear transform. Eqn 2.11 and 2.12 in Bernstein & 
+    Jarvis (2002) show how the ellipticity of sheared image relates with shear
+    and the intrinsic ellipticity
     '''
     def __init__(self, datavector, has_continuum = True,
         theory_Nx = None, theory_Ny = None, scale = None):
-        '''
-        datavector: DataCube
-            While this implementation will not use the datacube
-            image explicitly (other than shape info), most will
-        xxx flux: float
-            Object flux
-        xxx hlr: float
-            Object half-light radius (in pixels)
-        '''
-        if theory_Nx is not None and theory_Ny is not None:
-            nx, ny = theory_Nx, theory_Ny
-        else:
-            nx, ny = datavector.Nx, datavector.Ny
-
-        super(GMixModel, self).__init__('inclined_gmix', nx, ny)
-
-        self.has_continuum = has_continuum
-        self.pix_scale = scale if scale is not None else datavector.pix_scale
-
-        # same as default, but to make it explicit
-        self.is_static = False
-
-        return
+        pass
 
     def _render(self, theta_pars, datacube, pars):
         '''
@@ -243,32 +232,39 @@ class InclinedExponential(IntensityMap):
 
     def __init__(self, datavector, flux, hlr,
         theory_Nx = None, theory_Ny = None, scale = None):
-
-        '''
-        datavector: DataCube
-            While this implementation will not use the datacube
-            image explicitly (other than shape info), most will
+        ''' Initialize geometry spec and flux of InclinedExponentioal profile
+        Note that the `datavector` argument is only used to extract image di-
+        mension (Nx, Ny, and pixel scale), which can be replaced by kwargs.
+        Inputs:
+        =======
+        datavector: `cube.DataCube` object
+            While this implementation will not use the datacube image expli-
+            citly (other than shape info), general intensity generation will,
+            like shapelet method relies on some specific intensity profile to
+            get reasonably good guess.
+            For `InclinedExponential`, you can pass `datavector = None` then 
+            pass the shape information by kwargs:
+                theory_Nx = blahblah, theory_Ny = blahblah, scale = blahblah
         flux: float
             Object flux
         hlr: float
             Object half-light radius (in pixels)
         '''
+        ### Setting the intensity profile shape specification
         if theory_Nx is not None and theory_Ny is not None:
             nx, ny = theory_Nx, theory_Ny
         else:
             nx, ny = datavector.Nx, datavector.Ny
-
         super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
+        self.pix_scale = scale if scale is not None else datavector.pix_scale
 
+        ### Setting the intensity profile astrophysical info
         pars = {'flux': flux, 'hlr': hlr}
         for name, val in pars.items():
             if not isinstance(val, (float, int)):
                 raise TypeError(f'{name} must be a float or int!')
-
         self.flux = flux
         self.hlr = hlr
-        self.pix_scale = scale if scale is not None else datavector.pix_scale
-
         # same as default, but to make it explicit
         self.is_static = False
 

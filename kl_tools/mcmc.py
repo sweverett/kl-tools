@@ -264,17 +264,21 @@ class MCMCRunner(object):
                 print('WARNING: ENV variable OMP_NUM_THREADS is ' +\
                       f'set to {omp}. If not set to 1, this will ' +\
                       'degrade perfomance for parallel processing.')
+        if pool is not None:
+            with pool:
+                pt = type(pool)
+                print(f'Pool: {pool}')
 
-        with pool:
-            pt = type(pool)
-            print(f'Pool: {pool}')
+                if isinstance(pool, schwimmbad.MPIPool):
+                    if not pool.is_master():
+                        pool.wait()
+                        sys.exit(0)
 
-            if isinstance(pool, schwimmbad.MPIPool):
-                if not pool.is_master():
-                    pool.wait()
-                    sys.exit(0)
+                self.sampler = self._initialize_sampler(pool=pool)
 
-            self.sampler = self._initialize_sampler(pool=pool)
+                self._run_sampler(start, nsteps=nsteps, progress=progress)
+        else:
+            self.sampler = self._initialize_sampler()
 
             self._run_sampler(start, nsteps=nsteps, progress=progress)
 

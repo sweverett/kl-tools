@@ -5,11 +5,13 @@ from astropy.io import fits
 import astropy.units as u
 import galsim
 import os
+from time import time
 import pickle
 from copy import deepcopy
 from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
+from photutils.geometry import circular_overlap_grid as cog
 
 import utils
 import parameters
@@ -957,6 +959,366 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
 
     return bandpasses
 
+class FiberPars(CubePars):
+
+    # update the required/optional/generated fields
+    _req_fields = ['model_dimension', 'sed', 'intensity', 'velocity', 'priors']
+    _opt_fields = ['obs_conf',]
+    _gen_fields = ['shape', 'pix_scale', 'bandpasses']
+
+    def __init__(self, pars, obs_conf=None):
+        ''' Fiber-related `Pars` obj
+        Each `FiberPars` store the necessary parameters for one observation.
+
+        Inputs:
+        =======
+        pars: dict obj
+            Dictionary of meta pars for `FiberCube`. Note that this dict has
+            different convention than the parent class `cube.CubePars`. The 
+            initialization step will translate the dictionary.
+
+            An example structure of pars dict:
+            <required fields>
+            - model_dimension
+                - Nx
+                - Ny
+                - scale
+                - lambda_range
+                - lambda_res
+                - lambda_unit
+            - sed
+                - template
+                - wave_type
+                - flux_type
+                - z
+                - spectral_range
+                - obs_cont_norm
+                - lines
+                - line_sigma_int
+            - intensity
+                - type
+                - flux
+                - hlr
+            - velocity
+                - model
+                - v0
+                - vcirc
+                - rscale
+            - priors
+            <optional fields>
+            - obs_conf
+                See grism.GrismDataVector.data_header
+            <generated fields>
+            - shape
+            - pix_scale
+            - bandpasses
+                - lambda_blue
+                - lambda_red
+                - dlambda
+                - throughput
+                - zp
+                - unit
+                - file
+        '''
+        # assure the input dictionary obj has required fields & obs config
+        self._check_pars(pars)
+        _pars = deepcopy(pars) # avoid shallow-copy of a dict object
+        if obs_conf is None and _pars.get('obs_conf', None) is None:
+            raise ValueError('Observation configuration is not set!')
+        if obs_conf is not None:
+            print(f'FiberPars: Overwrite the observation configuration')
+            utils.check_type(obs_conf, 'obs_conf', dict)
+            _pars['obs_conf'] = deepcopy(obs_conf)
+        self.is_dispersed = (_pars['obs_conf']['OBSTYPE'] == 1)
+
+        # set up bandpass, model cube shape, and model cube pixel scale
+        _from_file_ = (_pars['obs_conf'].get('BANDPASS', None) is not None)
+        if self.is_dispersed or (_from_file_==False):
+            # focus on a narrow wavelength range
+            _lrange = _pars['model_dimension']['lambda_range']
+            _lblue, _lred = _lrange[0], _lrange[1]
+            _dlam = _pars['model_dimension']['lambda_res']
+            _Nlam = np.ceil( (_lred-_lblue)/_dlam ).astype(int)
+        else:
+            # need the full bandpass wavelength range to include all flux
+            _bp_file_ = np.genfromtxt(_pars['obs_conf'].get('BANDPASS'))
+            _lblue, _lred = _bp_file_[2,0], _bp_file_[-3,0]
+            _Nlam = _bp_file_.shape[0]
+            _dlam = (_lred-_lblue)/_Nlam
+
+        _pars['shape'] = np.array([_Nlam, 
+                         _pars['model_dimension']['Ny'], 
+                         _pars['model_dimension']['Nx']], dtype=int)
+        _pars['pix_scale'] = _pars['model_dimension']['scale']
+        _pars['bandpasses'] = {
+            'lambda_blue': _lblue, 'lambda_red': _lred,'dlambda': _dlam,
+                'unit': _pars['model_dimension']['lambda_unit'],
+        }
+        if _from_file_:
+            _pars['bandpasses']['file'] = _pars['obs_conf']['BANDPASS']
+        else:
+            _pars['bandpasses']['throughput'] = 1.0
+        super(FiberPars, self).__init__(_pars)
+        self.concatenated_bandpass = merge_bandpasses(self.bandpasses)
+        self._bp_array = np.zeros(self.lambdas.shape)
+        for i,_bp in enumerate(self.bandpasses):
+            self._bp_array[i][0] = _bp(self.lambdas[i][0])
+            self._bp_array[i][1] = _bp(self.lambdas[i][1])
+        self.lambda_eff = np.sum(self.lambdas[:,0]*self.bp_array[:,0])/np.sum(self.bp_array[:,0])
+        # update the obs_conf with the theoretical model cube parameters
+        self.obs_index = _pars['obs_conf']['OBSINDEX']
+        self.pars['obs_conf']['MDNAXIS1'] = _pars['shape'][2]# Nx
+        self.pars['obs_conf']['MDNAXIS2'] = _pars['shape'][1]# Ny
+        self.pars['obs_conf']['MDNAXIS3'] = _pars['shape'][0]# Nlam
+        self.pars['obs_conf']['MDSCALE'] = _pars['pix_scale']
+
+        return
+
+    # quick approach to the `obs_conf` observation configuration (1 obs) 
+    @property
+    def conf(self):
+        return self.pars['obs_conf']
+
+    # get the Nx2 band-pass array, which has the same dimension to `lambdas`
+    @property
+    def bp_array(self):
+        # self._bp_array = np.zeros(self.lambdas.shape)
+        # for i,_bp in enumerate(self.bandpasses):
+        #     self._bp_array[i][0] = _bp(self.lambdas[i][0])
+        #     self._bp_array[i][1] = _bp(self.lambdas[i][1])
+        return self._bp_array
+
+class FiberModelCube(DataVector):
+    ''' The most updated `FiberModelCube` implementation
+    This class wraps the theoretical cube after it is generated to produce 
+    simulated images.
+    '''
+    def __init__(self, Fpars):
+        ''' Store the `FiberPars` object
+        '''
+        self.pars = Fpars
+        # calculate the atmospheric PSF convolved fiber mask, if PSF model is
+        # not sampled.
+        if self.pars.is_dispersed:
+            self.ATMPSF_conv_fiber_mask = self.get_PSF_convolved_fiber_mask()
+            self.resolution_mat = self.get_resolution_matrix()
+        else:
+            self.ATMPSF_conv_fiber_mask = None
+            self.resolution_mat = None
+        return
+        
+    @property
+    def bp_array(self):
+        return self.pars.bp_array
+    @property
+    def conf(self):
+        return self.pars.conf
+    @property
+    def lambdas(self):
+        return self.pars.lambdas
+
+    @property
+    def lambda_eff(self):
+        return self.pars.lambda_eff
+
+    def get_fiber_mask(self):
+        mNx, mNy = self.pars['shape'][2], self.pars['shape'][1]
+        mscale = self.pars['pix_scale']
+        if self.pars.is_dispersed:
+            fiber_cen = [self.conf['FIBERDX'], self.conf['FIBERDY']] # dx, dy in arcsec
+            fiber_rad = self.conf['FIBERRAD'] # radius in arcsec
+            xmin, xmax = -mNx/2*mscale, mNx/2*mscale
+            ymin, ymax = -mNy/2*mscale, mNy/2*mscale
+            mask = cog(xmin-fiber_cen[0], xmax-fiber_cen[0], 
+                ymin-fiber_cen[1], ymax-fiber_cen[1], 
+                mNx, mNy, fiber_rad, 1, 2)
+        else:
+            mask = np.ones([mNy, mNx])
+        return mask
+
+    def get_fiber_1D_psf_kernel(self):
+        if self.pars.is_dispersed:
+            diameter_in_pixel = self.conf['FIBRBLUR']
+            sigma = diameter_in_pixel / 4.
+            x_in_pixel = np.arange(-5, 6)
+            # assume Gaussian for now
+            kernel = np.exp(-0.5*(x_in_pixel/sigma)**2)/((2*np.pi)**0.5*sigma)
+        else:
+            kernel = None
+        return kernel
+    def get_resolution_matrix(self):
+        if self.pars.is_dispersed:
+            diameter_in_pixel = self.conf['FIBRBLUR']
+            sigma = diameter_in_pixel / 4.
+            x_in_pixel = np.arange(-5, 6)
+            # assume Gaussian for now
+            kernel = np.exp(-0.5*(x_in_pixel/sigma)**2)/((2*np.pi)**0.5*sigma)
+            # get the resolution matrix (sparse matrix)
+            band = np.array([kernel]).repeat(self.pars['shape'][0], axis=0).T
+            offset=np.arange(kernel.shape[0]//2, -(kernel.shape[0]//2)-1, -1)
+            #print(band.shape, offset)
+            #plt.imshow(band)
+            Rmat = dia_matrix((band, offset), 
+                shape=(self.pars['shape'][0], self.pars['shape'][0]))
+        else:
+            Rmat = None
+        return Rmat
+
+    def get_PSF_convolved_fiber_mask(self):
+        ''' get atm-PSF convolved fiber mask
+        '''
+        mNx, mNy = self.pars['shape'][2], self.pars['shape'][1]
+        mscale = self.pars['pix_scale']
+        psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
+        mask = galsim.InterpolatedImage(
+            galsim.Image(array=self.get_fiber_mask()), 
+            scale=mscale)
+        # convolve fiber mask with atmospheric PSF
+        maskC = mask if psf is None else galsim.Convolve([mask, psf])
+        ary = maskC.drawImage(nx=mNx,ny=mNy,scale=mscale).array
+
+        return ary
+
+    def observe(self, theory_cube, gal, sed, force_noise_free=True):
+        ''' Simulate observed image
+        '''
+        # if photometry image
+        if not self.pars.is_dispersed:
+            gal_chro = gal * sed.spectrum
+            psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
+            gal = gal_chro if psf is None else galsim.Convolve([gal_chro, psf])
+            img = gal.drawImage(
+                bandpass = self.pars.concatenated_bandpass, 
+                nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
+                scale=self.conf['PIXSCALE'], method='auto', 
+                area=np.pi*(self.conf['DIAMETER']/2.)**2,
+                exptime=self.conf['EXPTIME'],gain=self.conf['GAIN'])
+            if force_noise_free:
+                return img.array, None
+            else:
+                noise = self._getNoise(self.conf)
+                img_withNoise = img.copy()
+                img_withNoise.addNoise(noise)
+                noise_img = img_withNoise - img
+                assert (img_withNoise.array is not None), "Null data"
+                assert (img.array is not None), "Null data"
+                #print("----- %s seconds -----" % (time() - start_time))
+                if self.conf['ADDNOISE']:
+                    #print("[GrismGenerator][debug]: add noise")
+                    return img_withNoise.array, noise_img.array
+                else:
+                    #print("[GrismGenerator][debug]: noise free")
+                    return img.array, noise_img.array
+        # if fiber 1D spectrum
+        else:
+            # The `lambdas` should be in fiber ccd native resolution
+            # Rigorous treatment would be:
+            #   - convolve 3D model cube with atmosphere PSF per slice
+            #   - apply fiber mask
+            #   - sum slice-wise to get 1D spectrum
+            # However, if the atmosphere PSF is symmetric about the origin,
+            # e.g. PSF(x,y) = PSF(-x, -y), then it is equivalent to
+            #  - convolve fiber mask with atmosphere PSF
+            #  - apply PSF-convolved fiber mask
+            #  - sum slice-wise to get 1D spectrum
+            # But you want to ensure your grid is large enough to accommodate
+            # convolution
+            
+            # theory_cube (should be) in units of [photons / (s cm2)]
+            #print(f'theory cube shape: {theory_cube.shape}')
+            #print(f'mask shape: {ary.shape}')
+            spec_1D = (self.ATMPSF_conv_fiber_mask[np.newaxis,:,:]*theory_cube).sum(axis=(1,2))
+            spec_1D = spec_1D*(self.bp_array[:,0]+self.bp_array[:,1])/2.
+            factor = np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
+            spec_1D = spec_1D * factor
+            # fiber PSF can result in degrade in spectra resolution
+            #kernel = self.get_fiber_1D_psf_kernel()
+            #spec_1D = np.convolve(spec_1D, kernel, mode='same')
+            if self.resolution_mat is not None:
+                spec_1D = self.resolution_mat * spec_1D
+            if force_noise_free:
+                return spec_1D, None
+            else:
+                # place holder
+                noise = spec_1D**(1/4)/2
+                #print("----- %s seconds -----" % (time() - start_time))
+                if self.conf['ADDNOISE']:
+                    #print("[GrismGenerator][debug]: add noise")
+                    return spec_1D+noise, noise
+                else:
+                    #print("[GrismGenerator][debug]: noise free")
+                    return spec_1D, noise
+
+    def _build_PSF_model(self, config, **kwargs):
+        ''' Generate PSF model
+
+        Inputs:
+        =======
+        kwargs: keyword arguments for building psf model
+            - lam: wavelength in nm
+            - scale: pixel scale
+
+        Outputs:
+        ========
+        psf_model: GalSim PSF object
+
+        '''
+        _type = config.get('PSFTYPE', 'none').lower()
+        if _type != 'none':
+            if _type == 'airy':
+                lam = kwargs.get('lam', 1000) # nm
+                scale_unit = kwargs.get('scale_unit', galsim.arcsec)
+                return galsim.Airy(lam=lam, diam=config['DIAMETER']/100,
+                                scale_unit=scale_unit)
+            elif _type == 'airy_mean':
+                scale_unit = kwargs.get('scale_unit', galsim.arcsec)
+                #return galsim.Airy(config['psf_fwhm']/1.028993969962188, 
+                #               scale_unit=scale_unit)
+                lam = kwargs.get("lam_mean", 1000) # nm
+                return galsim.Airy(lam=lam, diam=config['DIAMETER']/100,
+                                scale_unit=scale_unit)
+            elif _type == 'airy_fwhm':
+                loverd = config['PSFFWHM']/1.028993969962188
+                scale_unit = kwargs.get('scale_unit', galsim.arcsec)
+                return galsim.Airy(lam_over_diam=loverd, scale_unit=scale_unit)
+            elif _type == 'moffat':
+                beta = config.get('PSFBETA', 2.5)
+                fwhm = config.get('PSFFWHM', 0.5)
+                return galsim.Moffat(beta=beta, fwhm=fwhm)
+            else:
+                raise ValueError(f'{psf_type} has not been implemented yet!')
+        else:
+            return None
+
+    def _getNoise(self, config):
+        ''' Generate image noise based on parameter settings
+
+        Outputs:
+        ========
+        noise: GalSim Noise object
+        '''
+        random_seed = config.get('RANDSEED', int(time()))
+        rng = galsim.BaseDeviate(random_seed+1)
+
+        _type = config.get('NOISETYP', 'ccd').lower()
+        if _type == 'ccd':
+            sky_level = config.get('SKYLEVEL', 0.65*1.2)
+            read_noise = config.get('RDNOISE', 8.5)
+            gain = config.get('GAIN', 1.0)
+            exp_time = config.get('EXPTIME', 1.0)
+            noise = galsim.CCDNoise(rng=rng, gain=gain, 
+                                read_noise=read_noise, 
+                                sky_level=sky_level*exp_time/gain)
+        elif _type == 'gauss':
+            sigma = config.get('NOISESIG', 1.0)
+            noise = galsim.GaussianNoise(rng=rng, sigma=sigma)
+        elif _type == 'poisson':
+            sky_level = config.get('SKYLEVEL', 0.65*1.2)
+            noise = galsim.PoissonNoise(rng=rng, sky_level=sky_level)
+        else:
+            raise ValueError(f'{self.noise_type} not implemented yet!')
+        return noise
+
 def get_datavector_types():
     return DATAVECTOR_TYPES
 
@@ -984,6 +1346,14 @@ def build_datavector(name, kwargs):
 
     return datavector
 
+def merge_bandpasses(bandpasses):
+    blim, rlim = bandpasses[0].blue_limit, bandpasses[-1].red_limit
+    wtype, zp = bandpasses[0].wave_type, bandpasses[0].zeropoint
+    waves = [(bp.blue_limit+bp.red_limit)/2. for bp in bandpasses]
+    trans = [bp(w) for bp,w in zip(bandpasses, waves)]
+    table = galsim.LookupTable(waves, trans)
+    bandpass = galsim.Bandpass(table, wave_type=wtype, zeropoint=zp)
+    return bandpass
 
 # Used for testing
 def main(args):

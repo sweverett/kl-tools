@@ -21,3 +21,5 @@ dependencies:
   - ipdb
   - scipy
   - h5py
+  - getdist
+  - pocomc

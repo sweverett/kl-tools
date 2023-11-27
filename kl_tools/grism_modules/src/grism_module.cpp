@@ -14,7 +14,11 @@
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
 #include <omp.h>
+/*
 
+            WE CHOOSE Z-Y-X INDEXING FOR 3D DATA CUBE
+
+*/
 #define STRINGIFY(x) #x
 #define MACRO_STRINGIFY(x) STRINGIFY(x)
 #define _DEBUG_PRINTS_ 0
@@ -63,11 +67,11 @@ namespace interface_mpp_aux {
  * */
 
     struct pixel_response {
-        int image_x; // x index of dispersed image
-        int image_y; // y index of dispersed image
-        int cube_z; // z (wavelength) index of theory cube
-        int cube_x; // x index of theory cube
-        int cube_y; // y index of theory cube
+        int image_x; // x index of dispersed image (NAXIS1, fast)
+        int image_y; // y index of dispersed image (NAXIS2, slow)
+        int cube_z; // z (wavelength) index of theory cube (MDNAXIS3, slow)
+        int cube_x; // x index of theory cube (MDNAXIS1, fast)
+        int cube_y; // y index of theory cube (MDNAXIS2, med)
         double weight; // weight of the theory cube
     };
 
@@ -145,9 +149,9 @@ namespace interface_mpp_aux {
          *          - INSTNAME: instrument name
          *          - OBSTYPE : type of observation, grism or photometry
          *          - BANDPASS: bandpass file name
-         *          - MDNAXIS1: number of pixels along 3d model cube lambda-axis
-         *          - MDNAXIS2: number of pixels along 3d model cube x-axis
-         *          - MDNAXIS3: number of pixels along 3d model cube y-axis
+         *          - MDNAXIS1: number of pixels along 3d model cube x-axis
+         *          - MDNAXIS2: number of pixels along 3d model cube y-axis
+         *          - MDNAXIS3: number of pixels along 3d model cube lam-axis
          *          - MDSCALE : pixel scale of the 3d model cube
          *          [ MDCD1_1 : partial of the 1st axis w.r.t. x, 3d modelcube
          *          [ MDCD1_2 : partial of the 1st axis w.r.t. y, 3d modelcube
@@ -189,9 +193,9 @@ namespace interface_mpp_aux {
                                               const ndarray lambdas,
                                               const ndarray bandpasses) {
         obstype = py::int_(config["OBSTYPE"]);
-        model_Nx = py::int_(config["MDNAXIS2"]);//Nx?
-        model_Ny = py::int_(config["MDNAXIS3"]);//Ny?
-        model_Nlam = py::int_(config["MDNAXIS1"]);//Nlam
+        model_Nx = py::int_(config["MDNAXIS1"]);//Nx
+        model_Ny = py::int_(config["MDNAXIS2"]);//Ny
+        model_Nlam = py::int_(config["MDNAXIS3"]);//Nlam
         model_scale = py::float_(config["MDSCALE"]);
         Nx = py::int_(config["NAXIS1"]);
         Ny = py::int_(config["NAXIS2"]);
@@ -209,6 +213,22 @@ namespace interface_mpp_aux {
             disp_ang = 0.0;
             offset = 0.0;
         }
+        //cout << "set_disperse_helper: Obs type = " << obstype << endl;
+        cout << ">>> set_disperse_helper:" << endl;
+        cout << "--- OBSTYPE = " << obstype << endl;
+        cout << "--- MDNAXIS1 = " << model_Nx << endl;
+        cout << "--- MDNAXIS2 = " << model_Ny << endl;
+        cout << "--- MDNAXIS3 = " << model_Nlam << endl;
+        cout << "--- MDSCALE = " << model_scale << endl;
+        cout << "--- NAXIS1 = " << Nx << endl;
+        cout << "--- NAXIS2 = " << Ny << endl;
+        cout << "--- PIXSCALE = " << pix_scale << endl;
+        cout << "--- DIAMETER = " << diameter << endl;
+        cout << "--- EXPTIME = " << exp_time << endl;
+        cout << "--- GAIN = " << gain << endl;
+        cout << "--- RSPEC = " << R_spec << endl;
+        cout << "--- DISPANG= " << disp_ang << endl;
+        cout << "--- OFFSET = " << offset << endl;
         int status = set_pixel_response(lambdas, bandpasses);
         assert(status == 0);
     }
@@ -399,7 +419,7 @@ namespace interface_mpp_aux {
             throw runtime_error("`theory_data` dimension must be 3!");
         if (buf_td.shape[0] != model_Nlam)
             throw runtime_error("`theory_data`, must have the same Nlam!");
-        if ((buf_td.shape[1] != model_Nx) || (buf_td.shape[2] != model_Ny))
+        if ((buf_td.shape[1] != model_Ny) || (buf_td.shape[2] != model_Nx))
             throw runtime_error("`theory_data` dimension wrong!");
         // dimension check on photometry data
         if (buf_ph.ndim != 2)
@@ -430,7 +450,8 @@ namespace interface_mpp_aux {
             size_t ph_id = photometry_data.index_at(item.image_y, item.image_x);
             // loop through wavelength grid
             for (int il = 0; il < buf_td.shape[0]; il++){
-                size_t td_id = theory_data.index_at(il, item.cube_x, item.cube_y);
+                // assume zyx indexing for theory_data
+                size_t td_id = theory_data.index_at(il, item.cube_y, item.cube_x);
 
                 double mean_bp = (ptr_bp[2 * il + 0] + ptr_bp[2 * il + 1]) / 2.0;
                 ptr_ph[ph_id] += ptr_td[td_id] * item.weight * mean_bp;
@@ -443,21 +464,21 @@ namespace interface_mpp_aux {
         // sanity check
         py::buffer_info buf_td = theory_data.request();
         py::buffer_info buf_dd = dispersed_data.request();
-        cout << "Checking input dimension" << endl;
+        //cout << "Checking input dimension" << endl;
         if (buf_td.ndim != 3)
             throw runtime_error("`theory_data` dimension must be 3!");
         if (buf_dd.ndim != 2)
             throw runtime_error("`dispersed_data` dimension must be 2!");
         if (buf_td.shape[0] != model_Nlam)
             throw runtime_error("`theory_data`, must have the same Nlam!");
-        if ((buf_td.shape[1] != model_Nx) || (buf_td.shape[2] != model_Ny))
+        if ((buf_td.shape[1] != model_Ny) || (buf_td.shape[2] != model_Nx))
             throw runtime_error("`theory_data` dimension wrong!");
         if (buf_dd.shape[0] != Ny || buf_dd.shape[1] != Nx)
             throw runtime_error("`dispersed_data` dimension wrong!");
         // get pointer to the buffer data memory
         auto *ptr_td = static_cast<double *>(buf_td.ptr);
         auto *ptr_dd = static_cast<double *>(buf_dd.ptr);
-        cout << "Clean the output image" << endl;
+        //cout << "Clean the output image" << endl;
         // init dispersed_data
         for (size_t index = 0; index < buf_dd.size; index++) { ptr_dd[index] = 0.0; }
         // begin distribution
@@ -467,9 +488,9 @@ namespace interface_mpp_aux {
         if(_OMP_NUM_THREADS_) {
             Nthread = max(atoi(_OMP_NUM_THREADS_), 1);
         }
-        cout << "Setting OMP thread to " << Nthread << endl;
+        //cout << "Setting OMP thread to " << Nthread << endl;
         omp_set_num_threads(Nthread);
-        cout << "Looping" << endl;
+        //cout << "Looping" << endl;
 #pragma omp parallel shared(dispersed_data, theory_data, ptr_dd, \
         ptr_td, pixel_response_table)
         {
@@ -482,13 +503,14 @@ namespace interface_mpp_aux {
                 // theory cube index: lam=i, y=_k, x=_l
                 // weight: x_weight[q]*y_weight[p]*mean_bp*flux_scale
                 size_t local_copy_id = item.image_y * Nx + item.image_x;
+                // assuming zyx indexing for theory_data
                 size_t td_id = theory_data.index_at(item.cube_z,
-                                                    item.cube_x, item.cube_y);
+                                                    item.cube_y, item.cube_x);
                 //cout << item.image_x << item.image_y << item.cube_x;
                 //cout << item.cube_y << item.cube_z << item.weight << endl;
                 local_copy[local_copy_id] += ptr_td[td_id] * item.weight;
             }
-            cout << "Dump local copy to the final answer" << endl;
+            //cout << "Dump local copy to the final answer" << endl;
             for (int j = 0; j < Ny; j++) {// slow axis
                 for (int i = 0; i < Nx; i++) {// fast axis
                     size_t dd_id = dispersed_data.index_at(j, i);
@@ -659,16 +681,19 @@ void cpp_get_image(int index,
                    const ndarray lambdas, const ndarray bandpasses){
     const ima::DataVector& instance = ima::DataVector::get_instance();
     int _Nobs = instance.get_Nobs();
-    cout << "cpp_get_dispersed_image "<< index << " out of " << _Nobs << endl;
+    //cout << "cpp_get_image "<< index+1 << " out of " << _Nobs << endl;
     assert(index < _Nobs);
     const ima::disperse_helper& item = instance.get_helper(index);
     if(item.getObsType() == 1) {
-        cout << "Calling get_dispersed_image" << endl;
+        //cout << "Calling get_dispersed_image" << endl;
         item.get_dispersed_image(theory_data, image);
     }
-    else{
-        cout << "Calling get_photometry_image" << endl;
+    else if (item.getObsType() == 0){
+        //cout << "Calling get_photometry_image" << endl;
         item.get_photometry_image(theory_data, image, lambdas, bandpasses);
+    }
+    else{
+        throw runtime_error("ObsType not supported!");
     }
 }
 

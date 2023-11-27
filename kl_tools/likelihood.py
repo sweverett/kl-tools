@@ -25,8 +25,10 @@ import intensity
 from parameters import Pars, MetaPars
 # import parameters
 from velocity import VelocityMap
-from cube import DataVector, DataCube
-import grism as grism
+import cube
+from cube import DataCube
+from datavector import DataVector, FiberDataVector
+import grism
 import kltools_grism_module_2 as m
 m.set_mpi_info(_mpi_size, _mpi_rank)
 
@@ -42,6 +44,38 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
+CubeLists = []
+CubeParsLists = []
+def init_CubePars_lists(cubepars_lists):
+    assert type(cubepars_lists) is list, "Input cubepars_lists must be list!"
+    global CubeParsLists
+    CubeParsLists = cubepars_lists
+
+def init_Cube_lists(cube_lists):
+    assert type(cube_lists) is list, "Input cube_lists must be list!"
+    global CubeLists
+    CubeLists = cube_lists
+
+def get_Cube(i):
+    global CubeLists
+    assert i<len(CubeLists), print(f'Requesting cube {i} out of {len(CubeLists)}!')
+    return CubeLists[i]
+
+def get_CubePars(i):
+    global CubeParsLists
+    assert i<len(CubeParsLists), print(f'Requesting cubepar {i} out of {len(CubeLists)}!')
+    return CubeParsLists[i]
+
+GlobalDataVector = []
+def init_GlobalDataVector(dv_list):
+    assert type(dv_list) is list, "Input dv_list must be list!"
+    global GlobalDataVector
+    GlobalDataVector = dv_list
+def get_GlobalDataVector(i):
+    global GlobalDataVector
+    assert i<len(GlobalDataVector), f'Requesting GlobalDataVector {i} out of {len(GlobalDataVector)}!'
+    return GlobalDataVector[i]
+
 class LogBase(object):
     '''
     Base class for a probability dist that holds the meta and
@@ -50,11 +84,10 @@ class LogBase(object):
 
     def __init__(self, parameters, datavector):
         '''
-        parameters: Pars
+        parameters: `parameters.Pars`
             Pars instance that holds all parameters needed for MCMC
-            run, including SampledPars and MetaPars
-        datavector: DataCube, etc.
-            Arbitrary data vector that subclasses from DataVector.
+            run, including `SampledPars` and `MetaPars`
+        datavector: any class sub-classes from `datavector.DataVector`
             If DataCube, truncated to desired lambda bounds
         '''
 
@@ -113,21 +146,20 @@ class LogPosterior(LogBase):
     the passed sampled & meta parameters
     '''
 
-    def __init__(self, parameters, datavector, likelihood='default'):
+    def __init__(self, parameters, datavector, likelihood='default', **kwargs):
         '''
-        parameters: Pars
+        parameters: `parameters.Pars` object
             Pars instance that holds all parameters needed for MCMC
-            run, including SampledPars and MCMCPars
-        datavector: DataCube, etc.
-            Arbitrary data vector that subclasses from DataVector.
+            run, including `SampledPars` and `MCMCPars`
+        datavector: any class sub-classes from `datavector.DataVector`
             If DataCube, truncated to desired lambda bounds
         '''
-
-        super(LogPosterior, self).__init__(parameters, datavector)
+        # set self.parameters and self.datavector (to Null)
+        super(LogPosterior, self).__init__(parameters, DataVector())
 
         self.log_prior = LogPrior(parameters)
         self.log_likelihood = build_likelihood_model(
-            likelihood, parameters, datavector
+            likelihood, parameters, datavector, **kwargs
             )
 
         self.ndims = len(parameters.sampled)
@@ -150,9 +182,10 @@ class LogPosterior(LogBase):
 
         theta: list
             Sampled parameters. Order defined in self.pars_order
-        data: DataCube, etc.
+        data: DataVector, etc.
             Arbitrary data vector. If DataCube, truncated
             to desired lambda bounds
+        pars: Pars object
         '''
 
         logprior = self.log_prior(theta)
@@ -200,7 +233,7 @@ class LogPrior(LogBase):
 
 class LogLikelihood(LogBase):
 
-    def __init__(self, parameters, datavector):
+    def __init__(self, parameters, datavector, **kwargs):
         '''
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
@@ -683,292 +716,336 @@ class DataCubeLikelihood(LogLikelihood):
 
         return datacube.get_inv_cov_list()
 
+# class GrismLikelihood(LogLikelihood):
+#     '''
+#     An implementation of a LogLikelihood for a Grism KL measurement
+
+#     Note: a reminder of LogLikelihood interface
+#     method:
+#         - __init__(Pars:parameters, DataVector:datavector)
+#         x _setup_marginalization(MetaPars:pars)
+#         - __call__(list:theta, DataVector:datavector)
+#         x _compute_log_det(imap)
+#         - setup_vmap(dict:theta_pars, str:model_name)
+#         - _setup_vmap(dict:theta_pars, MetaPars:meta_pars, str:model_name)
+#         > _setup_sed(cls, theta_pars, datacube)
+#         - _interp1d(np.ndarray:table, np.ndarray:values, kind='linear')
+#         o _log_likelihood(list:theta, DataVector:datavector, DataCube:model)
+#         o _setup_model(list:theta_pars, DataVector:datavector) 
+
+#     attributes:
+#         From LogBase
+#         - self.parameters: parameters.Pars
+#         - self.datavector: cube.DataVector
+#         - self.meta/pars: parameters.MCMCPars
+#         - self.sampled: parameters.SampledPars
+#     '''
+#     def __init__(self, parameters, datavector):
+#         ''' Initialization
+
+#         Besides the usual likelihood.LogLikelihood initialization, we further
+#         initialize the grism.GrismModelCube object, fsor the sake of speed
+#         '''
+#         super(GrismLikelihood, self).__init__(parameters, datavector)
+#         # init with an empty model cube
+#         _lrange = self.meta['model_dimension']['lambda_range']
+#         _dl = self.meta['model_dimension']['lambda_res']
+#         Nspec = len(np.arange(_lrange[0], _lrange[1], _dl))
+#         Nx = self.meta['model_dimension']['Nx']
+#         Ny = self.meta['model_dimension']['Ny']
+#         # init with an empty modelcube object
+#         self.modelcube = grism.GrismModelCube(self.parameters, 
+#             datacube=np.zeros([Nspec, Nx, Ny]))
+#         self.set_obs_methods(datavector)
+#         return
+
+#     def set_obs_methods(self, datavector):
+#         self.modelcube.set_obs_methods(datavector.get_config_list())
+
+#     #def __call__(self, theta, datavector):
+#     def __call__(self, theta):
+#         '''
+#         Do setup and type / sanity checking here
+#         before calling the abstract method _loglikelihood,
+#         which will have a different implementation for each class
+
+#         theta: list
+#             Sampled parameters. Order defined in self.pars_order
+#         datavector: DataCube, etc.
+#             Arbitrary data vector that subclasses from DataVector.
+#             If DataCube, truncated to desired lambda bounds
+#         '''
+
+#         #start_time = time()*1000
+
+#         # unpack sampled params
+#         theta_pars = self.theta2pars(theta)
+
+#         # setup model corresponding to cube.DataCube type
+#         #model = self._setup_model(theta_pars, datavector)
+#         self._setup_model(theta_pars, datavector)
+
+#         #print("---- build model | %.2f ms -----" % (time()*1000 - start_time))
+
+#         # if we are computing the marginalized posterior over intensity
+#         # map parameters, then we need to scale this likelihood by a
+#         # determinant factor
+#         if self.marginalize_intensity is True:
+#             log_det = self._compute_log_det(self.imap)
+#         else:
+#             log_det = 1.
+
+#         return (-0.5 * log_det) + self._log_likelihood(theta, datavector)
+
+#     def _log_likelihood(self, theta, datavector):
+#         '''
+#         theta: list
+#             Sampled parameters, order defined by pars_order
+#         datavector: DataVector
+#             The grism datavector
+#         model: DataCube
+#             The model datacube object, truncated to desired lambda bounds
+#         '''
+
+#         #start_time = time()*1000
+#         # a (Nspec, Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
+#         inv_cov = self._setup_inv_cov_list(datavector)
+
+#         loglike = 0
+
+#         # can figure out how to remove this for loop later
+#         # will be fast enough with numba anyway
+#         for i in range(datavector.Nobs):
+
+#             _img, _noise = self.modelcube.observe(i, force_noise_free=True)
+#             diff = (datavector.get_data(i) - _img)
+#             chi2 = np.sum(diff**2/inv_cov[i])
+
+#             loglike += -0.5*chi2
+
+#         #print("---- calculate dchi2 | %.2f ms -----" % (time()*1000 - start_time))
+#         # NOTE: Actually slower due to extra matrix evals...
+#         # diff_2 = (datacube.data - model.data).reshape(Nspec, Nx*Ny)
+#         # chi2_2 = diff_2.dot(inv_cov.dot(diff_2.T))
+#         # loglike2 = -0.5*chi2_2.trace()
+
+#         return loglike
+
+#     def _setup_model(self, theta_pars, datavector):
+#         '''
+#         Setup the model datacube given the input theta_pars and datavector
+
+#         theta_pars: dict
+#             Dictionary of sampled pars
+#         datavector: DataVector
+#             GrismDataVector object
+#         '''
+#         Nx = self.meta['model_dimension']['Nx']
+#         Ny = self.meta['model_dimension']['Ny']
+#         model_scale = self.meta['model_dimension']['scale']
+
+#         # create grid of pixel centers in image coords
+#         X, Y = utils.build_map_grid(Nx, Ny, indexing='xy', scale=model_scale)
+
+#         # create 2D velocity & intensity maps given sampled transformation
+#         # parameters
+#         vmap = self.setup_vmap(theta_pars)
+#         imap = self.setup_imap(theta_pars, datavector)
+
+#         # TODO: temp for debugging!
+#         self.imap = imap
+
+#         try:
+#             use_numba = self.meta['run_options']['use_numba']
+#         except KeyError:
+#             use_numba = False
+
+#         # evaluate maps at pixel centers in obs plane
+#         v_array = vmap(
+#             'obs', X, Y, normalized=True, use_numba=use_numba
+#             )
+#         self.v_array = v_array
+#         # get both the emission line and continuum image
+#         _pars = self.meta.copy_with_sampled_pars(theta_pars)
+#         _pars['run_options']['imap_return_gal'] = True
+#         i_array, gal = imap.render(theta_pars, datavector, _pars)
+#         self.i_array = i_array
+#         self._construct_model_datacube(theta_pars, v_array, i_array, gal)
+        
+#     def setup_imap(self, theta_pars, datavector):
+#         '''
+#         theta_pars: dict
+#             A dict of the sampled mcmc params for both the velocity
+#             map and the tranformation matrices
+#         datacube: DataCube
+#             Datavector datacube truncated to desired lambda bounds
+#         '''
+#         imap = self._setup_imap(theta_pars, datavector, self.meta)
+#         return imap
+
+#     @classmethod
+#     def _setup_imap(cls, theta_pars, datavector, meta):
+#         '''
+#         See setup_imap(). Only runs if a new imap for the sample
+#         is needed
+#         '''
+
+#         # Need to check if any basis func parameters are
+#         # being sampled over
+#         pars = meta.copy_with_sampled_pars(theta_pars)
+
+#         imap_pars = deepcopy(pars['intensity'])
+#         imap_type = imap_pars['type']
+#         del imap_pars['type']
+#         imap_pars['theory_Nx'] = pars['model_dimension']['Nx']
+#         imap_pars['theory_Ny'] = pars['model_dimension']['Ny']
+#         imap_pars['scale'] = pars['model_dimension']['scale']
+
+#         return intensity.build_intensity_map(imap_type, datavector, imap_pars)
+
+
+#     def _construct_model_datacube(self, theta_pars, v_array, i_array, gal):
+#         '''
+#         Create the model datacube from model slices, using the evaluated
+#         velocity and intensity maps, SED, etc.
+
+#         theta_pars: dict
+#             A dict of the sampled mcmc params for both the velocity
+#             map and the tranformation matrices
+#         v_array: np.array (2D)
+#             The vmap evaluated at image pixel positions for sampled pars.
+#             (Must be normalzied)
+#         i_array: np.array (2D)
+#             The imap evaluated at image pixel positions for sampled pars
+#         cont_array: np.array (2D)
+#             The imap of the fitted or modeled continuum
+#         datacube: DataCube
+#             Datavector datacube truncated to desired lambda bounds
+#         '''
+#         _lrange = self.meta['model_dimension']['lambda_range']
+#         _dl = self.meta['model_dimension']['lambda_res']
+#         lambdas = [(l, l+_dl) for l in np.arange(_lrange[0], _lrange[1], _dl)]
+#         lambda_cen = np.array([(l[0]+l[1])/2.0 for l in lambdas])
+#         Nspec = len(lambdas)
+#         #Nspec, Nx, Ny = datavector.shape
+
+#         #data = np.zeros(datavector.shape)
+
+#         #lambdas = np.array(datavector.lambdas)
+
+#         sed = self._setup_sed(self.meta)
+
+#         # build Doppler-shifted datacube
+#         # self.lambda_cen = observed frame lambda grid
+#         # w_mesh = rest frame wavelengths evaluated on observed frame grid
+#         # To make energy conserved, dc_array in units of 
+#         # photons / (s cm2)
+#         w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
+#         w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
+#         # photons/s/cm2 in the 3D grid
+#         dc_array = sed.spectrum(w_mesh.flatten()) * _dl
+#         dc_array = dc_array.reshape(w_mesh.shape) * \
+#                         i_array[np.newaxis, :, :] /\
+#                         (1+v_array[np.newaxis, :, :]) 
+
+#         self.modelcube.set_data(dc_array, gal, sed)
+#         #model_datacube = grism.GrismModelCube(self.parameters,
+#         #    datacube=dc_array, gal=gal, sed=sed)
+
+#         #return model_datacube
+
+#     def _setup_inv_cov_list(self, datavector):
+#         '''
+#         '''
+
+#         # for now, we'll let each datacube class do this
+#         # to allow for differences in weightmap definitions
+#         # between experiments
+
+#         return datavector.get_inv_cov_list()
+
+#     @classmethod
+#     def _setup_sed(cls, meta):
+#         # self.meta
+#         return grism.GrismSED(meta['sed'])
+
+
 class GrismLikelihood(LogLikelihood):
     '''
     An implementation of a LogLikelihood for a Grism KL measurement
 
-    Note: a reminder of LogLikelihood interface
-    method:
-        - __init__(Pars:parameters, DataVector:datavector)
-        x _setup_marginalization(MetaPars:pars)
-        - __call__(list:theta, DataVector:datavector)
-        x _compute_log_det(imap)
-        - setup_vmap(dict:theta_pars, str:model_name)
-        - _setup_vmap(dict:theta_pars, MetaPars:meta_pars, str:model_name)
-        > _setup_sed(cls, theta_pars, datacube)
-        - _interp1d(np.ndarray:table, np.ndarray:values, kind='linear')
-        o _log_likelihood(list:theta, DataVector:datavector, DataCube:model)
-        o _setup_model(list:theta_pars, DataVector:datavector) 
-
-    attributes:
-        From LogBase
-        - self.parameters: parameters.Pars
-        - self.datavector: cube.DataVector
-        - self.meta/pars: parameters.MCMCPars
-        - self.sampled: parameters.SampledPars
+    Note: light-weight version
     '''
-    def __init__(self, parameters, datavector):
+    def __init__(self, parameters, datavector, **kwargs):
         ''' Initialization
-
-        Besides the usual likelihood.LogLikelihood initialization, we further
-        initialize the grism.GrismModelCube object, fsor the sake of speed
+        Set up GrismPars and GrismModelCube objects by providing a 
+        GrismDataVector object or fiducial parameters
         '''
-        super(GrismLikelihood, self).__init__(parameters, datavector)
-        # init with an empty model cube
-        _lrange = self.meta['model_dimension']['lambda_range']
-        _dl = self.meta['model_dimension']['lambda_res']
-        Nspec = len(np.arange(_lrange[0], _lrange[1], _dl))
-        Nx = self.meta['model_dimension']['Nx']
-        Ny = self.meta['model_dimension']['Ny']
-        # init with an empty modelcube object
-        self.modelcube = grism.GrismModelCube(self.parameters, 
-            datacube=np.zeros([Nspec, Nx, Ny]))
-        self.set_obs_methods(datavector)
+        ### Case 1: Build data vector from input fiducial parameters
+        if datavector is None:
+            print("GrismLikelihood: Generating data vector from fid pars...")
+            super(GrismLikelihood, self).__init__(parameters, DataVector())
+            self._set_model_dimension()
+            # set GrismPars and GrismModelCube list
+            if parameters.meta.get('obs_conf', None) is None:
+                raise ValueError(f'parameters must have obs_conf if '+\
+                    f'data vector is not provided!')
+            if kwargs.get('sampled_theta_fid', None) is None:
+                raise ValueError(f'sampled_theta_fid must be set when '+\
+                    f'data vector is not provided!')
+            meta_copy = parameters.meta.copy()
+            obs_conf_list = meta_copy.pop('obs_conf')
+            self.Nobs = len(obs_conf_list)
+            self.GrismPars_list = [grism.GrismPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)]
+            self.GrismModelCube_list = [grism.GrismModelCube(p) for p in self.GrismPars_list]
+            # initialize C++ routine without setting data vector
+            print("debug: Nlam = %d/%d"%(self.GrismPars_list[0].lambdas.shape,
+                self.GrismPars_list[0].bp_array.shape[0]))
+            grism.initialize_observations(self.Nobs, self.GrismPars_list)
+            # generate fiducial images and DataVector object
+            theta_pars_fid = self.theta2pars(kwargs['sampled_theta_fid'])
+            dc_array, gal, sed = self._setup_model(theta_pars_fid)
+            fid_img_list, fid_noise_list = [], []
+            for i in range(self.Nobs):
+                img, noise = self.GrismModelCube_list[i].observe(dc_array, force_noise_free=False)
+                fid_img_list.append(img)
+                fid_noise_list.append(noise)
+            _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
+            _data_header = obs_conf_list
+            self.datavector = grism.GrismDataVector(
+                header=_header, data_header=_data_header, 
+                data=fid_img_list, noise=fid_noise_list)
+            # set the fiducial images to C++ routine
+            print("GrismLikelihood: Caching the (fiducial) data vector...")
+            grism.initialize_observations(self.Nobs, self.GrismPars_list, datavector=self.datavector, overwrite=True)
+            input_from_fid_theta = True
+        ### Case 2: Build data vector from input GrismDataVector object 
+        else:
+            super(GrismLikelihood, self).__init__(parameters, datavector)
+            self._set_model_dimension()
+            meta_copy = parameters.meta.copy()
+            if meta_copy.get('obs_conf', None) is not None:
+                print(f'Ignoring obs_conf in parameters, use the ones from data vector')
+                meta_copy.pop(obs_conf)
+            obs_conf_list = datavector.get_config_list()
+            self.Nobs = datavector.Nobs
+            self.GrismPars_list = []
+            self.GrismModelCube_list = []
+            for i in range(self.Nobs):
+                _gp = grism.GrismPars(meta_copy.pars, obs_conf_list[i])
+                _gmc = grism.GrismModelCube(_gp)
+                self.GrismPars_list.append(_gp)
+                self.GrismModelCube_list.append(_gmc)
+            # self.GrismPars_list = [grism.GrismPars(meta_copy, conf) for conf in obs_conf_list]
+            # self.GrismModelCube_list = [grism.GrismModelCube(p) for p in self.GrismPars_list]
+            # initialize C++ routine with setting data vector
+            grism.initialize_observations(self.Nobs, self.GrismPars_list, datavector)
+            input_from_fid_theta = False
         return
 
-    def set_obs_methods(self, datavector):
-        self.modelcube.set_obs_methods(datavector.get_config_list())
-
-    #def __call__(self, theta, datavector):
-    def __call__(self, theta):
-        '''
-        Do setup and type / sanity checking here
-        before calling the abstract method _loglikelihood,
-        which will have a different implementation for each class
-
-        theta: list
-            Sampled parameters. Order defined in self.pars_order
-        datavector: DataCube, etc.
-            Arbitrary data vector that subclasses from DataVector.
-            If DataCube, truncated to desired lambda bounds
-        '''
-
-        #start_time = time()*1000
-
-        # unpack sampled params
-        theta_pars = self.theta2pars(theta)
-
-        # setup model corresponding to cube.DataCube type
-        #model = self._setup_model(theta_pars, datavector)
-        self._setup_model(theta_pars, datavector)
-
-        #print("---- build model | %.2f ms -----" % (time()*1000 - start_time))
-
-        # if we are computing the marginalized posterior over intensity
-        # map parameters, then we need to scale this likelihood by a
-        # determinant factor
-        if self.marginalize_intensity is True:
-            log_det = self._compute_log_det(self.imap)
-        else:
-            log_det = 1.
-
-        return (-0.5 * log_det) + self._log_likelihood(theta, datavector)
-
-    def _log_likelihood(self, theta, datavector):
-        '''
-        theta: list
-            Sampled parameters, order defined by pars_order
-        datavector: DataVector
-            The grism datavector
-        model: DataCube
-            The model datacube object, truncated to desired lambda bounds
-        '''
-
-        #start_time = time()*1000
-        # a (Nspec, Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
-        inv_cov = self._setup_inv_cov_list(datavector)
-
-        loglike = 0
-
-        # can figure out how to remove this for loop later
-        # will be fast enough with numba anyway
-        for i in range(datavector.Nobs):
-
-            _img, _noise = self.modelcube.observe(i, force_noise_free=True)
-            diff = (datavector.get_data(i) - _img)
-            chi2 = np.sum(diff**2/inv_cov[i])
-
-            loglike += -0.5*chi2
-
-        #print("---- calculate dchi2 | %.2f ms -----" % (time()*1000 - start_time))
-        # NOTE: Actually slower due to extra matrix evals...
-        # diff_2 = (datacube.data - model.data).reshape(Nspec, Nx*Ny)
-        # chi2_2 = diff_2.dot(inv_cov.dot(diff_2.T))
-        # loglike2 = -0.5*chi2_2.trace()
-
-        return loglike
-
-    def _setup_model(self, theta_pars, datavector):
-        '''
-        Setup the model datacube given the input theta_pars and datavector
-
-        theta_pars: dict
-            Dictionary of sampled pars
-        datavector: DataVector
-            GrismDataVector object
-        '''
-        Nx = self.meta['model_dimension']['Nx']
-        Ny = self.meta['model_dimension']['Ny']
-        model_scale = self.meta['model_dimension']['scale']
-
-        # create grid of pixel centers in image coords
-        X, Y = utils.build_map_grid(Nx, Ny, indexing='xy', scale=model_scale)
-
-        # create 2D velocity & intensity maps given sampled transformation
-        # parameters
-        vmap = self.setup_vmap(theta_pars)
-        imap = self.setup_imap(theta_pars, datavector)
-
-        # TODO: temp for debugging!
-        self.imap = imap
-
-        try:
-            use_numba = self.meta['run_options']['use_numba']
-        except KeyError:
-            use_numba = False
-
-        # evaluate maps at pixel centers in obs plane
-        v_array = vmap(
-            'obs', X, Y, normalized=True, use_numba=use_numba
-            )
-        self.v_array = v_array
-        # get both the emission line and continuum image
-        _pars = self.meta.copy_with_sampled_pars(theta_pars)
-        _pars['run_options']['imap_return_gal'] = True
-        i_array, gal = imap.render(theta_pars, datavector, _pars)
-        self.i_array = i_array
-        self._construct_model_datacube(theta_pars, v_array, i_array, gal)
-        
-    def setup_imap(self, theta_pars, datavector):
-        '''
-        theta_pars: dict
-            A dict of the sampled mcmc params for both the velocity
-            map and the tranformation matrices
-        datacube: DataCube
-            Datavector datacube truncated to desired lambda bounds
-        '''
-        imap = self._setup_imap(theta_pars, datavector, self.meta)
-        return imap
-
-    @classmethod
-    def _setup_imap(cls, theta_pars, datavector, meta):
-        '''
-        See setup_imap(). Only runs if a new imap for the sample
-        is needed
-        '''
-
-        # Need to check if any basis func parameters are
-        # being sampled over
-        pars = meta.copy_with_sampled_pars(theta_pars)
-
-        imap_pars = deepcopy(pars['intensity'])
-        imap_type = imap_pars['type']
-        del imap_pars['type']
-        imap_pars['theory_Nx'] = pars['model_dimension']['Nx']
-        imap_pars['theory_Ny'] = pars['model_dimension']['Ny']
-        imap_pars['scale'] = pars['model_dimension']['scale']
-
-        return intensity.build_intensity_map(imap_type, datavector, imap_pars)
-
-
-    def _construct_model_datacube(self, theta_pars, v_array, i_array, gal):
-        '''
-        Create the model datacube from model slices, using the evaluated
-        velocity and intensity maps, SED, etc.
-
-        theta_pars: dict
-            A dict of the sampled mcmc params for both the velocity
-            map and the tranformation matrices
-        v_array: np.array (2D)
-            The vmap evaluated at image pixel positions for sampled pars.
-            (Must be normalzied)
-        i_array: np.array (2D)
-            The imap evaluated at image pixel positions for sampled pars
-        cont_array: np.array (2D)
-            The imap of the fitted or modeled continuum
-        datacube: DataCube
-            Datavector datacube truncated to desired lambda bounds
-        '''
-        _lrange = self.meta['model_dimension']['lambda_range']
-        _dl = self.meta['model_dimension']['lambda_res']
-        lambdas = [(l, l+_dl) for l in np.arange(_lrange[0], _lrange[1], _dl)]
-        lambda_cen = np.array([(l[0]+l[1])/2.0 for l in lambdas])
-        Nspec = len(lambdas)
-        #Nspec, Nx, Ny = datavector.shape
-
-        #data = np.zeros(datavector.shape)
-
-        #lambdas = np.array(datavector.lambdas)
-
-        sed = self._setup_sed(self.meta)
-
-        # build Doppler-shifted datacube
-        # self.lambda_cen = observed frame lambda grid
-        # w_mesh = rest frame wavelengths evaluated on observed frame grid
-        # To make energy conserved, dc_array in units of 
-        # photons / (s cm2)
-        w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
-        w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
-        # photons/s/cm2 in the 3D grid
-        dc_array = sed.spectrum(w_mesh.flatten()) * _dl
-        dc_array = dc_array.reshape(w_mesh.shape) * \
-                        i_array[np.newaxis, :, :] /\
-                        (1+v_array[np.newaxis, :, :]) 
-
-        self.modelcube.set_data(dc_array, gal, sed)
-        #model_datacube = grism.GrismModelCube(self.parameters,
-        #    datacube=dc_array, gal=gal, sed=sed)
-
-        #return model_datacube
-
-    def _setup_inv_cov_list(self, datavector):
-        '''
-        '''
-
-        # for now, we'll let each datacube class do this
-        # to allow for differences in weightmap definitions
-        # between experiments
-
-        return datavector.get_inv_cov_list()
-
-    @classmethod
-    def _setup_sed(cls, meta):
-        # self.meta
-        return grism.GrismSED(meta['sed'])
-
-
-class GrismLikelihood_test(LogLikelihood):
-    '''
-    An implementation of a LogLikelihood for a Grism KL measurement
-
-    Note: light-weight version
-    method:
-        - __init__(Pars:parameters, DataVector:datavector)
-        x _setup_marginalization(MetaPars:pars)
-        - __call__(list:theta, DataVector:datavector)
-        x _compute_log_det(imap)
-        - setup_vmap(dict:theta_pars, str:model_name)
-        - _setup_vmap(dict:theta_pars, MetaPars:meta_pars, str:model_name)
-        > _setup_sed(cls, theta_pars, datacube)
-        - _interp1d(np.ndarray:table, np.ndarray:values, kind='linear')
-        o _log_likelihood(list:theta, DataVector:datavector, DataCube:model)
-        o _setup_model(list:theta_pars, DataVector:datavector) 
-
-    attributes:
-        From LogBase
-        - self.parameters: parameters.Pars
-        - self.datavector: None
-        - self.meta/pars: parameters.MCMCPars
-        - self.sampled: parameters.SampledPars
-    '''
-    def __init__(self, parameters, datavector):
-        ''' Initialization
-
-        Besides the usual likelihood.LogLikelihood initialization, we further
-        initialize the grism.GrismModelCube object, fsor the sake of speed
-        '''
-        # init parent class
-        super(GrismLikelihood_test, self).__init__(parameters, datavector)
+    def _set_model_dimension(self):
+        # build model lambda-y-x grid
+        # TODO: retrieve header in a consistent way
         _lr = self.meta['model_dimension']['lambda_range']
         _li, _lf = _lr[0], _lr[1]
         self._dl = self.meta['model_dimension']['lambda_res']
@@ -977,54 +1054,29 @@ class GrismLikelihood_test(LogLikelihood):
         self.mNx = self.meta['model_dimension']['Nx']
         self.mNy = self.meta['model_dimension']['Ny']
         self.mscale = self.meta['model_dimension']['scale']
-        self.Nobs = datavector.Nobs
-        self.obs_types = []
-        self.config_list = []
-        # init the data vector in C++ module
+        return 
+
+    def get_images(self, theta):
+        ''' Get simulated images given parameter values
+        '''
+        image_list = []
+        # unpack sampled params
+        theta_pars = self.theta2pars(theta)
+        # setup model corresponding to cube.DataCube type
+        dc_array, gal, sed = self._setup_model(theta_pars)
         for i in range(self.Nobs):
-            _config = datavector.get_config(i)
-            _config['model_Nx'] = self.mNx
-            _config['model_Ny'] = self.mNy
-            _config['model_Nlam'] = self.mNspec
-            _config['model_scale'] = self.mscale
-            _type = _config['type']
-            self.obs_types.append(_type)
-            self.config_list.append(_config)
-
-    def initialize_observations(self):
-        if (self.Nobs != m.get_Nobs()):
-            if(m.get_Nobs()>0):
-                print(f'clean {m.get_Nobs()} observations')
-                m.clear_observation()
-            for i in range(self.Nobs):
-                _config = self.config_list[i]
-                _type = self.obs_types[i]
-                _bp = gs.Bandpass(_config.get('bandpass'),
-                    wave_type=_config.get('wave_type', 'nm'))
-                _bp_list = _bp(self._lambdas)
-
-                if _type=='photometry':
-                    m.add_image_observation(_config, 
-                        self.datavector.get_data(i), 
-                        self.datavector.get_noise(i))
-                elif _type=='grism':
-                    m.add_grism_observation(
-                    _config,
-                    self._lambdas,
-                    _bp_list,
-                    self.datavector.get_data(i), 
-                    self.datavector.get_noise(i))
-            #self.obs_initialized = True
-        assert (m.get_Nobs() == self.Nobs), "Inconsistent # of obs!"
-
-    def __call__(self, theta, data):
+            _img, _noise = self.GrismModelCube_list[i].observe(dc_array)
+            image_list.append(_img)
+        return image_list
+        
+    def __call__(self, theta, datavector):
         '''
         Do setup and type / sanity checking here
         before calling the abstract method _loglikelihood,
         which will have a different implementation for each class
 
         theta: list
-            Sampled parameters. Order defined in self.pars_order
+            value of sampled parameters. Order defined in self.pars_order
         datavector: DataCube, etc.
             Arbitrary data vector that subclasses from DataVector.
             If DataCube, truncated to desired lambda bounds
@@ -1034,8 +1086,6 @@ class GrismLikelihood_test(LogLikelihood):
 
         # unpack sampled params
         theta_pars = self.theta2pars(theta)
-        if (m.get_Nobs() != self.Nobs):
-            self.initialize_observations()
         # setup model corresponding to cube.DataCube type
         dc_array, gal, sed = self._setup_model(theta_pars)
 
@@ -1045,7 +1095,7 @@ class GrismLikelihood_test(LogLikelihood):
         # map parameters, then we need to scale this likelihood by a
         # determinant factor
         if self.marginalize_intensity is True:
-            log_det = self._compute_log_det(self.imap)
+            log_det = self._compute_log_det(self.setup_imap(theta_pars))
         else:
             log_det = 1.
 
@@ -1068,7 +1118,7 @@ class GrismLikelihood_test(LogLikelihood):
         # can figure out how to remove this for loop later
         # will be fast enough with numba anyway
         for i in range(self.Nobs):
-            _img, _noise = self.get_simulated_image(i, dc_array, gal, sed)
+            _img, _noise = self.GrismModelCube_list[i].observe(dc_array)
             loglike += -0.5*m.get_chi2(i, _img)
 
         #print("---- calculate dchi2 | %.2f ms -----" % (time()*1000 - start_time))
@@ -1086,7 +1136,8 @@ class GrismLikelihood_test(LogLikelihood):
         theta_pars: dict
             Dictionary of sampled pars
         '''
-        # create grid of pixel centers in image coords
+        # create grid of pixel centers in image coordinates
+        # 'xy' indexing is the usual imshow y-x scheme
         X, Y = utils.build_map_grid(self.mNx, self.mNy, 
             indexing='xy', scale=self.mscale)
 
@@ -1096,7 +1147,7 @@ class GrismLikelihood_test(LogLikelihood):
         imap = self.setup_imap(theta_pars)
 
         # TODO: temp for debugging!
-        self.imap = imap
+        #self.imap = imap
 
         try:
             use_numba = self.meta['run_options']['use_numba']
@@ -1107,12 +1158,13 @@ class GrismLikelihood_test(LogLikelihood):
         v_array = vmap(
             'obs', X, Y, normalized=True, use_numba=use_numba
             )
-        self.v_array = v_array
+        # don't save if you only need it once
+        #self.v_array = v_array
         # get both the emission line and continuum image
         _pars = self.meta.copy_with_sampled_pars(theta_pars)
         _pars['run_options']['imap_return_gal'] = True
         i_array, gal = imap.render(theta_pars, None, _pars)
-        self.i_array = i_array
+        #self.i_array = i_array
         dc_array, sed = self._construct_model_datacube(theta_pars, 
             v_array, i_array, gal)
         return dc_array, gal, sed
@@ -1189,111 +1241,246 @@ class GrismLikelihood_test(LogLikelihood):
         # self.meta
         return grism.GrismSED(meta['sed'])
 
-    def _build_PSF_model(self, config, **kwargs):
-        ''' Generate PSF model
-
-        Inputs:
-        =======
-        kwargs: keyword arguments for building psf model
-            - lam: wavelength in nm
-            - scale: pixel scale
-
-        Outputs:
-        ========
-        psf_model: GalSim PSF object
-
+class FiberLikelihood(LogLikelihood):
+    '''
+    An implementation of a LogLikelihood for a Fiber KL measurement
+    Compare to reduced 1D data F_tilde, which is related to model F as 
+        F_tilde = RF,
+    where R is the ""resolution matrix", see DESI spectrum pipeline paper
+    and spectro-perfectionism
+    '''
+    
+    def _set_model_dimension(self):
+        # build model lambda-y-x grid
+        # TODO: retrieve header in a consistent way
+        _lr = self.meta['model_dimension']['lambda_range']
+        _li, _lf = _lr[0], _lr[1]
+        self._dl = self.meta['model_dimension']['lambda_res']
+        self._lambdas = np.array([(l, l+self._dl) for l in np.arange(_li, _lf, self._dl)])
+        self.mNspec = self._lambdas.shape[0]
+        self.mNx = self.meta['model_dimension']['Nx']
+        self.mNy = self.meta['model_dimension']['Ny']
+        self.mscale = self.meta['model_dimension']['scale']
+        return 
+    def _setup_model(self, theta_pars, datavector):
         '''
-        _type = config.get('psf_type', 'none').lower()
-        if _type != 'none':
-            if _type == 'airy':
-                lam = kwargs.get('lam', 1000) # nm
-                scale_unit = kwargs.get('scale_unit', gs.arcsec)
-                return gs.Airy(lam=lam, diam=config['diameter']/100,
-                                scale_unit=scale_unit)
-            elif _type == 'airy_mean':
-                scale_unit = kwargs.get('scale_unit', gs.arcsec)
-                #return gs.Airy(config['psf_fwhm']/1.028993969962188, 
-                #               scale_unit=scale_unit)
-                lam = kwargs.get("lam_mean", 1000) # nm
-                return gs.Airy(lam=lam, diam=config['diameter']/100,
-                                scale_unit=scale_unit)
-            elif _type == 'moffat':
-                beta = config.get('psf_beta', 2.5)
-                fwhm = config.get('psf_fwhm', 0.5)
-                return gs.Moffat(beta=beta, fwhm=fwhm)
-            else:
-                raise ValueError(f'{psf_type} has not been implemented yet!')
-        else:
-            return None
-    def _getNoise(self, config):
-        ''' Generate image noise based on parameter settings
+        Setup the model datacube given the input theta_pars and datavector
 
-        Outputs:
-        ========
-        noise: GalSim Noise object
+        theta_pars: dict
+            Dictionary of sampled pars
         '''
-        random_seed = config.get('random_seed', int(time()))
-        rng = gs.BaseDeviate(random_seed+1)
+        # create grid of pixel centers in image coordinates
+        # 'xy' indexing is the usual imshow y-x scheme
+        X, Y = utils.build_map_grid(self.mNx, self.mNy, 
+            indexing='xy', scale=self.mscale)
 
-        _type = config.get('noise_type', 'ccd').lower()
-        if _type == 'ccd':
-            sky_level = config.get('sky_level', 0.65*1.2)
-            read_noise = config.get('read_noise', 8.5)
-            gain = config.get('gain', 1.0)
-            exp_time = config.get('exp_time', 1.0)
-            noise = gs.CCDNoise(rng=rng, gain=self.gain, 
-                                read_noise=read_noise, 
-                                sky_level=sky_level*exp_time/gain)
-        elif _type == 'gauss':
-            sigma = config.get('noise_sigma', 1.0)
-            noise = gs.GaussianNoise(rng=rng, sigma=sigma)
-        elif _type == 'poisson':
-            sky_level = config.get('sky_level', 0.65*1.2)
-            noise = gs.PoissonNoise(rng=rng, sky_level=sky_level)
+        # create 2D velocity & intensity maps given sampled transformation
+        # parameters
+        vmap = self.setup_vmap(theta_pars)
+        imap = self.setup_imap(theta_pars)
+
+        # TODO: temp for debugging!
+        #self.imap = imap
+
+        try:
+            use_numba = self.meta['run_options']['use_numba']
+        except KeyError:
+            use_numba = False
+
+        # evaluate maps at pixel centers in obs plane
+        v_array = vmap(
+            'obs', X, Y, normalized=True, use_numba=use_numba
+            )
+        #self.v_array = v_array
+        # get both the emission line and continuum image
+        _pars = self.meta.copy_with_sampled_pars(theta_pars)
+        _pars['run_options']['imap_return_gal'] = True
+        i_array, gal = imap.render(theta_pars, None, _pars)
+        #self.i_array = i_array
+        dc_array, sed = self._construct_model_datacube(theta_pars, 
+            v_array, i_array, gal)
+        return dc_array, gal, sed
+
+    def __init__(self, parameters, datavector, **kwargs):
+        ''' Initialization
+        Set up CubePars and ModelCube objects by providing a 
+        FiberDataVector object or fiducial parameters
+        - parameters: Pars object
+        - datavector: FiberDataVector object
+        '''
+        ### Case 1: Build data vector from input fiducial parameters
+        if datavector is None:
+            print("FiberLikelihood: Generating data vector from fid pars...")
+            super(FiberLikelihood, self).__init__(parameters, DataVector())
+            self._set_model_dimension()
+            # set FiberPars and FiberModelCube list
+            if parameters.meta.get('obs_conf', None) is None:
+                raise ValueError(f'parameters must have obs_conf if '+\
+                    f'data vector is not provided!')
+            if kwargs.get('sampled_theta_fid', None) is None:
+                raise ValueError(f'sampled_theta_fid must be set when '+\
+                    f'data vector is not provided!')
+            meta_copy = parameters.meta.copy()
+            obs_conf_list = meta_copy.pop('obs_conf')
+            self.Nobs = len(obs_conf_list)
+            init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
+            #self.FiberPars_list = [cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)]
+            init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
+            #self.FiberModelCubes = [cube.FiberModelCube(p) for p in self.FiberPars_list]
+            # generate fiducial images and DataVector object
+            fid_img_list, fid_noise_list = self.get_images(kwargs['sampled_theta_fid'], force_noise_free=False, return_noise=True)
+            _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
+            _data_header = obs_conf_list
+            # self.datavector = FiberDataVector(
+            #     header=_header, data_header=_data_header, 
+            #     data=fid_img_list, noise=fid_noise_list)
+            init_GlobalDataVector([FiberDataVector(
+                 header=_header, data_header=_data_header, 
+                 data=fid_img_list, noise=fid_noise_list)])
+            # set the fiducial images to C++ routine
+            print("FiberLikelihood: Caching the (fiducial) data vector...")
+            input_from_fid_theta = True
+        ### Case 2: Build data vector from input FiberDataVector object 
         else:
-            raise ValueError(f'{self.noise_type} not implemented yet!')
-        return noise
-    def get_simulated_image(self, index, dc_array, gal, sed, force_noise_free=True):
-        _cfg = self.config_list[index]
-        _bp = gs.Bandpass(_cfg.get('bandpass'), 
-                wave_type=_cfg.get('wave_type', 'nm'))
-        if self.obs_types[index] == 'photometry':
-            gal_chromatic = gal * sed.spectrum
-            # convolve with PSF
-            psf = self._build_PSF_model(_cfg, 
-                  lam=_bp.calculateEffectiveWavelength())
-            if psf is not None:
-                gal_chromatic = gs.Convolve([gal_chromatic, psf])
-            _img = gal_chromatic.drawImage(nx=_cfg['Nx'], 
-                ny=_cfg['Ny'], scale=_cfg['pix_scale'], 
-                method='auto', area=np.pi*(_cfg['diameter']/2.0)**2, 
-                exptime=_cfg['exp_time'], gain=_cfg['gain'],
-                bandpass=_bp)
-        elif self.obs_types[index] == 'grism':
-            _imgArray = np.zeros([_cfg['Ny'], _cfg['Nx']], 
-                dtype=np.float64, order='C')
-            m.get_dispersed_image(index, dc_array, _imgArray)
-            _img = gs.Image(_imgArray, dtype = np.float64, 
-                scale=_cfg['pix_scale'])
-            psf = self._build_PSF_model(_cfg, lam_mean=np.mean(self._lambdas))
-            if psf is not None:
-                _gal = gs.InterpolatedImage(_img, scale=_cfg['pix_scale'])
-                grism_gal = gs.Convolve([_gal, psf])
-                _img = grism_gal.drawImage(nx=_cfg['Nx'], ny=_cfg['Ny'], scale=_cfg['pix_scale'])
+            #super(FiberLikelihood, self).__init__(parameters, datavector)
+            super(FiberLikelihood, self).__init__(parameters, DataVector())
+            init_GlobalDataVector([datavector])
+            self._set_model_dimension()
+            meta_copy = parameters.meta.copy()
+            if meta_copy.get('obs_conf', None) is not None:
+                print(f'Ignoring obs_conf in parameters, use the ones from data vector')
+                meta_copy.pop(obs_conf)
+            obs_conf_list = datavector.get_config_list()
+            self.Nobs = datavector.Nobs
+            init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
+            init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
+            # self.FiberPars_list = []
+            # self.FiberModelCubes = []
+            # for i in range(self.Nobs):
+            #     _gp = cube.FiberPars(meta_copy.pars, obs_conf_list[i])
+            #     _gmc = cube.FiberModelCube(_gp)
+            #     self.FiberPars_list.append(_gp)
+            #     self.FiberModelCubes.append(_gmc)
+            input_from_fid_theta = False
+        return
+    def get_images(self, theta, force_noise_free=True, return_noise=False):
+        ''' Get simulated images and data given parameter values
+        '''
+        image_list = []
+        noise_list = []
+        # unpack sampled params
+        theta_pars = self.theta2pars(theta)
+        # setup model corresponding to cube.DataCube type
+        dc_array, gal, sed = self._setup_model(theta_pars, None)
+        for i in range(self.Nobs):
+            #_img, _noise = self.FiberModelCubes[i].observe(dc_array, gal, sed, force_noise_free)
+            _img, _noise = get_Cube(i).observe(dc_array, gal, sed, force_noise_free)
+            image_list.append(_img)
+            noise_list.append(_noise)
+        if return_noise:
+            return image_list, noise_list
         else:
-            print(f'Invalid type {self.obs_type[index]}')
-            exit(-1)
-        if force_noise_free:
-            return _img.array, None
-        else:
-            noise = self._getNoise(_cfg)
-            _img_with_Noise = _img.copy()
-            _img_with_Noise.addNoise(noise)
-            noise_img = _img_with_Noise - _img
-            if _cfg.get('apply_to_data', True):
-                return _img_with_Noise.array, noise_img.array
-            else:
-                return _img.array, noise_img.array
+            return image_list
+    def _log_likelihood(self, theta, datavector, model):
+        '''
+        theta: list
+            Sampled parameters, order defined by pars_order
+        datavector: DataVector
+            The grism datavector
+        model: DataCube
+            The model datacube object, truncated to desired lambda bounds
+        '''
+        #start_time = time()*1000
+
+        loglike = 0
+        dv = get_GlobalDataVector(0)
+        for i in range(self.Nobs):
+            #img, _ = self.FiberModelCubes[i].observe(model[0],model[1],model[2])
+            img, _ = get_Cube(i).observe(model[0], model[1], model[2])
+            #data = self.datavector.get_data(i)
+            #noise = self.datavector.get_noise(i)
+            data = dv.get_data(i)
+            noise = dv.get_noise(i)
+            chi2 = np.sum(((data-img)/noise)**2)
+            loglike += -0.5*chi2
+
+        #print("---- calculate dchi2 | %.2f ms -----" % (time()*1000 - start_time))
+        # NOTE: Actually slower due to extra matrix evals...
+        # diff_2 = (datacube.data - model.data).reshape(Nspec, Nx*Ny)
+        # chi2_2 = diff_2.dot(inv_cov.dot(diff_2.T))
+        # loglike2 = -0.5*chi2_2.trace()
+        return loglike
+
+    def _construct_model_datacube(self, theta_pars, v_array, i_array, gal):
+        '''
+        Create the model datacube from model slices, using the evaluated
+        velocity and intensity maps, SED, etc.
+
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        v_array: np.array (2D)
+            The vmap evaluated at image pixel positions for sampled pars.
+            (Must be normalzied)
+        i_array: np.array (2D)
+            The imap evaluated at image pixel positions for sampled pars
+        cont_array: np.array (2D)
+            The imap of the fitted or modeled continuum
+        datacube: DataCube
+            Datavector datacube truncated to desired lambda bounds
+        '''
+        lambda_cen = np.mean(self._lambdas, axis=1)
+        sed = self._setup_sed(self.meta)
+        # build Doppler-shifted datacube
+        # self.lambda_cen = observed frame lambda grid
+        # w_mesh = rest frame wavelengths evaluated on observed frame grid
+        # To make energy conserved, dc_array in units of 
+        # photons / (s cm2)
+        w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
+        w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
+        # photons/s/cm2 in the 3D grid
+        dc_array = sed.spectrum(w_mesh.flatten()) * self._dl
+        dc_array = dc_array.reshape(w_mesh.shape) * \
+                        i_array[np.newaxis, :, :] /\
+                        (1+v_array[np.newaxis, :, :]) 
+
+        return dc_array, sed
+    @classmethod
+    def _setup_sed(cls, meta):
+        # self.meta
+        return grism.GrismSED(meta['sed'])
+
+    def setup_imap(self, theta_pars):
+        '''
+        theta_pars: dict
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        datacube: DataCube
+            Datavector datacube truncated to desired lambda bounds
+        '''
+        imap = self._setup_imap(theta_pars, self.meta)
+        return imap
+
+    @classmethod
+    def _setup_imap(cls, theta_pars, meta):
+        '''
+        See setup_imap(). Only runs if a new imap for the sample
+        is needed
+        '''
+
+        # Need to check if any basis func parameters are
+        # being sampled over
+        pars = meta.copy_with_sampled_pars(theta_pars)
+
+        imap_pars = deepcopy(pars['intensity'])
+        imap_type = imap_pars['type']
+        del imap_pars['type']
+        imap_pars['theory_Nx'] = pars['model_dimension']['Nx']
+        imap_pars['theory_Ny'] = pars['model_dimension']['Ny']
+        imap_pars['scale'] = pars['model_dimension']['scale']
+
+        return intensity.build_intensity_map(imap_type, None, imap_pars)
+
 
 def get_likelihood_types():
     return LIKELIHOOD_TYPES
@@ -1302,11 +1489,12 @@ def get_likelihood_types():
 LIKELIHOOD_TYPES = {
     'default': DataCubeLikelihood,
     'datacube': DataCubeLikelihood,
+    # 'grism': GrismLikelihood,
     'grism': GrismLikelihood,
-    'grism_test': GrismLikelihood_test
+    'fiber': FiberLikelihood,
     }
 
-def build_likelihood_model(name, parameters, datavector):
+def build_likelihood_model(name, parameters, datavector, **kwargs):
     '''
     name: str
         Name of likelihood model type
@@ -1322,7 +1510,7 @@ def build_likelihood_model(name, parameters, datavector):
 
     if name in LIKELIHOOD_TYPES.keys():
         # User-defined input construction
-        likelihood = LIKELIHOOD_TYPES[name](parameters, datavector)
+        likelihood = LIKELIHOOD_TYPES[name](parameters, datavector, **kwargs)
     else:
         raise ValueError(f'{name} is not a registered likelihood model!')
 

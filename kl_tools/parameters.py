@@ -206,6 +206,9 @@ class MetaPars(object):
     def get(self, key, default):
         return self.pars.get(key, default)
 
+    def pop(self, key):
+        return self.pars.pop(key)
+
 class MCMCPars(MetaPars):
 
     '''

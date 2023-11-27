@@ -74,7 +74,7 @@ def main(args, pool):
         'v0',
         'vcirc',
         'rscale',
-        'hlr',
+        #'hlr',
         ]
     sampled_pars_value = [0.0, 0.0, -1.04, 0.86, 0.0, 300.0, 0.5]
     sampled_pars_value_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_value)}
@@ -91,11 +91,12 @@ def main(args, pool):
             'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
             'theta_int': priors.UniformPrior(-np.pi, np.pi),
-            'sini': priors.UniformPrior(0, 1.),
+            'sini': priors.UniformPrior(0.001, 0.999),
             'v0': priors.GaussPrior(0.0, 30, clip_sigmas=5),
             #'vcirc': priors.UniformPrior(0, 800),
             'vcirc': priors.GaussPrior(300.0, 30, clip_sigmas=5),
-            'rscale': priors.UniformPrior(0, 4),
+            'rscale': priors.UniformPrior(0.001, 4),
+            #'hlr': priors.UniformPrior(0, 2),
             },
         'velocity': {
             'model': 'default',
@@ -108,6 +109,7 @@ def main(args, pool):
             'type': 'inclined_exp',
             'flux': 1.0, # counts
             'hlr': 0.5,
+            #'hlr': 'sampled',
             },
         # 'marginalize_intensity': True,
         'psf': gs.Gaussian(fwhm=0.13),
@@ -133,15 +135,17 @@ def main(args, pool):
             'obs_cont_norm': [614, 2.6e-17],
             # a dict of line names and obs-frame flux values (erg/s/cm2)
             'lines':{
-                'Halpha': 1.25e-16,
-                'OII': [1.0e-15, 1.2e-15],
-                'OIII': [1.0e-15, 1.2e-15],
+                'Ha': 1.25e-16,
+                'O2': [1.0e-15, 1.2e-15],
+                'O3_1': 1.0e-15,
+                'O3_2': 1.2e-15,
             },
             # intrinsic linewidth in nm
             'line_sigma_int':{
-                'Halpha': 0.5,
-                'OII': [0.2, 0.2],
-                'OIII': [0.2, 0.2],
+                'Ha': 0.5,
+                'O2': [0.2, 0.2],
+                'O3_1': 0.2,
+                'O3_2': 0.2,
             },
         },
     }
@@ -150,7 +154,7 @@ def main(args, pool):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector 
-    datafile = "/home/jiachuan/kl-tools_spencer/data/simudata_1_noisy.fits"
+    datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/simudata_3_noisy.fits"
     datavector = GrismDataVector(file=datafile)
 
     #-----------------------------------------------------------------
@@ -158,7 +162,7 @@ def main(args, pool):
 
     pars_order = pars.sampled.pars_order
 
-    log_posterior = LogPosterior(pars, datavector, likelihood='grism_test')
+    log_posterior = LogPosterior(pars, datavector, likelihood='grism')
 
     #-----------------------------------------------------------------
     # Setup sampler

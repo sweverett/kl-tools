@@ -224,14 +224,10 @@ parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
-parser.add_argument('-flux_scaling_power', type=int, default=0,
-                    help='Power of the scaling factor of the source flux')
-parser.add_argument('-sini', type=float, default=0.5,
-                    help='sini')
-parser.add_argument('-hlr', type=float, default=1.5,
-                    help='photometry half light radius')
-parser.add_argument('-fiber_conf', type=int, default=0,
-                    help='geometry configuration of fiber positions')
+parser.add_argument('-Iflux', type=int, default=0,help='Flux bin index')
+parser.add_argument('-sini', type=int, default=0, help='sin(i) bin index')
+parser.add_argument('-hlr', type=int, default=1.5, help='image hlr bin index')
+parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 
@@ -252,11 +248,12 @@ def main(args, pool):
     run_name = args.run_name
     show = args.show
 
-    flux_scaling_power = args.flux_scaling_power
+    flux_scaling_power = args.Iflux
     flux_scaling = 1.58489**flux_scaling_power
-    sini = args.sini
-    hlr = args.hlr 
-    fiber_conf = args.fiber_conf
+    sini = 0.05 + 0.1*args.sini
+    assert (0<sini<1)
+    hlr = 0.5 + 0.5*args.hlr 
+    fiber_conf = args.fiberconf
 
     ### Initialization
     sampled_pars = [

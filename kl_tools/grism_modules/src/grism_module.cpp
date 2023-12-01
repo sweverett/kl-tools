@@ -491,8 +491,7 @@ namespace interface_mpp_aux {
         //cout << "Setting OMP thread to " << Nthread << endl;
         omp_set_num_threads(Nthread);
         //cout << "Looping" << endl;
-#pragma omp parallel shared(dispersed_data, theory_data, ptr_dd, \
-        ptr_td, pixel_response_table)
+#pragma omp parallel shared(dispersed_data, ptr_dd, ptr_td)
         {
             vector<double> local_copy(Ny * Nx, 0.0);
 #pragma omp for

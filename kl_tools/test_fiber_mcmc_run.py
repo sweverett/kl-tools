@@ -354,7 +354,8 @@ def main(args, pool):
     }
     pars = Pars(sampled_pars, meta_pars)
 
-    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+    #cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+    cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
 
     ### Loading data vector 
     #datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/simufiber_3.fits"
@@ -412,7 +413,7 @@ def main(args, pool):
         runner.burn_in = nsteps // 2
 
         outdir = os.path.join(
-            utils.TEST_DIR, 'fiber-mcmc-run', run_name
+            "/xdisk/timeifler/jiachuanxu/kl_fiber", run_name
         )
         utils.make_dir(outdir)
         if (sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
@@ -460,7 +461,7 @@ def main(args, pool):
         MCMCsampler.run_mcmc(p0, nsteps, progress=True)
 
         outdir = os.path.join(
-            utils.TEST_DIR, 'fiber-mcmc-run', run_name
+            "/xdisk/timeifler/jiachuanxu/kl_fiber", run_name
         )
         utils.make_dir(outdir)
         outfile = os.path.join(outdir, 

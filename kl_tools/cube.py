@@ -1114,7 +1114,7 @@ class FiberModelCube(DataVector):
     def conf(self):
         return self.pars.conf
     @property
-    def lambdas(self):
+    def lambdas(self): # (Nlam, 2)
         return self.pars.lambdas
 
     @property
@@ -1184,15 +1184,25 @@ class FiberModelCube(DataVector):
         '''
         # if photometry image
         if not self.pars.is_dispersed:
-            gal_chro = gal * sed.spectrum
-            psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
-            gal = gal_chro if psf is None else galsim.Convolve([gal_chro, psf])
-            img = gal.drawImage(
-                bandpass = self.pars.concatenated_bandpass, 
-                nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
-                scale=self.conf['PIXSCALE'], method='auto', 
-                area=np.pi*(self.conf['DIAMETER']/2.)**2,
-                exptime=self.conf['EXPTIME'],gain=self.conf['GAIN'])
+            if self.pars['run_options']['run_mode'] == 'ETC':
+                # theory_cube, gal, and sed, in this case, are physical units
+                gal_chro = gal * sed.spectrum
+                psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
+                gal = gal_chro if psf is None else galsim.Convolve([gal_chro, psf])
+                img = gal.drawImage(
+                    bandpass = self.pars.concatenated_bandpass, 
+                    nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
+                    scale=self.conf['PIXSCALE'], method='auto', 
+                    area=np.pi*(self.conf['DIAMETER']/2.)**2,
+                    exptime=self.conf['EXPTIME'],gain=self.conf['GAIN'])
+            elif self.pars['run_options']['run_mode'] == 'SNR':
+                # theory_cube, gal, and sed, in this case, are arbitrary units
+                # However, theory_cube and gal are already scaled by flux factor
+                assert self.conf['NOISETYP'].lower() == 'gauss'
+                img = gal.drawImage( 
+                    nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
+                    scale=self.conf['PIXSCALE'], method='auto', 
+                    )
             if force_noise_free:
                 return img.array, None
             else:
@@ -1228,9 +1238,12 @@ class FiberModelCube(DataVector):
             #print(f'theory cube shape: {theory_cube.shape}')
             #print(f'mask shape: {ary.shape}')
             spec_1D = (self.ATMPSF_conv_fiber_mask[np.newaxis,:,:]*theory_cube).sum(axis=(1,2))
-            spec_1D = spec_1D*(self.bp_array[:,0]+self.bp_array[:,1])/2.
-            factor = np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
-            spec_1D = spec_1D * factor
+            if self.pars['run_options']['run_mode'] == 'ETC':
+                spec_1D = spec_1D*(self.bp_array[:,0]+self.bp_array[:,1])/2.
+                factor = np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
+                spec_1D = spec_1D * factor
+            # otherwise, the theory_cube is scaled by a factor for emission line
+
             # fiber PSF can result in degrade in spectra resolution
             #kernel = self.get_fiber_1D_psf_kernel()
             #spec_1D = np.convolve(spec_1D, kernel, mode='same')
@@ -1240,7 +1253,20 @@ class FiberModelCube(DataVector):
                 return spec_1D, None
             else:
                 # place holder
-                noise = spec_1D**(1/4)/2
+                if self.pars['run_options']['run_mode'] == 'ETC':
+                    skysb = galsim.LookupTable.from_file(self.conf["SKYMODEL"], f_log=True) # Ang v.s. 1e-17 erg s-1 cm-2 A-1 arcsec-2
+                    fiber_area = np.pi*(self.conf["FIBERRAD"])**2
+                    _wave = self.lambdas.mean(axis=1)*10 # Angstrom
+                    _dwave = (_wave[1]-_wave[0]) # Angstrom
+                    _hnu = 1986445857.148928/_wave # 1e-17 erg
+                    skyct = skysb(_wave)*fiber_area*_dwave/_hnu # s-1 cm-2
+                    skyct *= self.bp_array.mean(axis=1)*np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
+                    # noise std, not including dark current
+                    # eff read noise = sqrt(Npix along y) * read noise
+                    noise_std = (skyct+spec_1D+self.conf['RDNOISE']**2)**0.5
+                    noise = np.random.randn(spec_1D.shape[0])*noise_std
+                else:
+                    noise = np.random.randn(spec_1D.shape[0])*self.conf['NOISESIG']
                 #print("----- %s seconds -----" % (time() - start_time))
                 if self.conf['ADDNOISE']:
                     #print("[GrismGenerator][debug]: add noise")

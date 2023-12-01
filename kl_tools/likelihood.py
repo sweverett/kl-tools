@@ -1400,7 +1400,7 @@ class FiberLikelihood(LogLikelihood):
             #data = self.datavector.get_data(i)
             #noise = self.datavector.get_noise(i)
             data = dv.get_data(i)
-            noise = dv.get_noise(i)
+            noise = np.std(dv.get_noise(i))
             chi2 = np.sum(((data-img)/noise)**2)
             loglike += -0.5*chi2
 

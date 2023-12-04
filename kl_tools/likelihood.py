@@ -13,11 +13,11 @@ import galsim as gs
 from galsim.angle import Angle, radians
 import matplotlib.pyplot as plt
 from numba import njit
-from mpi4py import MPI
-_mpi = MPI
-_mpi_comm = _mpi.COMM_WORLD
-_mpi_size = _mpi_comm.Get_size()
-_mpi_rank = _mpi_comm.Get_rank()
+#from mpi4py import MPI
+#_mpi = MPI
+#_mpi_comm = _mpi.COMM_WORLD
+#_mpi_size = _mpi_comm.Get_size()
+#_mpi_rank = _mpi_comm.Get_rank()
 
 import utils
 import priors
@@ -30,7 +30,7 @@ from cube import DataCube
 from datavector import DataVector, FiberDataVector
 import grism
 import kltools_grism_module_2 as m
-m.set_mpi_info(_mpi_size, _mpi_rank)
+#m.set_mpi_info(_mpi_size, _mpi_rank)
 
 import ipdb
 

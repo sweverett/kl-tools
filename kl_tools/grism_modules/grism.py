@@ -17,7 +17,7 @@ import astropy.units as u
 import astropy.constants as constants
 from argparse import ArgumentParser
 from time import time
-from mpi4py import MPI
+#from mpi4py import MPI
 
 sys.path.insert(0, '../')
 import utils as utils

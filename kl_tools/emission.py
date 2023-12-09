@@ -3,7 +3,7 @@ from scipy.interpolate import interp1d
 from numpy import interp
 import astropy.units as u
 
-import utils
+import kl_tools.utils as utils
 
 import ipdb
 

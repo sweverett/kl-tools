@@ -17,6 +17,7 @@ from muse import MuseDataCube
 import mocks
 
 import ipdb
+import pudb
 
 def parse_args():
     parser = ArgumentParser()
@@ -53,7 +54,7 @@ def make_basis_imap(theta_pars, datacube, pars):
 
     return im, mle, imap
 
-def fit_one_beta(i, beta, theta, datacube,
+def fit_one_beta(i, beta, theta_pars, datacube,
                  pars_shapelet, pars_sersiclet, pars_exp_shapelet,
                  sky=1., vb=False):
 
@@ -65,13 +66,13 @@ def fit_one_beta(i, beta, theta, datacube,
     pars_exp_shapelet['intensity']['basis_kwargs']['beta'] = beta
 
     shapelet, mle_shapelet, imap_shapelet = make_basis_imap(
-        theta, datacube, pars_shapelet
+        theta_pars, datacube, pars_shapelet
         )
     sersiclet, mle_sersiclet, imap_sersiclet = make_basis_imap(
-        theta, datacube, pars_sersiclet
+        theta_pars, datacube, pars_sersiclet
         )
     exp_shapelet, mle_exp_shapelet, imap_exp_shapelet = make_basis_imap(
-        theta, datacube, pars_exp_shapelet
+        theta_pars, datacube, pars_exp_shapelet
         )
 
     data = datacube.stack()
@@ -150,8 +151,10 @@ def main(args):
     pars_sersiclet = deepcopy(meta_pars)
     pars_exp_shapelet = deepcopy(meta_pars)
 
-    nmax_cart  = 22
-    nmax_polar = 20
+    # nmax_cart  = 22
+    # nmax_polar = 20
+    nmax_cart = 12
+    nmax_polar = 6
     pars_shapelet['intensity'] = {
         'type': 'basis',
         'basis_type': 'shapelets',
@@ -190,7 +193,8 @@ def main(args):
     #-------------------------------------------------------------
     # setup datacube
 
-    psf = gs.Gaussian(fwhm=0.8, flux=1.)
+    # psf = gs.Gaussian(fwhm=0.8, flux=1.)
+    psf = None
 
     if dc_type == 'sim':
         print('Setting up test datacube and true Halpha image')
@@ -201,7 +205,7 @@ def main(args):
             'sini': 0.7,
             'v0': 5,
             'vcirc': 200,
-            'rscale': 3.5,
+            'rscale': 5,
         }
 
         true_flux = 1.8e4
@@ -212,8 +216,6 @@ def main(args):
             'Ny': 40, # pixels
             'pix_scale': 0.5, # arcsec / pixel
             # intensity meta pars
-            'true_flux': true_flux, # counts
-            'true_hlr': true_hlr, # pixels
             # velocty meta pars
             'v_model': meta_pars['velocity']['model'],
             'v_unit': meta_pars['units']['v_unit'],
@@ -224,6 +226,10 @@ def main(args):
             'z': 0.3,
             'R': 5000.,
             # 'sky_sigma': 0.5, # pixel counts for mock data vector
+            'intensity': {
+                'true_flux': true_flux, # counts
+                'true_hlr': true_hlr, # pixels
+            },
             's2n': 100000,
             'psf': psf,
         }
@@ -261,10 +267,10 @@ def main(args):
     #-------------------------------------------------------------
     # scan over beta values for each imap basis type
 
-    # make dummy sample
-    theta = np.random.rand(len(sampled_pars))
-
     betas = np.linspace(bmin, bmax, Nbeta)
+
+    # want to use the true transformation pars (sampled over in reality)
+    theta_pars = true_pars
 
     pars_shapelet_b = deepcopy(pars_shapelet)
     pars_sersiclet_b = deepcopy(pars_sersiclet)
@@ -275,7 +281,7 @@ def main(args):
             out = stack(pool.starmap(fit_one_beta,
                                      [(i,
                                        beta,
-                                       theta,
+                                       theta_pars,
                                        datacube,
                                        pars_shapelet_b,
                                        pars_sersiclet_b,
@@ -288,7 +294,7 @@ def main(args):
                         )
     else:
         out = stack([fit_one_beta(
-            i, beta, theta, datacube, pars_shapelet_b, pars_sersiclet_b,
+            i, beta, theta_pars, datacube, pars_shapelet_b, pars_sersiclet_b,
             pars_exp_shapelet_b, sky, vb
             ) for i, beta in enumerate(betas)])
 
@@ -325,13 +331,13 @@ def main(args):
 
     # this is just to get the num of basis funcs
     _, mle_shapelet, _ = make_basis_imap(
-        theta, datacube, pars_shapelet_b
+        theta_pars, datacube, pars_shapelet_b
     )
     _, mle_sersiclet, _ = make_basis_imap(
-        theta, datacube, pars_sersiclet_b
+        theta_pars, datacube, pars_sersiclet_b
     )
     _, mle_exp_shapelet, _ = make_basis_imap(
-        theta, datacube, pars_exp_shapelet_b
+        theta_pars, datacube, pars_exp_shapelet_b
     )
 
     nfuncs = (len(mle_shapelet), len(mle_sersiclet), len(mle_exp_shapelet))
@@ -374,13 +380,13 @@ def main(args):
         print(f'min exp_shapelet beta: {exp_shapelet_min}')
 
     shapelet, mle_shapelet, imap_shapelet = make_basis_imap(
-        theta, datacube, min_pars_shapelet
+        theta_pars, datacube, min_pars_shapelet
     )
     sersiclet, mle_sersiclet, imap_sersiclet = make_basis_imap(
-        theta, datacube, min_pars_sersiclet
+        theta_pars, datacube, min_pars_sersiclet
     )
     exp_shapelet, mle_exp_shapelet, imap_exp_shapelet = make_basis_imap(
-        theta, datacube, min_pars_exp_shapelet
+        theta_pars, datacube, min_pars_exp_shapelet
     )
 
     plt.subplot(241)

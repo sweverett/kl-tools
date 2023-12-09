@@ -16,11 +16,11 @@ import emcee
 # import pocomc as pc
 import ultranest
 
-import utils
-import priors
-from likelihood import DataCubeLikelihood
-from velocity import VelocityMap
-from metropolis import MetropolisSampler
+import kl_tools.utils as utils
+import kl_tools.priors as priors
+from kl_tools.likelihood import DataCubeLikelihood
+from kl_tools.velocity import VelocityMap
+from kl_tools.metropolis import MetropolisSampler
 
 import ipdb
 
@@ -752,8 +752,8 @@ class KLensZeusRunner(ZeusRunner):
             # fourth, % residual
             ax = axs[3,i]
             residual = 100. * (data - model) / model
-            vmin = np.max([-100, np.min(residual)])
-            vmax = np.min([ 100, np.max(residual)])
+            vmin = np.max([-20, np.min(residual)])
+            vmax = np.min([ 20, np.max(residual)])
             im = ax.imshow(residual, origin='lower', vmin=vmin, vmax=vmax)
             if i == 0:
                 ax.set_ylabel('% Residual')

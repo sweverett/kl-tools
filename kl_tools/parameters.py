@@ -1,5 +1,6 @@
 from copy import deepcopy
-import utils
+
+import kl_tools.utils as utils
 
 import ipdb
 
@@ -242,4 +243,3 @@ class MCMCPars(MetaPars):
                 pars[key] = cls._set_sampled_pars(theta_pars, pars[key])
 
         return pars
-

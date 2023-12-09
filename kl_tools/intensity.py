@@ -8,13 +8,14 @@ from argparse import ArgumentParser
 import galsim as gs
 from galsim.angle import Angle, radians
 
-import utils
-import basis
-import likelihood
-import parameters
-from transformation import transform_coords, TransformableImage
+import kl_tools.utils as utils
+import kl_tools.basis as basis
+import kl_tools.likelihood as likelihood
+import kl_tools.parameters as parameters
+from kl_tools.transformation import transform_coords, TransformableImage
 
 import ipdb
+import pudb
 
 '''
 This file contains a mix of IntensityMap classes for explicit definitions
@@ -585,6 +586,9 @@ class IntensityMapFitter(object):
         fail = 0
         while True:
             try:
+                # NOTE: This can quietly fail in rare cases of near-zero
+                # design matrices. We check for thix explicitly in the
+                # likelihood call
                 self.pseudo_inv = np.linalg.pinv(self.design_mat)
                 break
             except np.linalg.LinAlgError as e:
@@ -815,20 +819,31 @@ class TransformedIntensityMapFitter(object):
 
         return
 
-def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
-                 bmin=0.001, bmax=5):
+
+###############################################################################
+# helper funcs for guessing best beta value from data
+
+def fit_for_beta(datacube, basis, betas=None, Nbetas=100,
+                 bmin=0.001, bmax=5, ncores=1):
     '''
-    TODO: Finish!
     Scan over beta values for the best fit to the
-    stacked datacube image
+    stacked datacube image for a given basis set
 
     datacube: DataCube
         The datacube to find the preferred beta scale for
-    basis_type: str
-        The type of basis to use for fitting for beta
+    basis: basis.Basis subclass
+        An instance of a Basis subclass with all optional args set
     betas: list, np.array
         A list or array of beta values to use in finding
         optimal value. Will create one if not passed
+    Nbetas: int
+        The number of beta values to scane over (if betas is not passed)
+    bmin: float
+        The minimum beta value to check (it betas is not passed)
+    bmax: float
+        The maximum beta value to check (it betas is not passed)
+    ncores: int
+        The number of cores to use for the beta scan
 
     returns: float
         The value of beta that minimizes the imap chi2
@@ -837,10 +852,54 @@ def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
     if betas is None:
         betas = np.linspace(bmin, bmax, Nbetas)
 
-    for beta in betas:
-        pass
+    if ncores > 1:
+        with Pool(ncores) as pool:
+            out = stack(pool.starmap(fit_one_beta,
+                                     [(i,
+                                       beta,
+                                       theta,
+                                       datacube,
+                                       pars,
+                                       sky,
+                                       vb
+                                       )
+                                      for i, beta in enumerate(betas)]
+                                     )
+                        )
+    else:
+        out = stack([fit_one_beta(
+            i, beta, theta, datacube, pars_shapelet_b, pars_sersiclet_b,
+            pars_exp_shapelet_b, sky, vb
+            ) for i, beta in enumerate(betas)])
 
     return
+
+def fit_one_beta(i, beta, theta_pars, datacube, basis, sky=1., vb=False):
+    '''
+    TODO: Incorporate full covariance matrix instead of sky sigma
+    TODO: Docstring
+    '''
+
+    if (vb is True) and (i % 10 == 0):
+        print(f'Fitting beta {i}')
+
+    pars = basis.pars
+
+    # TODO
+    imap = likelihood.DataCubeLikelihood._setup_imap(
+        theta_pars, datacube, pars
+    )
+    basis_im = imap.render(
+        theta_pars, datacube, pars
+                )
+    mle = imap.fitter.mle_coefficients
+
+    data = datacube.stack()
+    Npix = data.shape[0] * data.shape[1]
+
+    chi2_shapelet = np.sum((basis_im-data)**2/sky**2) / Npix
+
+    return np.array([chi2_shapelet, chi2_sersiclet, chi2_exp_shapelet])
 
 def main(args):
     '''

@@ -17,15 +17,15 @@ import galsim as gs
 import matplotlib.pyplot as plt
 import zeus
 
-import utils
-from mcmc import build_mcmc_runner
-import priors
-import cube
-import mocks
-import likelihood
-from parameters import Pars
-from likelihood import LogPosterior
-from velocity import VelocityMap
+import kl_tools.utils as utils
+from kl_tools.mcmc import build_mcmc_runner
+import kl_tools.priors as priors
+import kl_tools.cube as cube
+import kl_tools.mocks as mocks
+import kl_tools.likelihood as likelihood
+from kl_tools.parameters import Pars
+from kl_tools.likelihood import LogPosterior
+from kl_tools.velocity import VelocityMap
 
 import ipdb
 import pudb
@@ -88,10 +88,10 @@ def main(args, pool):
         'v0': 5,
         'vcirc': 200,
         'rscale': 5,
-        'beta': np.NaN,
+        # 'beta': np.NaN,
         # 'flux': true_flux,
         # 'hlr': true_hlr,
-        # 'x0': 0.5,
+         ## 'x0': 0.5,
         # 'y0': -1,
     }
 
@@ -115,32 +115,41 @@ def main(args, pool):
             'rscale': priors.UniformPrior(0, 10),
             # 'x0': priors.UniformPrior(-3, 3),
             # 'y0': priors.UniformPrior(-3, 3),
-            'beta': priors.UniformPrior(0, .1),
+            # 'beta': priors.UniformPrior(0, .1),
             # 'hlr': priors.UniformPrior(0, 8),
             # 'flux': priors.UniformPrior(5e3, 7e4),
         },
         'intensity': {
             # For this test, use truth info
-            # 'type': 'inclined_exp',
-            # 'flux': true_flux, # counts
-            # 'hlr': true_hlr, # counts
+            'type': 'inclined_exp',
+            'flux': true_flux, # counts
+            'hlr': true_hlr, # counts
             # 'flux': 'sampled', # counts
             # 'hlr': 'sampled', # pixels
-            'type': 'basis',
-            'basis_type': 'shapelets',
+            # 'type': 'basis',
+            # 'basis_type': 'shapelets',
             # 'basis_type': 'sersiclets',
             # 'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                'Nmax': 12, # fiducial
-                # 'Nmax': 7,
-                'plane': 'disk',
-                # 'plane': 'obs',
-                # 'beta': 0.37, # n12-exp_shapelet
-                # 'beta': 1.45, # n20-sersiclet
-                'beta': 'sampled',
-                # 'index': 1,
-                # 'b': 1,
-                }
+            # 'basis_kwargs': {
+            #     'plane': 'obs',
+            #     # 'plane': 'disk',
+            #     #
+            #     # shapelets
+            #     # 'Nmax': 12, # fiducial
+            #     # 'Nmax': 7,
+            #     # 'beta': 3, # n12-shapelet (approx)
+            #     #
+            #     # exp_shapelets
+            #     'Nmax': 6,
+            #     # 'beta': 0.06, # for Nmax 12
+            #     'beta': 0.15, # for Nmax 6
+
+            #     # 'beta': 0.37, # n12-exp_shapelet
+            #     # 'beta': 1.45, # n20-sersiclet
+            #     # 'beta': 'sampled',
+            #     # 'index': 1,
+            #     # 'b': 1,
+            #     }
         },
         'velocity': {
             # 'model': 'offset'
@@ -162,7 +171,7 @@ def main(args, pool):
             'true_flux': true_flux, # counts
             'true_hlr': true_hlr, # pixels
             'type': 'inclined_exp',
-            'basis': 'shapelets',
+            # 'basis': 'exp_shapelets',
         },
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
@@ -176,7 +185,7 @@ def main(args, pool):
         's2n': 1000000,
         # 's2n': 10000,
         # # 'sky_sigma': 0.01, # pixel counts for mock data vector
-        # 'psf': gs.Gaussian(fwhm=2, flux=1.)
+        # 'psf': gs.Gaussian(fwhm=0.8, flux=1.)
     }
 
     if mcmc_pars['intensity']['type'] == 'basis':

@@ -135,13 +135,19 @@ def check_fields(config, req, opt, name=None):
 
     return
 
-def make_dir(d):
+def make_dir(d, recursive=True):
     '''
     Makes dir if it does not already exist
+
+    recursive: bool
+        If True, will make all parent dirs if they do not exist
     '''
 
     if not os.path.exists(d):
-        os.mkdir(d)
+        if recursive is True:
+            os.makedirs(d)
+        else:
+            os.mkdir(d)
 
     return
 

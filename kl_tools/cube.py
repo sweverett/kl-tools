@@ -11,11 +11,12 @@ from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
-import utils
-import parameters
-from datavector import DataVector
+import kl_tools.utils as utils
+import kl_tools.parameters as parameters
+from kl_tools.datavector import DataVector
 
 import ipdb
+import pudb
 
 parser = ArgumentParser()
 
@@ -372,8 +373,6 @@ class DataCube(DataVector):
 
     def get_sed(self, line_index=None, line_pars_update=None):
         '''
-        Get emission line SED, or modify if needed
-
         line_index: int
             The index of the desired emission line
         line_pars_update: dict
@@ -853,6 +852,80 @@ class DataCube(DataVector):
             im_list.append(s._data)
 
         galsim.fits.writeCube(im_list, outfile)
+
+        return
+
+    def plot(self, show=True, outfile=None, size=(9,12), title=None, imshow_kwargs={}, max_cols=10):
+        '''
+        Plot the mock observation; both the stack and individual channels
+
+        show: bool
+            Set to true to show the plot
+        outfile: str
+            Set to a filename to save the plot
+        size: tuple
+            The size of the figure in inches
+        title: str
+            The title of the figure
+        imshow_kwargs: dict
+            Any kwargs to pass to the imshow() function
+        max_cols: int
+            The maximum number of columns to use when plotting
+        '''
+
+        # total plots will be Nspec + 1 to include the stacked image
+        nplots = self.Nspec + 1
+
+        ncols = min(max_cols, nplots)
+        nrows = nplots // max_cols
+        fig, axes = plt.subplots(nrows, ncols)
+
+        # first, plot the stack
+        ax = axes[0]
+        im = ax.imshow(self.stack(), **imshow_kwargs)
+        ax.set_title('Stacked image')
+        plt.colorbar(im, ax=ax)
+
+        # now plot the individual slices
+        print('nrows', nrows)
+        print('ncols', ncols)
+        print('axis.shape', axes.shape)
+        print('nplots', nplots)
+        for i in range(1, nplots):
+            if len(axes.shape) == 1:
+                ax = axes[i]
+            else:
+                row = i // max_cols
+                col = i % max_cols
+                ax = axes[row, col]
+
+            ax.imshow(self._data[i-1,:,:], **imshow_kwargs)
+            ax.set_title(f'Slice {i}')
+            plt.colorbar(im, ax=ax)
+
+        # now make colorbars the same size as the images
+        for ax in axes:
+            im = ax.get_images()[0]
+            extent = im.get_extent()
+            ax.set_aspect(abs((extent[1]-extent[0])/(extent[3]-extent[2])))
+
+        if title is not None:
+            plt.title(title)
+        else:
+            li, le = self.lambdas[0][0], self.lambdas[-1][1]
+            unit = self.lambda_unit
+            plt.title(f'DataCube; {li} {unit} < ' +\
+                      f'lambda < {le} {unit}')
+
+        plt.gcf().set_size_inches(size)
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight')
+
+        if show is True:
+            plt.show()
+        else:
+            plt.close()
 
         return
 

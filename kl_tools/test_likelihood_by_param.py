@@ -7,15 +7,16 @@ import astropy.constants as const
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 from copy import deepcopy
+import pickle
 
-import velocity
-from likelihood import LogPosterior
-import velocity
-from parameters import Pars
-import mocks
-import utils
+import kl_tools.velocity as velocity
+from kl_tools.likelihood import LogPosterior
+from kl_tools.parameters import Pars
+import kl_tools.mocks as mocks
+import kl_tools.utils as utils
 
 import ipdb
+import pudb
 
 def parse_args():
     parser = ArgumentParser()
@@ -174,10 +175,12 @@ def main(args):
             # 'basis_type': 'sersiclets',
             'basis_type': 'exp_shapelets',
             'basis_kwargs': {
-                'Nmax': 12,
+                'Nmax': 6,
                 # 'plane': 'disk',
                 'plane': 'obs',
-                'beta': 0.2 # n12-exp_shapelet
+                # 'beta': 0.2 # n12-exp_shapelet
+                'beta': 0.15 # n6-exp_shapelet
+                # 'beta': 3, # shapelets
             #     'beta': 0.28,
             #     'index': 1,
             #     'b': 1,
@@ -206,8 +209,10 @@ def main(args):
         'Ny': 40, # pixels
         'pix_scale': 0.5, # arcsec / pixel
         # intensity meta pars
-        'true_flux': true_flux, # counts
-        'true_hlr': true_hlr, # pixels
+        'intensity': {
+            'true_flux': true_flux, # counts
+            'true_hlr': true_hlr, # pixels
+            },
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
         'v_unit': mcmc_pars['units']['v_unit'],
@@ -220,6 +225,15 @@ def main(args):
         # 'sky_sigma': 0.01, # pixel counts for mock data vector
         's2n': 1000000,
     }
+
+    if mcmc_pars['intensity']['type'] == 'basis':
+        datacube_pars['intensity'].update(
+            {
+            'use_basis_as_truth': True,
+            'basis': mcmc_pars['intensity']['basis_type'],
+            'basis_kwargs': mcmc_pars['intensity']['basis_kwargs']
+            }
+            )
 
     if psf is True:
         datacube_pars['psf'] = gs.Gaussian(fwhm=1., flux=1.)
@@ -234,9 +248,21 @@ def main(args):
     if psf is True:
         datacube.set_psf(datacube_pars['psf'])
 
+    outfile = os.path.join(outdir, 'true_pars.pkl')
+    print(f'Saving true pars to {outfile}')
+    with open(outfile, 'wb') as out:
+        pickle.dump(true_pars, out)
+
     outfile = os.path.join(outdir, 'datacube.fits')
     print(f'Saving test datacube to {outfile}')
     datacube.write(outfile)
+    outfile = os.path.join(outdir, 'datacube.pkl')
+    with open(outfile, 'wb') as out:
+        pickle.dump(datacube, out)
+
+    outfile = os.path.join(outdir, 'true_imap.npy')
+    print(f'Saving test datacube true imap to {outfile}')
+    np.save(outfile, true_im)
 
     outfile = os.path.join(outdir, 'vmap.png')
     print(f'Saving true vamp in obs plane to {outfile}')
@@ -291,6 +317,11 @@ def main(args):
 
     log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
     log_likelihood = log_posterior.log_likelihood
+
+    outfile = os.path.join(outdir, 'pars.pkl')
+    print(f'Saving Pars to {outfile}')
+    with open(outfile, 'wb') as out:
+        pickle.dump(pars, out)
 
     #-----------------------------------------------------------------
 

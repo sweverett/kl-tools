@@ -1,49 +1,196 @@
 import numpy as np
 from astropy.units import Unit
 import galsim as gs
+from abc import abstractmethod
+from typing import Union
+import os
 
-from emission import EmissionLine
-import cube
-from cube import CubePars, DataCube
-from velocity import VelocityMap
-from likelihood import DataCubeLikelihood
-import intensity
-import utils
+from kl_tools.parameters import Pars
+from kl_tools.emission import EmissionLine
+import kl_tools.cube as cube
+from kl_tools.cube import CubePars, DataCube
+from kl_tools.velocity import VelocityMap
+from kl_tools.likelihood import DataCubeLikelihood
+import kl_tools.intensity as intensity
+import kl_tools.utils as utils
 
 import ipdb
 import pudb
 
-def setup_likelihood_test(true_pars, meta):
+class MockObservation(object):
+    '''
+    This class is meant to organize the specification, construction, and
+    diagnostics of a mock datacube observation to be used for various
+    test scripts. This is to ensure consistency in input between multiple
+    tests
+    '''
+
+    # TODO: This may need to be restructured to allow for more general models
+    _req_true_pars = ['g1', 'g2', 'theta_int', 'sini', 'v0', 'vcirc', 'rscale']
+    _opt_true_pars = ['flux', 'hlr', 'beta', 'x0', 'y0']
+    _req_datacube_pars = ['Nx', 'Ny', 'pix_scale', 'true_flux', 'true_hlr', 'z', 'R', 'wavelength', 'v_model', 'imap_type']
+    _opt_datacube_pars = ['s2n', 'sky_sigma', 'continuum_template', 'v_unit', 'r_unit', 'lam_unit', 'psf', 'basis_type', 'basis_kwargs', 'use_basis_as_truth']
+
+    def __init__(self, true_pars:dict, datacube_pars: dict) -> None:
+        '''
+        true_pars: dict
+            A dictionary of parameters that are to be sampled over, along with
+            their true values
+        datacube_pars: dict
+            A dictionary of parameters needed for mock datacube construction
+        '''
+
+        utils.check_fields(
+            true_pars, self._req_true_pars, self._opt_true_pars, 'true_pars'
+            )
+        utils.check_fields(
+            datacube_pars, self._req_datacube_pars, self._opt_datacube_pars, 'datacube_pars'
+            )
+
+        self.true_pars = true_pars
+        self.datacube_pars = datacube_pars
+        self.generate_datacube()
+
+        return
+
+    def generate_datacube(self) -> None:
+        '''
+        Generate the mock datacube
+        '''
+        datacube, true_vmap, true_im = setup_likelihood_test(
+            self.true_pars, self.datacube_pars
+            )
+
+        self.datacube = datacube
+        self.true_vmap = true_vmap
+        self.true_im = true_im
+
+        return
+
+    def plot(self, plot_kwargs:dict) -> None:
+        '''
+        Plot the mock observation, both the stack and individual channels
+
+        plot_kwargs: dict
+            A dictionary of plotting kwargs to pass to the datacube.plot()
+            method
+        '''
+
+        self.datacube.plot(**plot_kwargs)
+
+        return
+
+class DefaultMockObservation(MockObservation):
+    '''
+    This is a specific mock observation that is meant to be used for
+    baseline testing
+    '''
+
+    _true_pars = {
+        'g1': 0.025,
+        'g2': -0.0125,
+        'theta_int': np.pi / 6,
+        'sini': 0.7,
+        'v0': 5,
+        'vcirc': 200,
+        'rscale': 5,
+    }
+
+    # exp disk parameters
+    _true_flux = 1.8e4
+    _true_hlr = 3.5
+
+    _datacube_pars = {
+        # image meta pars
+        'Nx': 40, # pixels
+        'Ny': 40, # pixels
+        'pix_scale': 0.5, # arcsec / pixel
+        # intensity meta pars
+        'true_flux': _true_flux, # counts
+        'true_hlr': _true_hlr, # pixels
+        'imap_type': 'inclined_exp',
+        # velocty meta pars
+        'v_model': 'centered',
+        'v_unit': Unit('km/s'),
+        'r_unit': Unit('kpc'),
+        # emission line meta pars
+        'wavelength': 656.28, # nm; halpha
+        'lam_unit': 'nm',
+        'z': 0.3,
+        'R': 5000.,
+        's2n': 1000000,
+        'true_flux': 1.8e4,
+        'true_hlr': 3.5,
+
+    }
+
+    _basis_pars = {
+        'beta': 0.15,
+    }
+
+    def __init__(self, imap: str) -> None:
+        '''
+        imap: str
+            The type of intensity map to use for the mock observation
+        '''
+
+        if imap == 'inclined_exp':
+            self._setup_inclined_exp()
+        elif imap == 'basis':
+            pass
+        else:
+            raise ValueError('imap must be inclined_exp or basis')
+
+        super().__init__(self._true_pars, self._datacube_pars)
+
+        return
+
+    def _setup_inclined_exp(self) -> None:
+        '''
+        Setup a mock observation using an inclined exponential disk
+        '''
+
+        # setup mock emission line, w/ halpha & CWI defaults
+        wavelength = 656.28
+
+        return
+
+    def _setup_basis(self) -> None:
+        '''
+        Setup a mock observation using a basis intensity map
+        '''
+
+        return
+
+def setup_likelihood_test(true_pars: dict, datacube_pars: dict) -> Union[DataCube, VelocityMap, gs.Image]:
     '''
     Setup a test datacube, velocity map, and intensity map given
-    true physical parameters and some metaprameters
+    true physical parameters and some datacube_parsprameters
 
     true_pars: dict
-        A dictionary of {'parameter': val} pairs for parameters
-        needed to construct a model datacube
-    meta: MetaPars or MCMCPars
-        A parameter object that contains all needed meta pars
-        for datacube construction
+        A dictionary of parameters needed to construct a true image
+    datacube_pars: dict
+        A dictionary of all parameters needed for datacube construction
 
-        Needed fields in meta:
+        Needed fields in datacube_pars:
         [Nx, Ny, pix_scale, true_flux, true_hlr, r_unit,
          v_unit, v_model]
 
-        Need one of the following in meta:
+        Need one of the following in datacube_pars:
         [sky_sigma, s2n]
     '''
 
     # setup mock emission line, w/ halpha & CWI defaults
-    if 'wavelength' in meta:
-        wavelength = meta['wavelength']
+    if 'wavelength' in datacube_pars:
+        wavelength = datacube_pars['wavelength']
     else:
         wavelength = 656.28 # nm
-    if 'R' in meta:
-        R = meta['R']
+    if 'R' in datacube_pars:
+        R = datacube_pars['R']
     else:
         R = 5000.
-    if 'z' in meta:
-        z = meta['z']
+    if 'z' in datacube_pars:
+        z = datacube_pars['z']
     else:
         z = 0.3
     width = 1 # nm
@@ -51,15 +198,16 @@ def setup_likelihood_test(true_pars, meta):
         wavelength, Unit('nm'), R, z, width
         )]
 
-    if ('sky_sigma' not in meta) and ('s2n' not in meta):
+
+    if ('sky_sigma' not in datacube_pars) and ('s2n' not in datacube_pars):
         raise KeyError('Must pass one of sky_sigma or s2n!')
 
-    if ('sky_sigma' in meta) and ('s2n' in meta):
+    if ('sky_sigma' in datacube_pars) and ('s2n' in datacube_pars):
         raise KeyError('Can only pass one of sky_sigma and s2n!')
 
-    if 's2n' in meta:
-        sky_sigma = meta['intensity']['true_flux'] / meta['s2n']
-        meta['sky_sigma'] = sky_sigma
+    if 's2n' in datacube_pars:
+        sky_sigma = datacube_pars['true_flux'] / datacube_pars['s2n']
+        datacube_pars['sky_sigma'] = sky_sigma
 
     # setup mock bandpasses
     throughput = 1.
@@ -73,7 +221,7 @@ def setup_likelihood_test(true_pars, meta):
 
     # setup datacube pars
     pars = CubePars({
-        'pix_scale': meta['pix_scale'],
+        'pix_scale': datacube_pars['pix_scale'],
         'bandpasses': bandpasses,
         'emission_lines': lines
     })
@@ -81,18 +229,18 @@ def setup_likelihood_test(true_pars, meta):
     # setup blank datacube
     # assert (width % dlam) == 0 # doesn't work bc of float issues...
     Nspec = int(width / dlam)
-    shape = (Nspec, meta['Nx'], meta['Ny'])
+    shape = (Nspec, datacube_pars['Nx'], datacube_pars['Ny'])
     data = np.zeros(shape)
     datacube = DataCube(data, pars=pars)
 
     # now fill datacube slices
     datacube, vmap, true_im = _fill_test_datacube(
-        datacube, true_pars, meta
+        datacube, true_pars, datacube_pars
         )
 
     return datacube, vmap, true_im
 
-def _fill_test_datacube(datacube, true_pars, pars):
+def _fill_test_datacube(datacube: DataCube, true_pars: dict, pars: dict) -> Union[DataCube, VelocityMap, gs.Image]:
     '''
     TODO: Restructure to allow for more general truth input
     '''
@@ -101,14 +249,17 @@ def _fill_test_datacube(datacube, true_pars, pars):
 
     # make true light profile an exponential disk
     imap_pars = {
-        'flux': pars['intensity']['true_flux'],
-        'hlr': pars['intensity']['true_hlr'],
+        'flux': pars['true_flux'],
+        'hlr': pars['true_hlr'],
     }
 
-    imap_type = pars['intensity']['type']
+    try:
+        imap_type = pars['imap_type']
+    except KeyError:
+        imap_type = 'inclined_exp'
 
     try:
-        use_basis = pars['intensity']['use_basis_as_truth']
+        use_basis = pars['use_basis_as_truth']
     except KeyError:
         use_basis = False
 
@@ -123,7 +274,7 @@ def _fill_test_datacube(datacube, true_pars, pars):
     true_im = imap.render(true_pars, datacube, pars)
 
     # TODO: TESTING!!!
-    # This alows us to draw the test datacube from shapelets instead
+    # This alows us to draw the test datacube from basis instead
     if use_basis is True:
         print('WARNING: Using basis for true image as test.')
         print('WARNING: Make sure this is intentional!')
@@ -142,20 +293,26 @@ def _fill_test_datacube(datacube, true_pars, pars):
             pars=basis_pars
             )
 
-        basis_type = pars['intensity']['basis']
-        kwargs = pars['intensity']['basis_kwargs']
-        shapelet_imap = intensity.BasisIntensityMap(
+        basis_type = pars['basis_type']
+        kwargs = pars['basis_kwargs']
+        basis_imap = intensity.BasisIntensityMap(
             basis_datacube, basis_type, basis_kwargs=kwargs
             )
 
-        # Now make new truth image from shapelet MLE fit
-        true_im = shapelet_imap.render(true_pars, basis_datacube, pars)
+        # Now make new truth image from basis MLE fit
+        true_im = basis_imap.render(true_pars, basis_datacube, pars)
 
     vel_pars = {}
     for name in true_pars.keys():
         vel_pars[name] = true_pars[name]
-    vel_pars['v_unit'] = pars['v_unit']
-    vel_pars['r_unit'] = pars['r_unit']
+    try:
+        vel_pars['v_unit'] = pars['v_unit']
+    except KeyError:
+        vel_pars['v_unit'] = Unit('km/s')
+    try:
+        vel_pars['r_unit'] = pars['r_unit']
+    except KeyError:
+        vel_pars['r_unit'] = Unit('kpc')
 
     vmap = VelocityMap(pars['v_model'], vel_pars)
 
@@ -178,6 +335,8 @@ def _fill_test_datacube(datacube, true_pars, pars):
     else:
         continuum = None
 
+    sky_sig = pars['sky_sigma']
+
     for i in range(Nspec):
         zfactor = 1. / (1 + Vnorm)
 
@@ -188,7 +347,7 @@ def _fill_test_datacube(datacube, true_pars, pars):
 
         obs_im = gs.Image(obs_array, scale=pars['pix_scale'])
 
-        noise = gs.GaussianNoise(sigma=pars['sky_sigma'])
+        noise = gs.GaussianNoise(sigma=sky_sig)
         obs_im.addNoise(noise)
 
         data[i,:,:] = obs_im.array
@@ -197,7 +356,7 @@ def _fill_test_datacube(datacube, true_pars, pars):
     datacube = DataCube(data, pars=datacube.pars)
 
     # set weight maps according to added noise
-    datacube.set_weights(1. / pars['sky_sigma'])
+    datacube.set_weights(1. / sky_sig)
     datacube.set_masks(0)
 
     return datacube, V, true_im
@@ -224,7 +383,11 @@ def setup_simple_CWI_datacube(Nx=30, Ny=30):
     pix_scale = 0.
     pars = CubePars()
 
-    return mock_datacube
+    # TODO: finish!
+    # ...
+
+    # return mock_datacube
+    return
 
 def setup_simple_emission_line(wavelength, unit, R, z, width,
                                Nbins=100):

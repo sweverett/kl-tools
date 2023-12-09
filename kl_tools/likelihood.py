@@ -12,15 +12,15 @@ from galsim.angle import Angle, radians
 import matplotlib.pyplot as plt
 from numba import njit
 
-import utils
-import priors
-import intensity
-from parameters import Pars, MetaPars
-# import parameters
-from velocity import VelocityMap
-from cube import DataVector, DataCube
+import kl_tools.utils as utils
+import kl_tools.priors as priors
+import kl_tools.intensity as intensity
+from kl_tools.parameters import Pars, MetaPars
+from kl_tools.velocity import VelocityMap
+from kl_tools.cube import DataVector, DataCube
 
 import ipdb
+import pudb
 
 # TODO: Make LogLikelihood a base class w/ abstract call,
 # and make current implementation for IFU
@@ -160,10 +160,15 @@ class LogPosterior(LogBase):
         else:
             loglike = self.log_likelihood(theta, data)
 
-        post = logprior + loglike, self.blob(logprior, loglike)
-        if (post == np.NaN) or (post == 0):
-            pudb.set_trace()
-        return logprior + loglike, self.blob(logprior, loglike)
+        logpost = logprior + loglike
+
+        # In rare cases, particularly basis function imap modeling,
+        # NaN's can occur from pseudo-inverse solving. We try to catch
+        # it when it happens but we keep this as a fail-safe
+        if np.isnan(logpost):
+            logpost = -np.inf
+
+        return logpost, self.blob(logprior, loglike)
 
 class LogPrior(LogBase):
     def __init__(self, parameters):
@@ -289,6 +294,13 @@ class LogLikelihood(LogBase):
 
         # setup model corresponding to datavector type
         model = self._setup_model(theta_pars, datavector)
+
+        # NOTE: in rare cases, the model will return a NaN datacube due
+        # to failure to find an inverse of the design matrix when using
+        # basis function imap modeling. This is usually due to an issue
+        # with sampling the scale factor, so we reject this sample
+        if np.isnan(model.data).any():
+            return -np.inf
 
         # if we are computing the marginalized posterior over intensity
         # map parameters, then we need to scale this likelihood by a
@@ -499,9 +511,6 @@ class DataCubeLikelihood(LogLikelihood):
         # parameters
         vmap = self.setup_vmap(theta_pars)
         imap = self.setup_imap(theta_pars, datacube)
-
-        # TODO: temp for debugging!
-        self.imap = imap
 
         try:
             use_numba = self.meta['run_options']['use_numba']

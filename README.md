@@ -1,2 +1,2 @@
 # kl-tools
-Kinematics Lensing Toolkit
+Kinematic Lensing Toolkit

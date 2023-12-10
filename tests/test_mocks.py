@@ -6,6 +6,8 @@ from astropy.units import Unit
 from kl_tools.mocks import MockObservation, DefaultMockObservation
 import kl_tools.utils as utils
 
+import pudb
+
 class TestMockObservation(unittest.TestCase):
     def setUp(self) -> None:
         # Set up any necessary objects or data for the tests
@@ -14,14 +16,14 @@ class TestMockObservation(unittest.TestCase):
             'g1': 0.01,
             'g2': -0.02,
             'theta_int': np.pi / 3,
-            'sini': 0.3,
+            'sini': 0.8,
             'v0': 9,
-            'vcirc': 180,
-            'rscale': 3.5,
+            'vcirc': 220,
+            'rscale': 5.5,
         }
 
         true_flux = 1e5
-        true_hlr = 1.5
+        true_hlr = 4.5
 
         self.datacube_pars = {
             # image meta pars
@@ -48,8 +50,8 @@ class TestMockObservation(unittest.TestCase):
             self.true_pars, self.datacube_pars
             )
 
-        # Create a MockObservation object with an expanded set of true parameters
-        self.true_pars_expanded = {
+        # Create a MockObservation object with an extended set of true parameters
+        self.true_pars_extended = {
             'g1': 0.025,
             'g2': -0.0125,
             'theta_int': np.pi / 6,
@@ -68,11 +70,8 @@ class TestMockObservation(unittest.TestCase):
             'v_model': 'offset'
         })
 
-        # the datacube generation wants to set this itself from the s2n
-        del self.datacube_pars_extended['sky_sigma']
-
-        self.mock_obs_expanded = MockObservation(
-            self.true_pars_expanded, self.datacube_pars_extended
+        self.mock_obs_extended = MockObservation(
+            self.true_pars_extended, self.datacube_pars_extended
         )
 
         # make a mock observation that uses basis functions to create the true image
@@ -99,9 +98,6 @@ class TestMockObservation(unittest.TestCase):
             }
         })
 
-        # the datacube generation wants to set this itself from the s2n
-        del self.datacube_pars_basis['sky_sigma']
-
         self.mock_obs_basis = MockObservation(
             self.true_pars_basis, self.datacube_pars_basis
         )
@@ -113,7 +109,14 @@ class TestMockObservation(unittest.TestCase):
         del self.true_pars
         del self.datacube_pars
         del self.mock_obs
-        del self.mock_obs_expanded
+
+        del self.true_pars_extended
+        del self.datacube_pars_extended
+        del self.mock_obs_extended
+
+        del self.true_pars_basis
+        del self.datacube_pars_basis
+        del self.mock_obs_basis
 
         return
 
@@ -142,15 +145,30 @@ class TestMockObservation(unittest.TestCase):
         outdir = os.path.join(os.path.dirname(__file__), 'plots', 'test_mocks')
         utils.make_dir(outdir)
 
-        outfile = os.path.join(outdir, 'datacube.png')
-        self.mock_obs.datacube.plot(outfile)
+        outfile = os.path.join(outdir, 'mock-datacube.png')
+        self.mock_obs.datacube.plot(show=False, outfile=outfile)
+
+        outfile = os.path.join(outdir, 'mock-datacube-extended.png')
+        self.mock_obs_extended.datacube.plot(show=False, outfile=outfile)
+
+        outfile = os.path.join(outdir, 'mock-datacube-basis.png')
+        self.mock_obs_basis.datacube.plot(show=False, outfile=outfile)
 
         return
 
 class TestDefaultMockObservation(unittest.TestCase):
     def setUp(self) -> None:
         # Set up any necessary objects or data for the tests
-        pass
+
+        self.mock_obs = DefaultMockObservation()
+        self.mock_obs_basis = DefaultMockObservation(imap='basis')
+
+        try:
+            wrong = DefaultMockObservation(imap='other')
+        except ValueError:
+            pass
+
+        return
 
     def tearDown(self) -> None:
         # Clean up any resources used by the tests
@@ -180,6 +198,22 @@ class TestDefaultMockObservation(unittest.TestCase):
         # Test the setup_simple_emission_line function
         # Add your test code here
         pass
+
+    def test_plots(self) -> None:
+        '''
+        Make plots of the default mock datacube
+        '''
+
+        outdir = os.path.join(os.path.dirname(__file__), 'plots', 'test_mocks')
+        utils.make_dir(outdir)
+
+        outfile = os.path.join(outdir, 'default-mock-datacube.png')
+        self.mock_obs.datacube.plot(show=False, outfile=outfile)
+
+        outfile = os.path.join(outdir, 'default-mock-datacube-basis.png')
+        self.mock_obs_basis.datacube.plot(show=False, outfile=outfile)
+
+        return
 
 if __name__ == '__main__':
     unittest.main()

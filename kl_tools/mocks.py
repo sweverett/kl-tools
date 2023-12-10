@@ -124,24 +124,31 @@ class DefaultMockObservation(MockObservation):
 
     }
 
-    _basis_pars = {
-        'beta': 0.15,
+    _datacube_basis_pars = {
+        'basis_type': 'exp_shapelets',
+        'use_basis_as_truth': True,
+        'basis_kwargs': {
+            'Nmax': 6,
+            'plane': 'obs',
+            'beta': 0.15,
+        }
     }
 
-    def __init__(self, imap: str) -> None:
+    def __init__(self, imap: str='inclined_exp') -> None:
         '''
         imap: str
-            The type of intensity map to use for the mock observation
+            The type of intensity map to use for the mock observation. If 'basis', then the true intensity map is the defined basis fit to the galsim-produced image defined in the default _datacube_pars image type
         '''
 
         if imap == 'inclined_exp':
             self._setup_inclined_exp()
         elif imap == 'basis':
-            pass
+            self._setup_basis()
         else:
             raise ValueError('imap must be inclined_exp or basis')
 
-        super().__init__(self._true_pars, self._datacube_pars)
+        # datacube_pars is set according to imap type in the respective setup method
+        super().__init__(self._true_pars, self.datacube_pars)
 
         return
 
@@ -150,8 +157,7 @@ class DefaultMockObservation(MockObservation):
         Setup a mock observation using an inclined exponential disk
         '''
 
-        # setup mock emission line, w/ halpha & CWI defaults
-        wavelength = 656.28
+        self.datacube_pars = self._datacube_pars
 
         return
 
@@ -159,6 +165,10 @@ class DefaultMockObservation(MockObservation):
         '''
         Setup a mock observation using a basis intensity map
         '''
+
+        self.datacube_pars = {
+            **self._datacube_pars, **self._datacube_basis_pars
+        }
 
         return
 
@@ -179,6 +189,10 @@ def setup_likelihood_test(true_pars: dict, datacube_pars: dict) -> Union[DataCub
         Need one of the following in datacube_pars:
         [sky_sigma, s2n]
     '''
+
+    # first, make copies so we don't modify the input dicts
+    true_pars = true_pars.copy()
+    datacube_pars = datacube_pars.copy()
 
     # setup mock emission line, w/ halpha & CWI defaults
     if 'wavelength' in datacube_pars:

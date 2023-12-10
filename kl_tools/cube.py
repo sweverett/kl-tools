@@ -855,7 +855,7 @@ class DataCube(DataVector):
 
         return
 
-    def plot(self, show=True, outfile=None, size=(9,12), title=None, imshow_kwargs={}, max_cols=10):
+    def plot(self, show=True, outfile=None, size=None, title=None, imshow_kwargs={}, max_cols=12):
         '''
         Plot the mock observation; both the stack and individual channels
 
@@ -878,20 +878,17 @@ class DataCube(DataVector):
 
         ncols = min(max_cols, nplots)
         nrows = nplots // max_cols
-        fig, axes = plt.subplots(nrows, ncols)
+        if nplots % max_cols != 0:
+            nrows += 1
+        fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True)
+        plt.subplots_adjust(wspace=0.5)
 
-        # first, plot the stack
-        ax = axes[0]
-        im = ax.imshow(self.stack(), **imshow_kwargs)
-        ax.set_title('Stacked image')
-        plt.colorbar(im, ax=ax)
+        # set the plot size based on nrows and ncols
+        if size is None:
+            size = (ncols*3, nrows*2)
 
-        # now plot the individual slices
-        print('nrows', nrows)
-        print('ncols', ncols)
-        print('axis.shape', axes.shape)
-        print('nplots', nplots)
-        for i in range(1, nplots):
+        unit = self.lambda_unit
+        for i in range(0, nrows*ncols):
             if len(axes.shape) == 1:
                 ax = axes[i]
             else:
@@ -899,25 +896,30 @@ class DataCube(DataVector):
                 col = i % max_cols
                 ax = axes[row, col]
 
-            ax.imshow(self._data[i-1,:,:], **imshow_kwargs)
-            ax.set_title(f'Slice {i}')
-            plt.colorbar(im, ax=ax)
-
-        # now make colorbars the same size as the images
-        for ax in axes:
-            im = ax.get_images()[0]
-            extent = im.get_extent()
-            ax.set_aspect(abs((extent[1]-extent[0])/(extent[3]-extent[2])))
+            # first, the stacked image
+            if i == 0:
+                im = ax.imshow(self.stack(), **imshow_kwargs, origin='lower')
+                ax.set_title('Stacked image')
+                utils.add_colorbar(im)
+            # next, the slice plots
+            elif i < nplots:
+                im = ax.imshow(self._data[i-1,:,:], **imshow_kwargs, origin='lower')
+                li, le = self.lambdas[i-1][0], self.lambdas[i-1][1]
+                # ax.set_title(rf'$S_{i}$: ({le:.2f}, {le:.2f}) {unit}')
+                ax.set_title(f'Slice {i}')
+                utils.add_colorbar(im)
+            else:
+                # make ax invisible
+                ax.axis('off')
 
         if title is not None:
             plt.title(title)
         else:
             li, le = self.lambdas[0][0], self.lambdas[-1][1]
-            unit = self.lambda_unit
-            plt.title(f'DataCube; {li} {unit} < ' +\
-                      f'lambda < {le} {unit}')
+            plt.suptitle(f'DataCube; {li:.2f} {unit} < ' +\
+                         f'lambda < {le:.2f} {unit}', y=1.05)
 
-        plt.gcf().set_size_inches(size)
+        fig.set_size_inches(size)
 
         if outfile is not None:
             plt.savefig(outfile, bbox_inches='tight')

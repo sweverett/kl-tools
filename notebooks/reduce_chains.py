@@ -183,7 +183,7 @@ param_limit = [
 ### Pickled runner and sampler
 #DATA_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/bgs_like_array_tnom600/"
 DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
-FIG_DIR = os.path.join(DATA_DIR, "figs")
+FIG_DIR = os.path.join(DATA_DIR, "figs/")
 
 sampler_fn = DATA_DIR+"sampler_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf)
 ### Data vector used in the code

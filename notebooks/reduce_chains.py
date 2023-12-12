@@ -321,7 +321,7 @@ plt.close(fig)
 ### 7. save summary stats
 ### =====================
 with open(os.path.join(FIG_DIR,"summary_stats/"+postfix), "w") as fp:
-    res1 = "%d %.2f %.2f %d %le %le"%(b, sini, hlr, a, sigma_e_rms, SNR_best)
+    res1 = "%d %.2f %.2f %d %le %le"%(flub_bin, sini, hlr, fiberconf, sigma_e_rms, SNR_best)
     pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
     pars_errs = [marge_stat.parWithName(key).err for key in sampled_pars]
     res2 = ' '.join("%le"%bias for bias in pars_bias)

@@ -40,7 +40,7 @@ atm_psf_fwhm = 1.0 # arcsec
 fiber_rad = 0.75 # arcsec
 fiber_offset_x = 1.5 # arcsec
 fiber_offset_y = 1.5 # arcsec
-exptime_nominal = 180 # seconds
+exptime_nominal = 600 # seconds
 ADD_NOISE = False
 
 default_obs_conf = [
@@ -158,7 +158,7 @@ default_obs_conf = [
          'PSFTYPE': "airy_fwhm",
          'PSFFWHM': atm_psf_fwhm,
          'DIAMETER': 332.42,
-         'EXPTIME': exptime_nominal,
+         'EXPTIME': 180,
          'GAIN': 1.0,
          'NOISETYP': 'ccd',
          'NOISESIG': 1.0,
@@ -181,11 +181,11 @@ default_obs_conf = [
         'PSFTYPE': "airy_fwhm",
         'PSFFWHM': 1.0,
         'DIAMETER': 332.42,
-        'EXPTIME': exptime_nominal*2,
+        'EXPTIME': 180*2,
         'GAIN': 1.0,
         'NOISETYP': 'ccd',
         'NOISESIG': 1.0,
-        'SKYLEVEL': 40.4*exptime_nominal*2,
+        'SKYLEVEL': 40.4*180*2,
         'RDNOISE': 2.6,
         'ADDNOISE': ADD_NOISE,
     }
@@ -252,7 +252,7 @@ def main(args, pool):
     flux_scaling = 1.58489**flux_scaling_power
     sini = 0.05 + 0.1*args.sini
     assert (0<sini<1)
-    hlr = 0.25 + 0.5*args.hlr 
+    hlr = 0.5 + 0.5*args.hlr 
     fiber_conf = args.fiberconf
 
     ### Initialization

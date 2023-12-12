@@ -29,4 +29,32 @@ source ~/.bashrc
 cd $SLURM_SUBMIT_DIR
 conda activate kltools
 
-python reduce_chains.py ${SLURM_ARRAY_TASK_ID}
+# 2 fiber configurations x 12 SNR bins x 4 hlr x 10 sinis; 960
+RUN=bgs_like_array_tnom600
+NSTEPS=5000
+SCRIPT=test_fiber_mcmc_run.py
+NCPUS=${SLURM_NTASKS}
+hit=0
+# fiber configuration
+for (( a=0; a<2; a++ ))
+do
+	# flux 
+	for (( b=0; b<12; b++ ))
+	do
+		# hlr 
+		for (( c=0; c<4; c++ ))
+		do
+			# sini
+			for (( d=0; d<10; d++ ))
+			do
+				# SLURM arrays start from 1
+				hit=$((${hit}+1))
+				if [ ${hit} -eq ${SLURM_ARRAY_TASK_ID} ]
+				then
+					# reduce chains
+					python reduce_chains.py -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=${a}
+				fi
+			done
+		done
+	done
+done

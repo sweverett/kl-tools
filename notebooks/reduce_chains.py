@@ -183,11 +183,13 @@ param_limit = [
 ### Pickled runner and sampler
 #DATA_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/bgs_like_array_tnom600/"
 DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
-FIG_DIR = os.path.join(DATA_DIR, "figs/")
+FIG_DIR = os.path.join(DATA_DIR, "figs")
 
-sampler_fn = DATA_DIR+"sampler_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf)
+sampler_fn = os.path.join(DATA_DIR, 
+    "sampler_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
 ### Data vector used in the code
-datafile = DATA_DIR+"dv_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf)
+datafile = os.path.join(DATA_DIR, 
+    "dv_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
 postfix = "sim_%d_sini%.2f_hlr%.2f_fiberconf%d.png"%(flux_bin, sini, hlr, fiberconf)
 
 Nparams = len(sampled_pars)
@@ -222,9 +224,11 @@ for i in range(Nparams):
 for j in range(2*Nparams):
     axes[Nparams].semilogy(-blobs[:,j,1])
 axes[Nparams].set(ylim=[0.5,1e8])
-plt.savefig(FIG_DIR+"trace/sim%d_trace.png"%(ct))
+plt.savefig(os.path.join(FIG_DIR,"trace/"+postfix))
 plt.close(fig)
-### triangle plot
+
+### 2. triangle plot
+### ================
 g = plots.get_subplot_plotter()
 g.settings.title_limit_fontsize = 14
 g.triangle_plot([samples,], filled=True, 
@@ -233,9 +237,9 @@ g.triangle_plot([samples,], filled=True,
                 #param_limits={k:v for k,v in zip(param_names, param_limit)}
                 title_limit = 1,
                )
-g.export(FIG_DIR+"posterior/"+postfix)
+g.export(os.path.join(FIG_DIR,"posterior/"+postfix))
 
-### 2. shape noise
+### 3. shape noise
 ### ============== 
 marge_stat = samples.getMargeStats()
 g1, eg1 = marge_stat.parWithName('g1').mean, marge_stat.parWithName('g1').err
@@ -243,7 +247,7 @@ g2, eg2 = marge_stat.parWithName('g2').mean, marge_stat.parWithName('g2').err
 sigma_e_rms = np.sqrt(eg1**2+eg2**2)
 print(f'r.m.s. shape noise = {sigma_e_rms}')
 
-### 3. best-fitting v.s. data
+### 4. best-fitting v.s. data
 ### =========================
 sampled_pars_bestfit = chains_flat[np.argmax(np.sum(blobs_flat, axis=1)), :]
 sampled_pars_bestfit_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_bestfit)}
@@ -255,7 +259,7 @@ loglike = log_posterior.log_likelihood
 wave = get_Cube(0).lambdas.mean(axis=1)*10 # Angstrom
 images_bestfit = loglike.get_images(sampled_pars_bestfit)
 
-### 4. fiber spectra
+### 5. fiber spectra
 ### ================
 Ha_center = LINE_LAMBDAS['Ha'].to('Angstrom').value * (1+pars.meta['sed']['z'])
 fig, axes = plt.subplots(1,Nspec, figsize=(2*Nspec,2), sharey=True)
@@ -274,10 +278,10 @@ for i in range(Nspec):
     ax.text(0.05, 0.9, '(%.1f", %.1f")'%(fiberpos[0], fiberpos[1]), transform=ax.transAxes)
 axes[0].legend(frameon=False)
 axes[0].set(ylabel='ADU')
-plt.savefig(FIG_DIR+"spectra/"+postfix)
+plt.savefig(os.path.join(FIG_DIR, "spectra/"+postfix))
 plt.close(fig)
 
-### 5. broad-band image
+### 6. broad-band image
 ### ===================
 fig, axes = plt.subplots(1,3,figsize=(9,3), sharey=True)
 noisy_data = dv.get_data(Nspec)+dv.get_noise(Nspec)
@@ -311,12 +315,12 @@ for i in range(Nspec):
     axes[0].add_patch(circ)
     axes[0].text(dx, dy, "+", ha='center', va='center', color='red')
 
-plt.savefig(FIG_DIR+"image/"+postfix)
+plt.savefig(os.path.join(FIG_DIR,"image/"+postfix))
 plt.close(fig)
 
-### 6. save summary stats
+### 7. save summary stats
 ### =====================
-with open(FIG_DIR+"summary_stats/"+postfix, "w") as fp:
+with open(os.path.join(FIG_DIR,"summary_stats/"+postfix), "w") as fp:
     res1 = "%d %.2f %.2f %d %le %le"%(b, sini, hlr, a, sigma_e_rms, SNR_best)
     pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
     pars_errs = [marge_stat.parWithName(key).err for key in sampled_pars]
@@ -324,7 +328,7 @@ with open(FIG_DIR+"summary_stats/"+postfix, "w") as fp:
     res3 = ' '.join("%le"%err for err in pars_errs)
     fp.write(' '.join([res1, res2, res3])+'\n')
 if ct==1:
-    with open(FIG_DIR+"summary_stats/colnames.dat", "w") as fp:
+    with open(os.path.join(FIG_DIR,"summary_stats/colnames.dat"), "w") as fp:
         hdr1 = "# flux_bin sini hlr fiberconf sn_rms snr_best"
         hdr2 = ' '.join("%s_bias"%key for key in sampled_pars)
         hdr3 = ' '.join("%s_std"%key for key in sampled_pars)

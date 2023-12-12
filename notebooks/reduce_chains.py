@@ -160,9 +160,9 @@ param_limit = [
 ### Pickled runner and sampler
 DATA_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/bgs_like_array/"
 FIG_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/figs/"
-sampler_fn = DATA_DIR+"sampler_%d_sini%.2f_hlr%.1f_fiberconf%d.pkl"
+sampler_fn = DATA_DIR+"sampler_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"
 ### Data vector used in the code
-datafile = DATA_DIR+"dv_%d_sini%.2f_hlr%.1f_fiberconf%d.pkl"
+datafile = DATA_DIR+"dv_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"
 
 Nparams = len(sampled_pars)
 
@@ -189,7 +189,7 @@ for a in range(2):
     for b in range(12):
         flux_scaling = 1.58489**b
         for c in range(4):
-            hlr = 0.5 + c*0.5
+            hlr = 0.25 + c*0.5
             for d in range(10):
                 sini = 0.05 + d*0.1
 
@@ -231,7 +231,7 @@ for a in range(2):
                     for j in range(2*Nparams):
                         axes[Nparams].semilogy(-blobs[:,j,1])
                     axes[Nparams].set(ylim=[0.5,1e8])
-                    plt.savefig(FIG_DIR+"trace/sim%d_trace.png"%ct)
+                    plt.savefig(FIG_DIR+"trace/sim%d_trace.png"%(ct+960))
                     plt.close(fig)
                     ### triangle plot
                     g = plots.get_subplot_plotter()
@@ -242,7 +242,7 @@ for a in range(2):
                                     #param_limits={k:v for k,v in zip(param_names, param_limit)}
                                     title_limit = 1,
                                    )
-                    g.export(FIG_DIR+"posterior/sim%d_posterior.png"%ct)
+                    g.export(FIG_DIR+"posterior/sim%d_posterior.png"%(ct+960))
                     ### shape noise 
                     marge_stat = samples.getMargeStats()
                     g1, eg1 = marge_stat.parWithName('g1').mean, marge_stat.parWithName('g1').err
@@ -283,7 +283,7 @@ for a in range(2):
                         ax.text(0.05, 0.9, '(%.1f", %.1f")'%(fiberpos[0], fiberpos[1]), transform=ax.transAxes)
                     axes[0].legend(frameon=False)
                     axes[0].set(ylabel='ADU')
-                    plt.savefig(FIG_DIR+"spectra/sim%d_spectra.png"%ct)
+                    plt.savefig(FIG_DIR+"spectra/sim%d_spectra.png"%(ct+960))
                     plt.close(fig)
                     ### broad-band image
                     fig, axes = plt.subplots(1,3,figsize=(9,3), sharey=True)
@@ -318,12 +318,12 @@ for a in range(2):
                         axes[0].add_patch(circ)
                         axes[0].text(dx, dy, "+", ha='center', va='center', color='red')
 
-                    plt.savefig(FIG_DIR+"image/sim%d_image.png"%ct)
+                    plt.savefig(FIG_DIR+"image/sim%d_image.png"%(ct+960))
                     plt.close(fig)
 
                     # save summary stats
-                    with open(FIG_DIR+"summary_stats/sim%d.dat"%ct, "w") as fp:
-                        res1 = "%d %.2f %.1f %d %le %le"%(b, sini, hlr, a, sigma_e_rms, SNR_best)
+                    with open(FIG_DIR+"summary_stats/sim%d.dat"%(ct+960), "w") as fp:
+                        res1 = "%d %.2f %.2f %d %le %le"%(b, sini, hlr, a, sigma_e_rms, SNR_best)
                         pars_bias = [marge_stat.parWithName(key).mean-sampled_pars_value_dict[key]for key in sampled_pars]
                         pars_errs = [marge_stat.parWithName(key).err for key in sampled_pars]
                         res2 = ' '.join("%le"%bias for bias in pars_bias)

@@ -252,7 +252,7 @@ def main(args, pool):
     flux_scaling = 1.58489**flux_scaling_power
     sini = 0.05 + 0.1*args.sini
     assert (0<sini<1)
-    hlr = 0.5 + 0.5*args.hlr 
+    hlr = 0.25 + 0.5*args.hlr 
     fiber_conf = args.fiberconf
 
     ### Initialization
@@ -462,11 +462,11 @@ def main(args, pool):
         )
         utils.make_dir(outdir)
         outfile = os.path.join(outdir, 
-            'sampler_%s_sini%.2f_hlr%.1f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
+            'sampler_%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
         print(f'Pickling sampler to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(MCMCsampler, f)
-    outfile = os.path.join(outdir, 'dv_%s_sini%.2f_hlr%.1f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
+    outfile = os.path.join(outdir, 'dv_%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
     print(f'Saving data vector to {outfile}')
     dv = get_GlobalDataVector(0)
     dv.to_fits(outfile, overwrite=True)

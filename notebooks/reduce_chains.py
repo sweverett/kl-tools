@@ -320,21 +320,19 @@ plt.close(fig)
 
 ### 7. save summary stats
 ### =====================
-with open(os.path.join(FIG_DIR,"summary_stats/"+postfix), "w") as fp:
-    res1 = "%d %.2f %.2f %d %le %le"%(flub_bin, sini, hlr, fiberconf, sigma_e_rms, SNR_best)
+with open(os.path.join(FIG_DIR,"summary_stats/"+postfix[:-3]+"dat"), "w") as fp:
+    res1 = "%d %.2f %.2f %d %le %le"%(flux_bin, sini, hlr, fiberconf, sigma_e_rms, SNR_best)
     pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
     pars_errs = [marge_stat.parWithName(key).err for key in sampled_pars]
     res2 = ' '.join("%le"%bias for bias in pars_bias)
     res3 = ' '.join("%le"%err for err in pars_errs)
     fp.write(' '.join([res1, res2, res3])+'\n')
-if ct==1:
+if (args.Iflux==0) and (args.sini==0) and (args.hlr==0) and (args.fiberconf==0):
     with open(os.path.join(FIG_DIR,"summary_stats/colnames.dat"), "w") as fp:
         hdr1 = "# flux_bin sini hlr fiberconf sn_rms snr_best"
         hdr2 = ' '.join("%s_bias"%key for key in sampled_pars)
         hdr3 = ' '.join("%s_std"%key for key in sampled_pars)
         fp.write(' '.join([hdr1, hdr2, hdr3])+'\n')
-del sampler, dv, images_bestfit, chains, chains_flat, blobs, blobs_flat
-del marge_stat, pars, log_posterior, loglike, wave, noisy_data
 
 print("Done")
 

@@ -193,23 +193,29 @@ default_obs_conf = [
 
 def choose_fiber_conf(case):
     if case==0:
-        # major+minor
+        # major+minor, 1+4 fibers
         obs_conf = copy.deepcopy(default_obs_conf)
     elif case==1:
-        # major
+        # major, 1+2 fibers
         obs_conf = copy.deepcopy([default_obs_conf[i] for i in [0,1,4,5]])
         for i,conf in enumerate(obs_conf):
             conf['OBSINDEX'] = i
+            if i<2:
+                conf['EXPTIME'] = 2 * conf['EXPTIME']
     elif case==2:
-        # minor
+        # minor, 1+2 fibers
         obs_conf = copy.deepcopy([default_obs_conf[i] for i in [2,3,4,5]])
         for i,conf in enumerate(obs_conf):
             conf['OBSINDEX'] = i
+            if i<2:
+                conf['EXPTIME'] = 2 * conf['EXPTIME']
     elif case==3:
-        # semi-major+semi-minor
+        # semi-major+semi-minor, 1+2 fibers
         obs_conf = copy.deepcopy([default_obs_conf[i] for i in [0,2,4,5]])
         for i,conf in enumerate(obs_conf):
             conf['OBSINDEX'] = i
+            if i<2:
+                conf['EXPTIME'] = 2 * conf['EXPTIME']
     else:
         print(f'Fiber configuration case {case} is not implemented yet!')
         exit(-1)

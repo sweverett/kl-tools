@@ -40,7 +40,7 @@ atm_psf_fwhm = 1.0 # arcsec
 fiber_rad = 0.75 # arcsec
 fiber_offset_x = 1.5 # arcsec
 fiber_offset_y = 1.5 # arcsec
-exptime_nominal = 600 # seconds
+exptime_nominal = 900 # seconds
 ADD_NOISE = False
 
 default_obs_conf = [

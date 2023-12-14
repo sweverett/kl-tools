@@ -25,15 +25,17 @@ module load anaconda
 conda init bash
 source ~/.bashrc
 
-cd $SLURM_SUBMIT_DIR
 conda activate kltools
 
 # 2 fiber configurations x 12 SNR bins x 4 hlr x 10 sinis; 960
-RUN=bgs_like_array_tnom600
+DATADIR=/xdisk/timeifler/jiachuanxu/kl_fiber
+RUN=bgs_like_array_tnom900
 NSTEPS=5000
 SCRIPT=test_fiber_mcmc_run.py
 NCPUS=${SLURM_NTASKS}
 hit=0
+
+cd $SLURM_SUBMIT_DIR
 # fiber configuration
 for (( a=0; a<2; a++ ))
 do
@@ -54,6 +56,12 @@ do
 					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=${a} --mpi
 					# reduce chains
 					python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=${a}
+
+					# run chains
+					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2)) --mpi
+					# reduce chains
+					python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2 ))
+
 				fi
 			done
 		done

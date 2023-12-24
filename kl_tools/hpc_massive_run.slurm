@@ -3,7 +3,7 @@
 #SBATCH --output=KL_fiber-%A_%a.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=8
-#SBATCH --array=1-960
+#SBATCH --array=1-800
 #SBATCH --cpus-per-task=1
 
 ### >>> High priority purchase-in time
@@ -29,18 +29,20 @@ conda activate kltools
 
 # 2 fiber configurations x 12 SNR bins x 4 hlr x 10 sinis; 960
 DATADIR=/xdisk/timeifler/jiachuanxu/kl_fiber
-RUN=bgs_like_array_tnom900
+RUN=SNR-HDR_tnom900
 NSTEPS=5000
+TNOM=900
 SCRIPT=test_fiber_mcmc_run.py
 NCPUS=${SLURM_NTASKS}
 hit=0
 
 cd $SLURM_SUBMIT_DIR
 # fiber configuration
-for (( a=0; a<2; a++ ))
+#for (( a=0; a<2; a++ ))
+for a in 0 3
 do
 	# flux 
-	for (( b=0; b<12; b++ ))
+	for (( b=0; b<10; b++ ))
 	do
 		# hlr 
 		for (( c=0; c<4; c++ ))
@@ -52,15 +54,18 @@ do
 				hit=$((${hit}+1))
 				if [ ${hit} -eq ${SLURM_ARRAY_TASK_ID} ]
 				then
-					# run chains
-					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=${a} --mpi
-					# reduce chains
-					python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=${a}
+                    for subit in 0 1 2
+                    do
+					    # run chains
+					    mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=$(( b + subit * 10)) -sini=${d} -hlr=${c} -fiberconf=${a} -EXPTIME=${TNOM} --mpi
+					    # reduce chains
+					    python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=$(( b + subit * 10))  -sini=${d} -hlr=${c} -fiberconf=${a}
+                    done
 
-					# run chains
-					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2)) --mpi
-					# reduce chains
-					python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2 ))
+#					# run chains
+#					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2)) --mpi
+#					# reduce chains
+#					python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2 ))
 
 				fi
 			done

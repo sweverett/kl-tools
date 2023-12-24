@@ -29,6 +29,7 @@ import cube
 from cube import DataCube
 from datavector import DataVector, FiberDataVector
 import grism
+import emission
 import kltools_grism_module_2 as m
 #m.set_mpi_info(_mpi_size, _mpi_rank)
 
@@ -1229,7 +1230,7 @@ class GrismLikelihood(LogLikelihood):
         w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
         w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
         # photons/s/cm2 in the 3D grid
-        dc_array = sed.spectrum(w_mesh.flatten()) * self._dl
+        dc_array = sed(w_mesh.flatten()) * self._dl
         dc_array = dc_array.reshape(w_mesh.shape) * \
                         i_array[np.newaxis, :, :] /\
                         (1+v_array[np.newaxis, :, :]) 
@@ -1239,7 +1240,7 @@ class GrismLikelihood(LogLikelihood):
     @classmethod
     def _setup_sed(cls, meta):
         # self.meta
-        return grism.GrismSED(meta['sed'])
+        return emission.ObsFrameSED(meta['sed'])
 
 class FiberLikelihood(LogLikelihood):
     '''
@@ -1249,58 +1250,6 @@ class FiberLikelihood(LogLikelihood):
     where R is the ""resolution matrix", see DESI spectrum pipeline paper
     and spectro-perfectionism
     '''
-    
-    def _set_model_dimension(self):
-        # build model lambda-y-x grid
-        # TODO: retrieve header in a consistent way
-        _lr = self.meta['model_dimension']['lambda_range']
-        _li, _lf = _lr[0], _lr[1]
-        self._dl = self.meta['model_dimension']['lambda_res']
-        self._lambdas = np.array([(l, l+self._dl) for l in np.arange(_li, _lf, self._dl)])
-        self.mNspec = self._lambdas.shape[0]
-        self.mNx = self.meta['model_dimension']['Nx']
-        self.mNy = self.meta['model_dimension']['Ny']
-        self.mscale = self.meta['model_dimension']['scale']
-        return 
-    def _setup_model(self, theta_pars, datavector):
-        '''
-        Setup the model datacube given the input theta_pars and datavector
-
-        theta_pars: dict
-            Dictionary of sampled pars
-        '''
-        # create grid of pixel centers in image coordinates
-        # 'xy' indexing is the usual imshow y-x scheme
-        X, Y = utils.build_map_grid(self.mNx, self.mNy, 
-            indexing='xy', scale=self.mscale)
-
-        # create 2D velocity & intensity maps given sampled transformation
-        # parameters
-        vmap = self.setup_vmap(theta_pars)
-        imap = self.setup_imap(theta_pars)
-
-        # TODO: temp for debugging!
-        #self.imap = imap
-
-        try:
-            use_numba = self.meta['run_options']['use_numba']
-        except KeyError:
-            use_numba = False
-
-        # evaluate maps at pixel centers in obs plane
-        v_array = vmap(
-            'obs', X, Y, normalized=True, use_numba=use_numba
-            )
-        #self.v_array = v_array
-        # get both the emission line and continuum image
-        _pars = self.meta.copy_with_sampled_pars(theta_pars)
-        _pars['run_options']['imap_return_gal'] = True
-        i_array, gal = imap.render(theta_pars, None, _pars)
-        #self.i_array = i_array
-        dc_array, sed = self._construct_model_datacube(theta_pars, 
-            v_array, i_array, gal)
-        return dc_array, gal, sed
-
     def __init__(self, parameters, datavector, **kwargs):
         ''' Initialization
         Set up CubePars and ModelCube objects by providing a 
@@ -1324,25 +1273,18 @@ class FiberLikelihood(LogLikelihood):
             obs_conf_list = meta_copy.pop('obs_conf')
             self.Nobs = len(obs_conf_list)
             init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
-            #self.FiberPars_list = [cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)]
             init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
-            #self.FiberModelCubes = [cube.FiberModelCube(p) for p in self.FiberPars_list]
             # generate fiducial images and DataVector object
             fid_img_list, fid_noise_list = self.get_images(kwargs['sampled_theta_fid'], force_noise_free=False, return_noise=True)
             _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
             _data_header = obs_conf_list
-            # self.datavector = FiberDataVector(
-            #     header=_header, data_header=_data_header, 
-            #     data=fid_img_list, noise=fid_noise_list)
             init_GlobalDataVector([FiberDataVector(
                  header=_header, data_header=_data_header, 
                  data=fid_img_list, noise=fid_noise_list)])
             # set the fiducial images to C++ routine
             print("FiberLikelihood: Caching the (fiducial) data vector...")
-            input_from_fid_theta = True
         ### Case 2: Build data vector from input FiberDataVector object 
         else:
-            #super(FiberLikelihood, self).__init__(parameters, datavector)
             super(FiberLikelihood, self).__init__(parameters, DataVector())
             init_GlobalDataVector([datavector])
             self._set_model_dimension()
@@ -1354,15 +1296,52 @@ class FiberLikelihood(LogLikelihood):
             self.Nobs = datavector.Nobs
             init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
             init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
-            # self.FiberPars_list = []
-            # self.FiberModelCubes = []
-            # for i in range(self.Nobs):
-            #     _gp = cube.FiberPars(meta_copy.pars, obs_conf_list[i])
-            #     _gmc = cube.FiberModelCube(_gp)
-            #     self.FiberPars_list.append(_gp)
-            #     self.FiberModelCubes.append(_gmc)
-            input_from_fid_theta = False
         return
+
+    def _set_model_dimension(self):
+        # build model lambda-y-x grid
+        # TODO: retrieve header in a consistent way
+        _lr = self.meta['model_dimension']['lambda_range']
+        _li, _lf = _lr[0], _lr[1]
+        self._dl = self.meta['model_dimension']['lambda_res']
+        self._lambdas = np.array([(l, l+self._dl) for l in np.arange(_li, _lf, self._dl)])
+        self.mNspec = self._lambdas.shape[0]
+        self.mNx = self.meta['model_dimension']['Nx']
+        self.mNy = self.meta['model_dimension']['Ny']
+        self.mscale = self.meta['model_dimension']['scale']
+        return
+
+    def _setup_model(self, theta_pars, datavector):
+        '''
+        Setup the model datacube given the input theta_pars and datavector
+
+        theta_pars: dict
+            Dictionary of sampled pars
+        '''
+        # create grid of pixel centers in image coordinates
+        # 'xy' indexing is the usual imshow y-x scheme
+        X, Y = utils.build_map_grid(self.mNx, self.mNy, 
+            indexing='xy', scale=self.mscale)
+        # create 2D velocity & intensity maps given sampled transformation
+        # parameters
+        vmap = self.setup_vmap(theta_pars)
+        imap = self.setup_imap(theta_pars)
+        try:
+            use_numba = self.meta['run_options']['use_numba']
+        except KeyError:
+            use_numba = False
+        # evaluate maps at pixel centers in obs plane
+        v_array = vmap('obs', X, Y, normalized=True, use_numba=use_numba)
+        
+        # get both the emission line and continuum image
+        _pars = self.meta.copy_with_sampled_pars(theta_pars)
+        _pars['run_options']['imap_return_gal'] = True
+        i_array, gal = imap.render(theta_pars, None, _pars)
+        #self.i_array = i_array
+        dc_array, sed = self._construct_model_datacube(theta_pars, 
+            v_array, i_array, gal)
+        return dc_array, gal, sed
+
     def get_images(self, theta, force_noise_free=True, return_noise=False):
         ''' Get simulated images and data given parameter values
         '''
@@ -1439,16 +1418,16 @@ class FiberLikelihood(LogLikelihood):
         w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
         w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
         # photons/s/cm2 in the 3D grid
-        dc_array = sed.spectrum(w_mesh.flatten()) * self._dl
+        dc_array = sed(w_mesh.flatten()) * self._dl
         dc_array = dc_array.reshape(w_mesh.shape) * \
                         i_array[np.newaxis, :, :] /\
                         (1+v_array[np.newaxis, :, :]) 
 
         return dc_array, sed
+
     @classmethod
     def _setup_sed(cls, meta):
-        # self.meta
-        return grism.GrismSED(meta['sed'])
+        return emission.ObsFrameSED(meta['sed'])
 
     def setup_imap(self, theta_pars):
         '''

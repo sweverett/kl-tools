@@ -274,7 +274,7 @@ def main(args, pool):
         ]
     sampled_pars_value = [0.0, 0.0, 0, sini, 0.0, 300.0, hlr, hlr]
     sampled_pars_std = np.array(
-        [0.01, 0.01, 0.01, 0.01, 2, 5, 0.05, 0.01]
+        [0.01, 0.01, 0.01, 0.01, 2, 5, 0.01, 0.01]
         )/1000
     sampled_pars_value_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_value)}
     meta_pars = {
@@ -329,36 +329,56 @@ def main(args, pool):
             'lambda_unit': 'nm',
         },
         ### SED model
+        # typical values: cont 4e-16, emline 1e-16-1e-15 erg/s/cm2/nm
         'sed':{
-            'template': '../data/Simulation/GSB2.spec',
-            'wave_type': 'Ang',
-            'flux_type': 'flambda',
             'z': 0.3,
-            'wave_range': [500., 3000.], # nm
-            # obs-frame continuum normalization (nm, erg/s/cm2/nm)
-            'obs_cont_norm': [850, 2.6e-15*flux_scaling],
-            # a dict of line names and obs-frame flux values (erg/s/cm2)
-            'lines':{
-                'Ha': 1.25e-15*flux_scaling,
-                'O2': [1.0e-14*flux_scaling, 1.2e-14*flux_scaling],
-                'O3_1': 1.0e-14*flux_scaling,
-                'O3_2': 1.2e-14*flux_scaling,
-            },
-            # intrinsic linewidth in nm
-            'line_sigma_int':{
-                'Ha': 0.05,
-                'O2': [0.2, 0.2],
-                'O3_1': 0.2,
-                'O3_2': 0.2,
-            },
+            'continuum_type': 'temp',
+            'restframe_temp': '../data/Simulation/GSB2.spec',
+            'temp_wave_type': 'Ang',
+            'temp_flux_type': 'flambda',
+            'cont_norm_method': 'flux',
+            'obs_cont_norm_wave': 850,
+            'obs_cont_norm_flam': 4.0e-17*flux_scaling,
+            'em_Ha_flux': 1.2e-16flux_scaling,
+            'em_Ha_sigma': 0.26,
+            'em_O2_flux': 8.8e-17*flux_scaling*1,
+            'em_O2_sigma': (0.13, 0.13),
+            'em_O2_share': (0.45, 0.55),
+            'em_O3_1_flux': 2.4e-17*flux_scaling*1,
+            'em_O3_1_sigma': 0.13,
+            'em_O3_2_flux': 2.8e-17*flux_scaling*1,
+            'em_O3_2_sigma': 0.13,
+            'em_Hb_flux': 1.2e-17*flux_scaling,
+            'em_Hb_sigma': 0.26,
+            # 'template': '../data/Simulation/GSB2.spec',
+            # 'wave_type': 'Ang',
+            # 'flux_type': 'flambda',
+            # 'z': 0.3,
+            # 'wave_range': [500., 3000.], # nm
+            # # obs-frame continuum normalization (nm, erg/s/cm2/nm)
+            # 'obs_cont_norm': [850, 2.6e-15*flux_scaling],
+            # # a dict of line names and obs-frame flux values (erg/s/cm2)
+            # 'lines':{
+            #     'Ha': 1.25e-15*flux_scaling,
+            #     'O2': [1.0e-14*flux_scaling, 1.2e-14*flux_scaling],
+            #     'O3_1': 1.0e-14*flux_scaling,
+            #     'O3_2': 1.2e-14*flux_scaling,
+            # },
+            # # intrinsic linewidth in nm
+            # 'line_sigma_int':{
+            #     'Ha': 0.05,
+            #     'O2': [0.2, 0.2],
+            #     'O3_1': 0.2,
+            #     'O3_2': 0.2,
+            # },
         },
         ### observation configurations
         'obs_conf':  choose_fiber_conf(fiber_conf)
     }
     pars = Pars(sampled_pars, meta_pars)
 
-    #cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
-    cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
+    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+    #cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
 
     ### Loading data vector 
     #datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/simufiber_3.fits"
@@ -415,9 +435,7 @@ def main(args, pool):
 
         runner.burn_in = nsteps // 2
 
-        outdir = os.path.join(
-            "/xdisk/timeifler/jiachuanxu/kl_fiber", run_name
-        )
+        outdir = os.path.join(cube_dir, run_name)
         utils.make_dir(outdir)
         if (sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
             # The sampler isn't pickleable for some reason in this scenario
@@ -463,9 +481,7 @@ def main(args, pool):
         
         MCMCsampler.run_mcmc(p0, nsteps, progress=True)
 
-        outdir = os.path.join(
-            "/xdisk/timeifler/jiachuanxu/kl_fiber", run_name
-        )
+        outdir = os.path.join(cube_dir, run_name)
         utils.make_dir(outdir)
         outfile = os.path.join(outdir, 
             'sampler_%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))

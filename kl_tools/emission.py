@@ -1,11 +1,98 @@
+import os
+import warnings
+import copy
+import ipdb
 import numpy as np
+import galsim as gs
+# astropy
+import astropy.units as u
+import astropy.constants as constants
+# interpolations
 from scipy.interpolate import interp1d
 from numpy import interp
-import astropy.units as u
-
+# kltools
 import utils
 
-import ipdb
+### some constants
+_h = constants.h.to('erg s').value
+_c = constants.c.to('nm/s').value
+_c_kms = constants.c.to('km/s').value
+
+### Emission line table
+# NOTE: These are the emission line wavelengths
+# in a vacuum
+# NOTE: These use the MUSE convention, but we can map to these
+# for other experiments
+LINE_LAMBDAS = {
+    'O6_2': (1031.93, 1037.62) * u.Unit('Angstrom'),
+    'Lya': 1215.670 * u.Unit('Angstrom'),
+    'N5': (1238.821, 1242.804) * u.Unit('Angstrom'),
+    'C4': (1548.203, 1550.777) * u.Unit('Angstrom'),
+    'Mg2': 2796.290 * u.Unit('Angstrom'),
+    'O2': (3727.048, 3729.832) * u.Unit('Angstrom'),
+    'Ne3': 3870.115 * u.Unit('Angstrom'),
+    'Ne32': 3968.872 * u.Unit('Angstrom'),
+    'Hzet': 3890.109 * u.Unit('Angstrom'),
+    'Heps': 3971.154 * u.Unit('Angstrom'),
+    'Hd': 4102.852 * u.Unit('Angstrom'),
+    'Hg': 4341.647 * u.Unit('Angstrom'),
+    'O3_3': 4364.400 * u.Unit('Angstrom'),
+    'Hb': 4862.650 * u.Unit('Angstrom'),
+    'O3_1': 4960.263 * u.Unit('Angstrom'),
+    'O3_2': 5008.208 * u.Unit('Angstrom'),
+    'He1': 5877.217 * u.Unit('Angstrom'),
+    'O1': 6302.022 * u.Unit('Angstrom'),
+    'N2_1': 6549.825 * u.Unit('Angstrom'),
+    'Ha': 6564.589 * u.Unit('Angstrom'),
+    'N2_2': 6585.255 * u.Unit('Angstrom'),
+    'S2_1': 6718.271 * u.Unit('Angstrom'),
+    'S2_2': 6732.645 * u.Unit('Angstrom'),
+}
+
+### default sed parameters, as an example
+_default_sed_pars = {
+    # redshift
+    'z': 0.0,
+    ### **obs-frame** SED wavelength grid limits, nm
+    'lblue': 50,
+    'lred': 50000,
+    # spectral resolution at 1 micron, assuming dispersion per pixel
+    'resolution': 3000,
+    'thin': -1,
+    ### **rest-frame** continuum
+    'continuum_type': 'func', # func, template, spec?
+    'continuum_func': '10 - (wave-400)/400',
+    'restframe_temp': '../data/Simulation/GSB2.spec',
+    'temp_wave_type': 'Ang',
+    'temp_flux_type': 'flambda',
+    ### **obs-frame** continuum normalization, either
+    'cont_norm_method': 'flux', # flux or mag
+    # 1. normalized to specific flam (erg/s/cm2/nm) at specific wavelength (nm)
+    'obs_cont_norm_wave': 400,
+    'obs_cont_norm_flam': 0.0,
+    # 2. normalized to specific magnitude at specific band 
+    'obs_norm_band': "../data/Bandpass/HST/WFC3_IR_F105W.dat",
+    'obs_norm_mag': 17,
+    ### **obs-frame** emission line properties
+    # flux (erg/s/cm2), line width (nm), doublet flux share, systemic velocity (km/s)
+    # other emission line properties could include: CONT, EW, etc. See
+    # https://desidatamodel.readthedocs.io/en/latest/DESI_SPECTRO_REDUX/SPECPROD/tiles/GROUPTYPE/
+    #     TILEID/GROUPID/emline-SPECTROGRAPH-TILEID-GROUPID.html
+    # for reference.
+    'em_O2_flux': None,
+    'em_O2_sigma': (0.1, 0.1),
+    'em_O2_share': (0.3,0.7),
+    'em_O2_vsys': 30,
+    'em_Hb_flux': None,
+    'em_Hb_sigma': 0.4,
+    'em_O3_1_flux': None,
+    'em_O3_1_sigma': 0.5,
+    'em_O3_2_flux': None,
+    'em_O3_2_sigma': 0.5,
+    'em_Ha_flux': None,
+    'em_Ha_sigma': 0.5,
+}
+
 
 class EmissionLine(object):
     '''
@@ -128,33 +215,140 @@ class SED(object):
 
         return
 
+class ObsFrameSED(SED):
+    def __init__(self, sed_meta=None):
+        '''
+        Initialize SED class object with parameters dictionary
+        '''
+        self.pars = copy.deepcopy(_default_sed_pars)
+        super(ObsFrameSED, self).__init__(self.pars['lblue'], self.pars['lred'], 3000, 'nm')
+        self.blue_limit, self.red_limit = self.pars['lblue']*u.nm, self.pars['lred']*u.nm
+        if sed_meta is not None:
+            self.updatePars(self.pars, sed_meta)
+        #print(self.pars)
+        self.calculate_obsframe_sed(self.pars)
+        self.inventory = {
+            'total':     self.obs_frame_sed, 
+            'continuum': self.continuum, 
+            'emissions': self.emission,
+        }
 
-# NOTE: These are the emission line wavelengths
-# in a vacuum
-# NOTE: These use the MUSE convention, but we can map to these
-# for other experiments
-LINE_LAMBDAS = {
-    'O6_2': (1031.93, 1037.62) * u.Unit('Angstrom'),
-    'Lya': 1215.670 * u.Unit('Angstrom'),
-    'N5': (1238.821, 1242.804) * u.Unit('Angstrom'),
-    'C4': (1548.203, 1550.777) * u.Unit('Angstrom'),
-    'Mg2': 2796.290 * u.Unit('Angstrom'),
-    'O2': (3727.048, 3729.832) * u.Unit('Angstrom'),
-    'Ne3': 3870.115 * u.Unit('Angstrom'),
-    'Ne32': 3968.872 * u.Unit('Angstrom'),
-    'Hzet': 3890.109 * u.Unit('Angstrom'),
-    'Heps': 3971.154 * u.Unit('Angstrom'),
-    'Hd': 4102.852 * u.Unit('Angstrom'),
-    'Hg': 4341.647 * u.Unit('Angstrom'),
-    'O3_3': 4364.400 * u.Unit('Angstrom'),
-    'Hb': 4862.650 * u.Unit('Angstrom'),
-    'O3_1': 4960.263 * u.Unit('Angstrom'),
-    'O3_2': 5008.208 * u.Unit('Angstrom'),
-    'He1': 5877.217 * u.Unit('Angstrom'),
-    'O1': 6302.022 * u.Unit('Angstrom'),
-    'N2_1': 6549.825 * u.Unit('Angstrom'),
-    'Ha': 6564.589 * u.Unit('Angstrom'),
-    'N2_2': 6585.255 * u.Unit('Angstrom'),
-    'S2_1': 6718.271 * u.Unit('Angstrom'),
-    'S2_2': 6732.645 * u.Unit('Angstrom'),
-}
+    def __call__(self, wave, new_pars=None, component='total', flux_type='fphotons'):
+        if isinstance(wave, u.Quantity):
+            wave = wave.to(self.spectrum.wave_type).value
+            
+        # check SED recomputation
+        if (new_pars is not None) and self.updatePars(self.pars, new_pars):
+            self.calculate_obsframe_sed(self.pars)
+        
+        # check returned flux type
+        norm = {'fphotons': 1, '1': 1, 'flambda': (_h*_c)/wave, 'fnu': wave*_h}
+        if flux_type not in norm.keys():
+            raise ValueError(f'`flux_type` only supports ({norm.keys()})!')
+        
+        # check returned SED components
+        if component not in self.inventory.keys():
+            raise ValueError(f'`component` only supports ({self.inventory.keys()})!')
+        return self.inventory[component](wave)*norm[flux_type]
+            
+    
+    def calculate_obsframe_sed(self, pars):
+        self.continuum = self.addContinuum(pars)
+        self.emissions_list = self.addEmissionLines(pars)
+        self.emission = np.sum(self.emissions_list)
+        self.obs_frame_sed = self.continuum + self.emission
+        if pars['thin'] > 0:
+            self.obs_frame_sed = self.obs_frame_sed.thin(rel_err=pars['thin'])
+        
+    @classmethod
+    def updatePars(cls, old_pars, new_pars):
+        '''
+        Update parameters, return True is pars is updated.
+        '''
+        recompute = False
+        for key, val in new_pars.items():
+            if type(val) is dict:
+                recompute = recompute | updatePars(old_pars[key], new_pars[key])
+            else:
+                if (old_pars[key] != val):
+                    recompute = True
+                    old_pars[key] = val
+        return recompute
+    
+    @classmethod
+    def wrap_restframe_emline_string(cls, center, sigma, share, redshift):
+        eml_fmt = 'np.exp(-0.5*((wave-%le)/%le)**2)*%le/np.sqrt(2*np.pi*%le**2)'
+        _cen, _sig, _shr = np.atleast_1d(center), np.atleast_1d(sigma)/(1.+redshift), np.atleast_1d(share)
+        assert _cen.shape == _sig.shape == _shr.shape, 'center, sigma, share have inconsistent shape!'
+        eml_strings = ' + '.join([eml_fmt%(_c,_s,_f,_s) for _c,_s,_f in zip(_cen, _sig, _shr)])
+        return eml_strings
+            
+    @classmethod
+    def addEmissionLines(cls, pars):
+        # Gaussian emission line profile (no spectra resolution convolved)
+        emline_list, z = [], pars['z']
+        # loop through emission lines in the meta parameters
+        for emline,vacwave in LINE_LAMBDAS.items():
+            if pars.get(f'em_{emline}_flux', None) is not None:
+                # get obs-frame line width (nm), line flux (erg/s/cm2), and doublet share
+                zsys = pars.get(f'em_{emline}_vsys', 0.0)/_c_kms # redshift due to systemic velocity
+                wsys = vacwave.to('nm').value*(1.+zsys)
+                obs_sigma = pars[f'em_{emline}_sigma']/(1.+zsys)
+                obs_flux  = pars[f'em_{emline}_flux']
+                share = pars.get(f'em_{emline}_share', 1.0)
+                assert np.isclose(np.sum(share), 1.0), 'emission line share does not add up to 1!'
+                # the redshift argument only changes the wavelength, keeping flux density fixed
+                emlstr = cls.wrap_restframe_emline_string(wsys, obs_sigma, share, z)
+                emline_list.append(gs.SED(emlstr, wave_type='nm', flux_type='flambda', redshift=z)*obs_flux)
+        return emline_list
+    
+    @classmethod
+    def addContinuum(cls, pars):
+        # TODO: add support to other continuum methods: desi spectra
+        if pars['continuum_type'] == 'func':
+            cont = gs.SED(pars['continuum_func'], wave_type='nm', flux_type='flambda', redshift=pars['z'])
+        elif pars['continuum_type'] == 'temp':
+            template = pars['restframe_temp']
+            if not os.path.isfile(template):
+                raise OSError(f'Can not find template file {template}!')
+            cont = gs.SED(template, wave_type=pars['temp_wave_type'], flux_type=pars['temp_flux_type'],
+                         redshift=pars['z'])
+        else:
+            raise ValueError(f'Continuum type {pars["continuum_type"]} is not yet supported. '+\
+                             f'Only (func, temp) are supported now.')
+        # normalization: either specify flux at specific wavelength (do not require emission line)
+        # or specify band magnitude (need to subtract emission line flux)
+        if pars.get('cont_norm_method', 'flux') == 'flux':
+            # note that the normalizing flux density in `withFluxDensity` has units of phot/s/cm2/nm
+            # while `obs_cont_norm_flam` has units of erg/s/cm2/nm
+            return cont.withFluxDensity(pars['obs_cont_norm_flam']/(_h*_c/pars['obs_cont_norm_wave']), 
+                                        pars['obs_cont_norm_wave'])
+        elif pars.get('cont_norm_method', 'flux') == 'mag':
+            # TODO: compensate for emission line fluxes here
+            norm_band = gs.Bandpass(pars['obs_norm_band'], wave_type='nm').withZeropoint('AB')
+            return cont.withMagnitude(pars['obs_norm_mag'], norm_band)
+        else:
+            # do not normalize
+            warnings.warn(f'cont_norm_method is set to {pars["cont_norm_method"]} which is neither '+\
+                          f'flux nor mag. Skip continuum normalizing...')
+            return cont
+    
+    def calculateMagnitude(self, bandpass, zp='AB', component='total'):
+        bp = gs.Bandpass(bandpass, wave_type='nm').withZeropoint(zp)
+        return self.inventory[component].calculateMagnitude(bp)
+    
+    def calculateFlux(self, bandpass, zp='AB', component='total'):
+        bp = gs.Bandpass(bandpass, wave_type='nm').withZeropoint(zp)
+        return self.inventory[component].calculateFlux(bp)
+
+    def calculateEW(self, emline, frame='obs'):
+        z = self.pars['z']
+        if self.pars.get(f'em_{emline}_flux', None) is not None:
+            S = self.pars[f'em_{emline}_flux']
+            zsys = self.pars.get(f'em_{emline}_vsys', 0.0)/_c_kms
+            wcen = np.atleast_1d(LINE_LAMBDAS[emline].to('nm').value*(1.+z)*(1+zsys)).mean()
+            C = self.__call__(wcen, component='continuum', flux_type='flambda')
+            return S/C if frame=='obs' else (S/C)/((1.+z)*(1+zsys))
+        else:
+            print(f'Emission line {emline} not detected in the SED!')
+            return np.nan

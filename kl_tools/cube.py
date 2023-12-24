@@ -1186,7 +1186,7 @@ class FiberModelCube(DataVector):
         if not self.pars.is_dispersed:
             if self.pars['run_options']['run_mode'] == 'ETC':
                 # theory_cube, gal, and sed, in this case, are physical units
-                gal_chro = gal * sed.spectrum
+                gal_chro = gal * sed.obs_frame_sed
                 psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
                 gal = gal_chro if psf is None else galsim.Convolve([gal_chro, psf])
                 img = gal.drawImage(

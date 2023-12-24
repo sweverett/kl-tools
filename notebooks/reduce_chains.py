@@ -4,6 +4,7 @@ import galsim as gs
 from galsim.angle import Angle, radians, degrees
 import sys
 import os
+from pathlib import Path
 from copy import deepcopy
 import astropy.io.fits as fits
 from astropy.units import Unit
@@ -24,10 +25,10 @@ import priors
 import utils
 from likelihood import LogPosterior, FiberLikelihood, get_Cube
 from datavector import DataVector, FiberDataVector
+import emission
 from emission import LINE_LAMBDAS
 
 parser = ArgumentParser()
-# parser.add_argument('hit', type=int, help='Which chain to analyze')
 parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
 parser.add_argument('-Iflux', type=int, default=0,help='Flux bin index')
@@ -37,7 +38,7 @@ parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
 args = parser.parse_args()
 
 flux_bin = args.Iflux
-flux_scaling = 1.58489**flux_bin
+flux_scaling = 1.2**flux_bin
 sini = args.sini*0.1 + 0.05
 hlr = 0.5+0.5*args.hlr 
 fiberconf = args.fiberconf
@@ -89,8 +90,8 @@ default_meta = {
     'sini': 'sampled',
     ### oriors
     'priors': {
-        'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-        'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
+        'g1': priors.UniformPrior(-0.5, 0.5),
+        'g2': priors.UniformPrior(-0.5, 0.5),
         'theta_int': priors.UniformPrior(-np.pi, np.pi),
         'sini': priors.UniformPrior(0, 1.),
         'v0': priors.GaussPrior(0, 10),
@@ -133,27 +134,46 @@ default_meta = {
     },
     ### SED model
     'sed':{
-        'template': '../data/Simulation/GSB2.spec',
-        'wave_type': 'Ang',
-        'flux_type': 'flambda',
-        'z': 0.3,
-        'wave_range': [500., 3000.], # nm
-        # obs-frame continuum normalization (nm, erg/s/cm2/nm)
-        'obs_cont_norm': [850, 2.6e-15*flux_scaling],
-        # a dict of line names and obs-frame flux values (erg/s/cm2)
-        'lines':{
-            'Ha': 1.25e-15*flux_scaling,
-            'O2': [1.0e-14*flux_scaling, 1.2e-14*flux_scaling],
-            'O3_1': 1.0e-14*flux_scaling,
-            'O3_2': 1.2e-14*flux_scaling,
-        },
-        # intrinsic linewidth in nm
-        'line_sigma_int':{
-            'Ha': 0.05,
-            'O2': [0.2, 0.2],
-            'O3_1': 0.2,
-            'O3_2': 0.2,
-        },
+            'z': 0.3,
+            'continuum_type': 'temp',
+            'restframe_temp': '../data/Simulation/GSB2.spec',
+            'temp_wave_type': 'Ang',
+            'temp_flux_type': 'flambda',
+            'cont_norm_method': 'flux',
+            'obs_cont_norm_wave': 850,
+            'obs_cont_norm_flam': 3.0e-17*flux_scaling,
+            'em_Ha_flux': 1.2e-16*flux_scaling,
+            'em_Ha_sigma': 0.26,
+            'em_O2_flux': 8.8e-17*flux_scaling*1,
+            'em_O2_sigma': (0.13, 0.13),
+            'em_O2_share': (0.45, 0.55),
+            'em_O3_1_flux': 2.4e-17*flux_scaling*1,
+            'em_O3_1_sigma': 0.13,
+            'em_O3_2_flux': 2.8e-17*flux_scaling*1,
+            'em_O3_2_sigma': 0.13,
+            'em_Hb_flux': 1.2e-17*flux_scaling,
+            'em_Hb_sigma': 0.26,
+#        'template': '../data/Simulation/GSB2.spec',
+#        'wave_type': 'Ang',
+#        'flux_type': 'flambda',
+#        'z': 0.3,
+#        'wave_range': [500., 3000.], # nm
+#        # obs-frame continuum normalization (nm, erg/s/cm2/nm)
+#        'obs_cont_norm': [850, 2.6e-15*flux_scaling],
+#        # a dict of line names and obs-frame flux values (erg/s/cm2)
+#        'lines':{
+#            'Ha': 1.25e-15*flux_scaling,
+#            'O2': [1.0e-14*flux_scaling, 1.2e-14*flux_scaling],
+#            'O3_1': 1.0e-14*flux_scaling,
+#            'O3_2': 1.2e-14*flux_scaling,
+#        },
+#        # intrinsic linewidth in nm
+#        'line_sigma_int':{
+#            'Ha': 0.05,
+#            'O2': [0.2, 0.2],
+#            'O3_1': 0.2,
+#            'O3_2': 0.2,
+#        },
     },
 }
 
@@ -184,13 +204,21 @@ param_limit = [
 #DATA_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/bgs_like_array_tnom600/"
 DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
 FIG_DIR = os.path.join(DATA_DIR, "figs")
+SUM_DIR = os.path.join(DATA_DIR, "summary_stats")
+Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+Path(FIG_DIR).mkdir(parents=True, exist_ok=True)
+Path(SUM_DIR).mkdir(parents=True, exist_ok=True)
+Path(os.path.join(FIG_DIR, "image")).mkdir(parents=True, exist_ok=True)
+Path(os.path.join(FIG_DIR, "spectra")).mkdir(parents=True, exist_ok=True)
+Path(os.path.join(FIG_DIR, "trace")).mkdir(parents=True, exist_ok=True)
+Path(os.path.join(FIG_DIR, "posterior")).mkdir(parents=True, exist_ok=True)
 
 sampler_fn = os.path.join(DATA_DIR, 
-    "sampler_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
+    "sampler/%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
 ### Data vector used in the code
 datafile = os.path.join(DATA_DIR, 
-    "dv_%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
-postfix = "sim_%d_sini%.2f_hlr%.2f_fiberconf%d.png"%(flux_bin, sini, hlr, fiberconf)
+    "dv/%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
+postfix = "sim_%d_sini%.2f_hlr%.2f_fiberconf%d"%(flux_bin, sini, hlr, fiberconf)
 
 Nparams = len(sampled_pars)
 
@@ -224,7 +252,7 @@ for i in range(Nparams):
 for j in range(2*Nparams):
     axes[Nparams].semilogy(-blobs[:,j,1])
 axes[Nparams].set(ylim=[0.5,1e8])
-plt.savefig(os.path.join(FIG_DIR,"trace/"+postfix))
+plt.savefig(os.path.join(FIG_DIR,"trace/"+postfix+".png"))
 plt.close(fig)
 
 ### 2. triangle plot
@@ -237,7 +265,7 @@ g.triangle_plot([samples,], filled=True,
                 #param_limits={k:v for k,v in zip(param_names, param_limit)}
                 title_limit = 1,
                )
-g.export(os.path.join(FIG_DIR,"posterior/"+postfix))
+g.export(os.path.join(FIG_DIR,"posterior/"+postfix+".png"))
 
 ### 3. shape noise
 ### ============== 
@@ -253,6 +281,8 @@ sampled_pars_bestfit = chains_flat[np.argmax(np.sum(blobs_flat, axis=1)), :]
 sampled_pars_bestfit_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_bestfit)}
 meta_pars = deepcopy(default_meta)
 
+obsSED = emission.ObsFrameSED(meta_pars['sed'])
+rmag = obsSED.calculateMagnitude("../data/Bandpass/CTIO/DECam.r.dat")
 pars = Pars(sampled_pars, meta_pars)
 log_posterior = LogPosterior(pars, dv, likelihood='fiber')
 loglike = log_posterior.log_likelihood
@@ -278,7 +308,7 @@ for i in range(Nspec):
     ax.text(0.05, 0.9, '(%.1f", %.1f")'%(fiberpos[0], fiberpos[1]), transform=ax.transAxes)
 axes[0].legend(frameon=False)
 axes[0].set(ylabel='ADU')
-plt.savefig(os.path.join(FIG_DIR, "spectra/"+postfix))
+plt.savefig(os.path.join(FIG_DIR, "spectra/"+postfix+".png"))
 plt.close(fig)
 
 ### 6. broad-band image
@@ -315,21 +345,21 @@ for i in range(Nspec):
     axes[0].add_patch(circ)
     axes[0].text(dx, dy, "+", ha='center', va='center', color='red')
 
-plt.savefig(os.path.join(FIG_DIR,"image/"+postfix))
+plt.savefig(os.path.join(FIG_DIR,"image/"+postfix+".png"))
 plt.close(fig)
 
 ### 7. save summary stats
 ### =====================
-with open(os.path.join(FIG_DIR,"summary_stats/"+postfix[:-3]+"dat"), "w") as fp:
-    res1 = "%d %.2f %.2f %d %le %le"%(flux_bin, sini, hlr, fiberconf, sigma_e_rms, SNR_best)
+with open(os.path.join(SUM_DIR,postfix+".dat"), "w") as fp:
+    res1 = "%d %f %.2f %.2f %d %le %le"%(flux_bin, rmag, sini, hlr, fiberconf, sigma_e_rms, SNR_best)
     pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
     pars_errs = [marge_stat.parWithName(key).err for key in sampled_pars]
     res2 = ' '.join("%le"%bias for bias in pars_bias)
     res3 = ' '.join("%le"%err for err in pars_errs)
     fp.write(' '.join([res1, res2, res3])+'\n')
 if (args.Iflux==0) and (args.sini==0) and (args.hlr==0) and (args.fiberconf==0):
-    with open(os.path.join(FIG_DIR,"summary_stats/colnames.dat"), "w") as fp:
-        hdr1 = "# flux_bin sini hlr fiberconf sn_rms snr_best"
+    with open(os.path.join(SUM_DIR,"colnames.dat"), "w") as fp:
+        hdr1 = "# flux_bin rmag sini hlr fiberconf sn_rms snr_best"
         hdr2 = ' '.join("%s_bias"%key for key in sampled_pars)
         hdr3 = ' '.join("%s_std"%key for key in sampled_pars)
         fp.write(' '.join([hdr1, hdr2, hdr3])+'\n')

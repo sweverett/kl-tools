@@ -35,12 +35,34 @@ from datavector import FiberDataVector
 
 import ipdb
 
+parser = ArgumentParser()
+parser.add_argument('nsteps', type=int,
+                    help='Number of mcmc iterations per walker')
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
+                    default='emcee',
+                    help='Which sampler to use for mcmc')
+parser.add_argument('-run_name', type=str, default='',
+                    help='Name of mcmc run')
+parser.add_argument('-Iflux', type=int, default=0,help='Flux bin index')
+parser.add_argument('-sini', type=int, default=0, help='sin(i) bin index')
+parser.add_argument('-hlr', type=int, default=1.5, help='image hlr bin index')
+parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
+parser.add_argument('-EXPTIME', type=int, default=600, help='Exposure time in s')
+parser.add_argument('--show', action='store_true', default=False,
+                    help='Set to show test plots')
+group = parser.add_mutually_exclusive_group()
+group.add_argument('--mpi', dest='mpi', default=False, action='store_true',
+                   help='Run with MPI.')
+group.add_argument('-ncores', default=1, type=int,
+                    help='Number of processes (uses `multiprocessing` sequencial pool).')
+args = parser.parse_args()
+
 fiber_blur = 3.4 # pixels
 atm_psf_fwhm = 1.0 # arcsec
 fiber_rad = 0.75 # arcsec
 fiber_offset_x = 1.5 # arcsec
 fiber_offset_y = 1.5 # arcsec
-exptime_nominal = 900 # seconds
+exptime_nominal = args.EXPTIME # seconds
 ADD_NOISE = False
 
 default_obs_conf = [
@@ -221,27 +243,7 @@ def choose_fiber_conf(case):
         exit(-1)
     return obs_conf
 
-parser = ArgumentParser()
 
-parser.add_argument('nsteps', type=int,
-                    help='Number of mcmc iterations per walker')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
-                    default='emcee',
-                    help='Which sampler to use for mcmc')
-parser.add_argument('-run_name', type=str, default='',
-                    help='Name of mcmc run')
-parser.add_argument('-Iflux', type=int, default=0,help='Flux bin index')
-parser.add_argument('-sini', type=int, default=0, help='sin(i) bin index')
-parser.add_argument('-hlr', type=int, default=1.5, help='image hlr bin index')
-parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
-parser.add_argument('--show', action='store_true', default=False,
-                    help='Set to show test plots')
-
-group = parser.add_mutually_exclusive_group()
-group.add_argument('--mpi', dest='mpi', default=False, action='store_true',
-                   help='Run with MPI.')
-group.add_argument('-ncores', default=1, type=int,
-                    help='Number of processes (uses `multiprocessing` sequencial pool).')
 
 def main(args, pool):
 
@@ -255,7 +257,8 @@ def main(args, pool):
     show = args.show
 
     flux_scaling_power = args.Iflux
-    flux_scaling = 1.58489**flux_scaling_power
+    #flux_scaling = 1.58489**flux_scaling_power
+    flux_scaling = 1.2**flux_scaling_power
     sini = 0.05 + 0.1*args.sini
     assert (0<sini<1)
     hlr = 0.5 + 0.5*args.hlr 
@@ -285,15 +288,15 @@ def main(args, pool):
         'sini': 'sampled',
         ### priors
         'priors': {
-            'g1': priors.UniformPrior(-0.2, 0.2),
-            'g2': priors.UniformPrior(-0.2, 0.2),
+            'g1': priors.UniformPrior(-0.5, 0.5),
+            'g2': priors.UniformPrior(-0.5, 0.5),
             'theta_int': priors.UniformPrior(-np.pi, np.pi),
             'sini': priors.UniformPrior(0, 1.),
             'v0': priors.GaussPrior(0, 10),
             #'vcirc': priors.UniformPrior(10, 800),
             'vcirc': priors.GaussPrior(300, 80, clip_sigmas=3),
-            'rscale': priors.UniformPrior(0, 5),
-            'hlr': priors.UniformPrior(0, 5),
+            'rscale': priors.UniformPrior(0.1, 5),
+            'hlr': priors.UniformPrior(0.1, 5),
         },
         ### velocity model
         'velocity': {
@@ -338,8 +341,8 @@ def main(args, pool):
             'temp_flux_type': 'flambda',
             'cont_norm_method': 'flux',
             'obs_cont_norm_wave': 850,
-            'obs_cont_norm_flam': 4.0e-17*flux_scaling,
-            'em_Ha_flux': 1.2e-16flux_scaling,
+            'obs_cont_norm_flam': 3.0e-17*flux_scaling,
+            'em_Ha_flux': 1.2e-16*flux_scaling,
             'em_Ha_sigma': 0.26,
             'em_O2_flux': 8.8e-17*flux_scaling*1,
             'em_O2_sigma': (0.13, 0.13),
@@ -377,9 +380,9 @@ def main(args, pool):
     }
     pars = Pars(sampled_pars, meta_pars)
 
-    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
-    #cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
-
+    #cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+    cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
+    outdir = os.path.join(cube_dir, run_name)
     ### Loading data vector 
     #datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/simufiber_3.fits"
     #dv = FiberDataVector(file=datafile)
@@ -471,6 +474,12 @@ def main(args, pool):
                 sys.exit(0)
             else:
                 print("[%d/%d] go"%(rank, size))
+                if not os.path.exists(outdir):
+                    utils.make_dir(outdir)
+                if not os.path.exists(os.path.join(outdir, "dv")):
+                    utils.make_dir(os.path.join(outdir, "dv"))
+                if not os.path.exists(os.path.join(outdir, "sampler")):
+                    utils.make_dir(os.path.join(outdir, "sampler"))
         print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
         MCMCsampler = emcee.EnsembleSampler(
             nwalkers, ndims, log_posterior,
@@ -481,14 +490,12 @@ def main(args, pool):
         
         MCMCsampler.run_mcmc(p0, nsteps, progress=True)
 
-        outdir = os.path.join(cube_dir, run_name)
-        utils.make_dir(outdir)
         outfile = os.path.join(outdir, 
-            'sampler_%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
+            'sampler/%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
         print(f'Pickling sampler to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(MCMCsampler, f)
-    outfile = os.path.join(outdir, 'dv_%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
+    outfile = os.path.join(outdir, 'dv/%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
     print(f'Saving data vector to {outfile}')
     dv = get_GlobalDataVector(0)
     dv.to_fits(outfile, overwrite=True)
@@ -572,7 +579,6 @@ def _callback_():
     print("Worker exit!!!!!")
 
 if __name__ == '__main__':
-    args = parser.parse_args()
     
     rc = main(args, None)
 

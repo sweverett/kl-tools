@@ -143,7 +143,7 @@ default_meta = {
             'obs_cont_norm_wave': 850,
             'obs_cont_norm_flam': 3.0e-17*flux_scaling,
             'em_Ha_flux': 1.2e-16*flux_scaling,
-            'em_Ha_sigma': 0.26,
+            'em_Ha_sigma': 0.26/4,
             'em_O2_flux': 8.8e-17*flux_scaling*1,
             'em_O2_sigma': (0.13, 0.13),
             'em_O2_share': (0.45, 0.55),

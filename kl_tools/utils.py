@@ -1,5 +1,6 @@
 import numpy as np
 import os, sys
+from pathlib import Path
 import yaml
 import matplotlib.colors as colors
 import pdb
@@ -140,8 +141,9 @@ def make_dir(d):
     Makes dir if it does not already exist
     '''
 
-    if not os.path.exists(d):
-        os.mkdir(d)
+    # if not os.path.exists(d):
+    #     os.mkdir(d)
+    Path(d).mkdir(parents=True, exist_ok=True)
 
     return
 

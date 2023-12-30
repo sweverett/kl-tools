@@ -26,169 +26,6 @@ parser.add_argument('--show', action='store_true', default=False,
 parser.add_argument('--test', action='store_true', default=False,
                     help='Set to run tests')
 
-class CubePars(parameters.MetaPars):
-    '''
-    Class that defines structure for DataCube meta parameters,
-    e.g. image & emission line meta data
-    '''
-
-    _req_fields = ['pix_scale', 'bandpasses']
-    _opt_fields = ['psf', 'emission_lines', 'files', 'shape', 'meta', 'truth']
-    _gen_fields = ['wavelengths'] # not an allowed input field, but generated
-
-    def __init__(self, pars):
-        '''
-        pars: dict
-            Dictionary of meta pars for the DataCube
-        '''
-
-        super(CubePars, self).__init__(pars)
-
-        self._bandpasses = None
-        bp = self.pars['bandpasses']
-        try:
-            utils.check_type(bp, 'bandpasses', list)
-        except TypeError:
-            try:
-                utils.check_type(bp, 'bandpasses', dict)
-            except:
-                raise TypeError('CubePars bandpass field must be a' +\
-                                'list of galsim bandpasses or a dict!')
-
-        self.build_bandpasses()
-
-        self._lambdas = None
-        self._lambda_unit = None
-        self.build_wavelength_list()
-
-        return
-
-    def build_bandpasses(self, remake=False):
-        '''
-        Build a bandpass list from pars if not provided directly
-        '''
-
-        # sometimes it is already set in the parameter dict
-        if (remake is False) & (self._bandpasses is not None):
-            return
-
-        bp = self.pars['bandpasses']
-
-        if isinstance(bp, list):
-            # we'll be lazy and just check the first entry
-            if not isinstance(bp[0], galsim.Bandpass):
-                raise TypeError('bandpass list must be filled with ' +\
-                                'galsim.Bandpass objects!')
-            bandpasses = bp
-        else:
-            # make this a separate dict
-            bp_dict = deepcopy(bp)
-
-            # already checked it is a list or dict
-            bandpass_req = ['lambda_blue', 'lambda_red', 'dlambda']
-            bandpass_opt = ['throughput', 'zp', 'unit', 'file']
-            utils.check_fields(bp_dict, bandpass_req, bandpass_opt)
-
-            args = [
-                bp_dict.pop('lambda_blue'),
-                bp_dict.pop('lambda_red'),
-                bp_dict.pop('dlambda')
-                ]
-
-            kwargs = bp_dict
-
-            bandpasses = setup_simple_bandpasses(*args, **kwargs)
-
-        self._bandpasses = bandpasses
-        self['bandpasses'] = bandpasses
-
-        return
-
-    def build_wavelength_list(self):
-        '''
-        Build a list of slice wavelength bounds (lambda_blue, lambda_red)
-        given a set bandpass list
-        '''
-
-        if self._bandpasses is None:
-            self.build_bandpasses()
-
-        # Not necessarily needed, but could help ease of access
-        self._lambda_unit = u.Unit(self._bandpasses[0].wave_type)
-        self._lambdas = [] # Tuples of bandpass bounds in unit of bandpass
-        for bp in self._bandpasses:
-            # galsim bandpass limits are always stored in nm
-            li = (bp.blue_limit * u.nm).to(self._lambda_unit).value
-            le = (bp.red_limit * u.nm).to(self._lambda_unit).value
-            self._lambdas.append((li, le))
-
-            # Make sure units are consistent
-            # (could generalize, but not necessary)
-            assert bp.wave_type == self._lambda_unit
-        self._lambdas = np.array(self._lambdas)
-
-        self['wavelengths'] = self._lambdas
-
-        return
-
-    def reset(self):
-        '''
-        Reset any attributes or fields that were set during instantiation,
-        not as a direct field input. Useful for datacube truncations
-        '''
-
-        self._bandpasses = None
-        self._lambdas = None
-        self._lambda_unit = None
-
-        # remove any generated fields
-        for field in self._gen_fields:
-            del self[field]
-
-        self.__init__(self.pars)
-
-        return
-
-    def set_shape(self, shape):
-        '''
-        Store the datacube shape in CubePars
-
-        shape: (Nspec, Nx, Ny) tuple
-        '''
-
-        if len(shape) != 3:
-            raise ValueError('shape must be a tuple of len 3!')
-
-        # this will build a lambda list from the bandpasses, if not yet created
-        lambdas = self.lambdas
-
-        if shape[0] != len(lambdas):
-            raise ValueError('The first dimension of shape must be the ' +\
-                             'length as the bandpass & wavelength list!')
-
-        self['shape'] = shape
-
-        return
-
-    @property
-    def bandpasses(self):
-        if self._bandpasses is None:
-            self.build_bandpasses()
-
-        return self._bandpasses
-
-    @property
-    def lambdas(self):
-        if self._lambdas is None:
-            self.build_wavelength_list()
-
-        return self._lambdas
-
-    def copy(self):
-        return self.__copy__()
-
-    def __copy__(self):
-        return CubePars(deepcopy(self.pars))
 
 class DataCube(DataVector):
     '''
@@ -238,20 +75,20 @@ class DataCube(DataVector):
                 'pix_scale': pix_scale,
                 'bandpasses': bandpasses
             }
-            pars = CubePars(pars_dict)
+            pars = parameters.CubePars(pars_dict)
         else:
             if (pix_scale is not None) or (bandpasses is not None):
                 raise Exception('Cannot pass pix_scale or bandpasses if ' +\
                                 'pars is set!')
             try:
-                utils.check_type(pars, 'pars', CubePars)
+                utils.check_type(pars, 'pars', parameters.CubePars)
             except TypeError:
                 try:
                     utils.check_type(pars, 'pars', dict)
                 except:
                     raise TypeError('pars must be either CubePars ' +\
                                     'or a dict!')
-                pars = CubePars(pars)
+                pars = parameters.CubePars(pars)
 
         self.pars = pars
         self.pix_scale = pars['pix_scale']
@@ -918,188 +755,18 @@ class Slice(object):
 
         return
 
-def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
-                            throughput=1., zp=30., unit='nm', file=None):
-    '''
-    Setup list of bandpasses needed to instantiate a DataCube
-    given the simple case of constant spectral resolution, throughput,
-    and image zeropoints for all slices
-
-    Useful for quick setup of tests and simulated datavectors
-
-    lambda_blue: float
-        Blue-end of datacube wavelength range
-    lambda_red: float
-        Rd-end of datacube wavelength range
-    dlambda: float
-        Constant wavelength range per slice
-    throughput: float
-        Throughput of filter of data slices
-    unit: str
-        The wavelength unit
-    zeropoint: float
-        Image zeropoint for all data slices
-    '''
-
-    li, lf = lambda_blue, lambda_red
-    lambdas = [(l, l+dlambda) for l in np.arange(li, lf, dlambda)]
-
-    bandpasses = []
-    if file is None:
-        for l1, l2 in lambdas:
-            bandpasses.append(galsim.Bandpass(
-                throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-                ))
-    else:
-        # build bandpass from file
-        assert os.path.exists(file), f'Bandpass file {file} does not exist!'
-        _bandpass = galsim.Bandpass(file, wave_type = unit)
-        for l1, l2 in lambdas:
-            bandpasses.append(_bandpass.truncate(blue_limit=l1, red_limit=l2))
-
-    return bandpasses
-
-class FiberPars(CubePars):
-
-    # update the required/optional/generated fields
-    _req_fields = ['model_dimension', 'sed', 'intensity', 'velocity', 'priors']
-    _opt_fields = ['obs_conf',]
-    _gen_fields = ['shape', 'pix_scale', 'bandpasses']
-
-    def __init__(self, pars, obs_conf=None):
-        ''' Fiber-related `Pars` obj
-        Each `FiberPars` store the necessary parameters for one observation.
-
-        Inputs:
-        =======
-        pars: dict obj
-            Dictionary of meta pars for `FiberCube`. Note that this dict has
-            different convention than the parent class `cube.CubePars`. The 
-            initialization step will translate the dictionary.
-
-            An example structure of pars dict:
-            <required fields>
-            - model_dimension
-                - Nx
-                - Ny
-                - scale
-                - lambda_range
-                - lambda_res
-                - lambda_unit
-            - sed
-                - template
-                - wave_type
-                - flux_type
-                - z
-                - spectral_range
-                - obs_cont_norm
-                - lines
-                - line_sigma_int
-            - intensity
-                - type
-                - flux
-                - hlr
-            - velocity
-                - model
-                - v0
-                - vcirc
-                - rscale
-            - priors
-            <optional fields>
-            - obs_conf
-                See grism.GrismDataVector.data_header
-            <generated fields>
-            - shape
-            - pix_scale
-            - bandpasses
-                - lambda_blue
-                - lambda_red
-                - dlambda
-                - throughput
-                - zp
-                - unit
-                - file
-        '''
-        # assure the input dictionary obj has required fields & obs config
-        self._check_pars(pars)
-        _pars = deepcopy(pars) # avoid shallow-copy of a dict object
-        if obs_conf is None and _pars.get('obs_conf', None) is None:
-            raise ValueError('Observation configuration is not set!')
-        if obs_conf is not None:
-            print(f'FiberPars: Overwrite the observation configuration')
-            utils.check_type(obs_conf, 'obs_conf', dict)
-            _pars['obs_conf'] = deepcopy(obs_conf)
-        self.is_dispersed = (_pars['obs_conf']['OBSTYPE'] == 1)
-
-        # set up bandpass, model cube shape, and model cube pixel scale
-        _from_file_ = (_pars['obs_conf'].get('BANDPASS', None) is not None)
-        if self.is_dispersed or (_from_file_==False):
-            # focus on a narrow wavelength range
-            _lrange = _pars['model_dimension']['lambda_range']
-            _lblue, _lred = _lrange[0], _lrange[1]
-            _dlam = _pars['model_dimension']['lambda_res']
-            _Nlam = np.ceil( (_lred-_lblue)/_dlam ).astype(int)
-        else:
-            # need the full bandpass wavelength range to include all flux
-            _bp_file_ = np.genfromtxt(_pars['obs_conf'].get('BANDPASS'))
-            _lblue, _lred = _bp_file_[2,0], _bp_file_[-3,0]
-            _Nlam = _bp_file_.shape[0]
-            _dlam = (_lred-_lblue)/_Nlam
-
-        _pars['shape'] = np.array([_Nlam, 
-                         _pars['model_dimension']['Ny'], 
-                         _pars['model_dimension']['Nx']], dtype=int)
-        _pars['pix_scale'] = _pars['model_dimension']['scale']
-        _pars['bandpasses'] = {
-            'lambda_blue': _lblue, 'lambda_red': _lred,'dlambda': _dlam,
-                'unit': _pars['model_dimension']['lambda_unit'],
-        }
-        if _from_file_:
-            _pars['bandpasses']['file'] = _pars['obs_conf']['BANDPASS']
-        else:
-            _pars['bandpasses']['throughput'] = 1.0
-        super(FiberPars, self).__init__(_pars)
-        self.concatenated_bandpass = merge_bandpasses(self.bandpasses)
-        self._bp_array = np.zeros(self.lambdas.shape)
-        for i,_bp in enumerate(self.bandpasses):
-            self._bp_array[i][0] = _bp(self.lambdas[i][0])
-            self._bp_array[i][1] = _bp(self.lambdas[i][1])
-        self.lambda_eff = np.sum(self.lambdas[:,0]*self.bp_array[:,0])/np.sum(self.bp_array[:,0])
-        # update the obs_conf with the theoretical model cube parameters
-        self.obs_index = _pars['obs_conf']['OBSINDEX']
-        self.pars['obs_conf']['MDNAXIS1'] = _pars['shape'][2]# Nx
-        self.pars['obs_conf']['MDNAXIS2'] = _pars['shape'][1]# Ny
-        self.pars['obs_conf']['MDNAXIS3'] = _pars['shape'][0]# Nlam
-        self.pars['obs_conf']['MDSCALE'] = _pars['pix_scale']
-
-        return
-
-    # quick approach to the `obs_conf` observation configuration (1 obs) 
-    @property
-    def conf(self):
-        return self.pars['obs_conf']
-
-    # get the Nx2 band-pass array, which has the same dimension to `lambdas`
-    @property
-    def bp_array(self):
-        # self._bp_array = np.zeros(self.lambdas.shape)
-        # for i,_bp in enumerate(self.bandpasses):
-        #     self._bp_array[i][0] = _bp(self.lambdas[i][0])
-        #     self._bp_array[i][1] = _bp(self.lambdas[i][1])
-        return self._bp_array
-
 class FiberModelCube(DataVector):
     ''' The most updated `FiberModelCube` implementation
     This class wraps the theoretical cube after it is generated to produce 
     simulated images.
     '''
-    def __init__(self, Fpars):
+    def __init__(self, meta_pars, obs_conf=None):
         ''' Store the `FiberPars` object
         '''
-        self.pars = Fpars
+        self.Fpars = parameters.FiberPars(meta_pars, obs_conf=obs_conf)
         # calculate the atmospheric PSF convolved fiber mask, if PSF model is
         # not sampled.
-        if self.pars.is_dispersed:
+        if self.Fpars.is_dispersed:
             self.ATMPSF_conv_fiber_mask = self.get_PSF_convolved_fiber_mask()
             self.resolution_mat = self.get_resolution_matrix()
         else:
@@ -1109,22 +776,24 @@ class FiberModelCube(DataVector):
         
     @property
     def bp_array(self):
-        return self.pars.bp_array
+        return self.Fpars.bp_array
     @property
     def conf(self):
-        return self.pars.conf
+        return self.Fpars.conf
     @property
     def lambdas(self): # (Nlam, 2)
-        return self.pars.lambdas
-
+        return self.Fpars.lambdas
+    @property
+    def wave(self):
+        return self.Fpars.wave 
     @property
     def lambda_eff(self):
-        return self.pars.lambda_eff
+        return self.Fpars.lambda_eff
 
     def get_fiber_mask(self):
-        mNx, mNy = self.pars['shape'][2], self.pars['shape'][1]
-        mscale = self.pars['pix_scale']
-        if self.pars.is_dispersed:
+        mNx, mNy = self.Fpars['shape'][2], self.Fpars['shape'][1]
+        mscale = self.Fpars['pix_scale']
+        if self.Fpars.is_dispersed:
             fiber_cen = [self.conf['FIBERDX'], self.conf['FIBERDY']] # dx, dy in arcsec
             fiber_rad = self.conf['FIBERRAD'] # radius in arcsec
             xmin, xmax = -mNx/2*mscale, mNx/2*mscale
@@ -1137,7 +806,7 @@ class FiberModelCube(DataVector):
         return mask
 
     def get_fiber_1D_psf_kernel(self):
-        if self.pars.is_dispersed:
+        if self.Fpars.is_dispersed:
             diameter_in_pixel = self.conf['FIBRBLUR']
             sigma = diameter_in_pixel / 4.
             x_in_pixel = np.arange(-5, 6)
@@ -1147,19 +816,19 @@ class FiberModelCube(DataVector):
             kernel = None
         return kernel
     def get_resolution_matrix(self):
-        if self.pars.is_dispersed:
+        if self.Fpars.is_dispersed:
             diameter_in_pixel = self.conf['FIBRBLUR']
             sigma = diameter_in_pixel / 4.
             x_in_pixel = np.arange(-5, 6)
             # assume Gaussian for now
             kernel = np.exp(-0.5*(x_in_pixel/sigma)**2)/((2*np.pi)**0.5*sigma)
             # get the resolution matrix (sparse matrix)
-            band = np.array([kernel]).repeat(self.pars['shape'][0], axis=0).T
+            band = np.array([kernel]).repeat(self.Fpars['shape'][0], axis=0).T
             offset=np.arange(kernel.shape[0]//2, -(kernel.shape[0]//2)-1, -1)
             #print(band.shape, offset)
             #plt.imshow(band)
             Rmat = dia_matrix((band, offset), 
-                shape=(self.pars['shape'][0], self.pars['shape'][0]))
+                shape=(self.Fpars['shape'][0], self.Fpars['shape'][0]))
         else:
             Rmat = None
         return Rmat
@@ -1167,8 +836,8 @@ class FiberModelCube(DataVector):
     def get_PSF_convolved_fiber_mask(self):
         ''' get atm-PSF convolved fiber mask
         '''
-        mNx, mNy = self.pars['shape'][2], self.pars['shape'][1]
-        mscale = self.pars['pix_scale']
+        mNx, mNy = self.Fpars['shape'][2], self.Fpars['shape'][1]
+        mscale = self.Fpars['pix_scale']
         psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
         mask = galsim.InterpolatedImage(
             galsim.Image(array=self.get_fiber_mask()), 
@@ -1183,19 +852,19 @@ class FiberModelCube(DataVector):
         ''' Simulate observed image
         '''
         # if photometry image
-        if not self.pars.is_dispersed:
-            if self.pars['run_options']['run_mode'] == 'ETC':
+        if not self.Fpars.is_dispersed:
+            if self.Fpars['run_options']['run_mode'] == 'ETC':
                 # theory_cube, gal, and sed, in this case, are physical units
                 gal_chro = gal * sed.obs_frame_sed
                 psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
                 gal = gal_chro if psf is None else galsim.Convolve([gal_chro, psf])
                 img = gal.drawImage(
-                    bandpass = self.pars.concatenated_bandpass, 
+                    bandpass = self.Fpars.throughput, 
                     nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
                     scale=self.conf['PIXSCALE'], method='auto', 
                     area=np.pi*(self.conf['DIAMETER']/2.)**2,
                     exptime=self.conf['EXPTIME'],gain=self.conf['GAIN'])
-            elif self.pars['run_options']['run_mode'] == 'SNR':
+            elif self.Fpars['run_options']['run_mode'] == 'SNR':
                 # theory_cube, gal, and sed, in this case, are arbitrary units
                 # However, theory_cube and gal are already scaled by flux factor
                 assert self.conf['NOISETYP'].lower() == 'gauss'
@@ -1238,29 +907,27 @@ class FiberModelCube(DataVector):
             #print(f'theory cube shape: {theory_cube.shape}')
             #print(f'mask shape: {ary.shape}')
             spec_1D = (self.ATMPSF_conv_fiber_mask[np.newaxis,:,:]*theory_cube).sum(axis=(1,2))
-            if self.pars['run_options']['run_mode'] == 'ETC':
-                spec_1D = spec_1D*(self.bp_array[:,0]+self.bp_array[:,1])/2.
+            if self.Fpars['run_options']['run_mode'] == 'ETC':
+                spec_1D = spec_1D*self.bp_array
                 factor = np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
                 spec_1D = spec_1D * factor
             # otherwise, the theory_cube is scaled by a factor for emission line
 
             # fiber PSF can result in degrade in spectra resolution
-            #kernel = self.get_fiber_1D_psf_kernel()
-            #spec_1D = np.convolve(spec_1D, kernel, mode='same')
             if self.resolution_mat is not None:
                 spec_1D = self.resolution_mat * spec_1D
             if force_noise_free:
                 return spec_1D, None
             else:
                 # place holder
-                if self.pars['run_options']['run_mode'] == 'ETC':
+                if self.Fpars['run_options']['run_mode'] == 'ETC':
                     skysb = galsim.LookupTable.from_file(self.conf["SKYMODEL"], f_log=True) # Ang v.s. 1e-17 erg s-1 cm-2 A-1 arcsec-2
                     fiber_area = np.pi*(self.conf["FIBERRAD"])**2
-                    _wave = self.lambdas.mean(axis=1)*10 # Angstrom
+                    _wave = self.wave*10 # Angstrom
                     _dwave = (_wave[1]-_wave[0]) # Angstrom
                     _hnu = 1986445857.148928/_wave # 1e-17 erg
                     skyct = skysb(_wave)*fiber_area*_dwave/_hnu # s-1 cm-2
-                    skyct *= self.bp_array.mean(axis=1)*np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
+                    skyct *= self.bp_array*np.pi*(self.conf['DIAMETER']/2.)**2*self.conf['EXPTIME']/self.conf['GAIN']
                     # noise std, not including dark current
                     # eff read noise = sqrt(Npix along y) * read noise
                     noise_std = (skyct+spec_1D+self.conf['RDNOISE']**2)**0.5
@@ -1371,15 +1038,6 @@ def build_datavector(name, kwargs):
         raise ValueError(f'{name} is not a registered datavector!')
 
     return datavector
-
-def merge_bandpasses(bandpasses):
-    blim, rlim = bandpasses[0].blue_limit, bandpasses[-1].red_limit
-    wtype, zp = bandpasses[0].wave_type, bandpasses[0].zeropoint
-    waves = [(bp.blue_limit+bp.red_limit)/2. for bp in bandpasses]
-    trans = [bp(w) for bp,w in zip(bandpasses, waves)]
-    table = galsim.LookupTable(waves, trans)
-    bandpass = galsim.Bandpass(table, wave_type=wtype, zeropoint=zp)
-    return bandpass
 
 # Used for testing
 def main(args):

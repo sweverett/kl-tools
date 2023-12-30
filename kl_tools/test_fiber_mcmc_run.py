@@ -35,6 +35,7 @@ from datavector import FiberDataVector
 
 import ipdb
 
+########################### Parsing arguments ##################################
 parser = ArgumentParser()
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
@@ -45,7 +46,8 @@ parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
 parser.add_argument('-Iflux', type=int, default=0,help='Flux bin index')
 parser.add_argument('-sini', type=int, default=0, help='sin(i) bin index')
-parser.add_argument('-hlr', type=int, default=1.5, help='image hlr bin index')
+parser.add_argument('-hlr', type=int, default=0, help='image hlr bin index')
+parser.add_argument('-sigma_int', type=int, default=1, help='Intrinsic eml sig')
 parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
 parser.add_argument('-EXPTIME', type=int, default=600, help='Exposure time in s')
 parser.add_argument('--show', action='store_true', default=False,
@@ -65,186 +67,72 @@ fiber_offset_y = 1.5 # arcsec
 exptime_nominal = args.EXPTIME # seconds
 ADD_NOISE = False
 
-default_obs_conf = [
-     { # observation 1: fiber position 1
-         'OBSINDEX': 0,
-         'INSTNAME': "DESI",
-         'OBSTYPE': 1,
-         'BANDPASS': "../data/Bandpass/DESI/z.dat",
-         'SKYMODEL': "../data/Skyspectra/skysb_grey.dat",
-         'NAXIS': 2,
-         'NAXIS1': 32,# Nx 
-         'NAXIS2': 30,# Ny
-         'PIXSCALE': 0.22,
-         'RSPEC': 5332,
-         'PSFTYPE': "airy_fwhm",
-         'PSFFWHM': atm_psf_fwhm,
-         'DIAMETER': 332.42,
-         'EXPTIME': exptime_nominal,
-         'GAIN': 1.0,
-         'NOISETYP': 'ccd',
-         'NOISESIG': 1.0,
-         'RDNOISE': 8.6,
-         'ADDNOISE': ADD_NOISE,
-         'FIBERDX': fiber_offset_x,
-         'FIBERDY': 0.0,
-         'FIBERRAD': fiber_rad,
-         'FIBRBLUR': fiber_blur,
-     },
-     { # observation 2: fiber position 2
-         'OBSINDEX': 1,
-         'INSTNAME': "DESI",
-         'OBSTYPE': 1,
-         'BANDPASS':"../data/Bandpass/DESI/z.dat",
-         'SKYMODEL': "../data/Skyspectra/skysb_grey.dat",
-         'NAXIS': 2,
-         'NAXIS1': 32,# Nx 
-         'NAXIS2': 30,# Ny
-         'PIXSCALE': 0.22,
-         'RSPEC': 5332,
-         'PSFTYPE': "airy_fwhm",
-         'PSFFWHM': atm_psf_fwhm,
-         'DIAMETER': 332.42,
-         'EXPTIME': exptime_nominal,
-         'GAIN': 1.0,
-         'NOISETYP': 'ccd',
-         'NOISESIG': 1.0,
-         'RDNOISE': 8.6,
-         'ADDNOISE': ADD_NOISE,
-         'FIBERDX': -1*fiber_offset_x,
-         'FIBERDY': 0.0,
-         'FIBERRAD': fiber_rad,
-         'FIBRBLUR': fiber_blur,
-     },
-     { # observation 3: fiber position 3
-         'OBSINDEX': 2,
-         'INSTNAME': "DESI",
-         'OBSTYPE': 1,
-         'BANDPASS': "../data/Bandpass/DESI/z.dat",
-         'SKYMODEL': "../data/Skyspectra/skysb_grey.dat",
-         'NAXIS': 2,
-         'NAXIS1': 32,# Nx 
-         'NAXIS2': 30,# Ny
-         'PIXSCALE': 0.22,
-         'RSPEC': 5332,
-         'PSFTYPE': "airy_fwhm",
-         'PSFFWHM': atm_psf_fwhm,
-         'DIAMETER': 332.42,
-         'EXPTIME': exptime_nominal,
-         'GAIN': 1.0,
-         'NOISETYP': 'ccd',
-         'NOISESIG': 1.0,
-         'RDNOISE': 8.6,
-         'ADDNOISE': ADD_NOISE,
-         'FIBERDX': 0, 
-         'FIBERDY': fiber_offset_y,
-         'FIBERRAD': fiber_rad,
-         'FIBRBLUR': fiber_blur,
-     },
-    { # observation 4: fiber position 4
-         'OBSINDEX': 3,
-         'INSTNAME': "DESI",
-         'OBSTYPE': 1,
-         'BANDPASS': "../data/Bandpass/DESI/z.dat",
-         'SKYMODEL': "../data/Skyspectra/skysb_grey.dat",
-         'NAXIS': 2,
-         'NAXIS1': 32,# Nx 
-         'NAXIS2': 30,# Ny
-         'PIXSCALE': 0.22,
-         'RSPEC': 5332,
-         'PSFTYPE': "airy_fwhm",
-         'PSFFWHM': atm_psf_fwhm,
-         'DIAMETER': 332.42,
-         'EXPTIME': exptime_nominal,
-         'GAIN': 1.0,
-         'NOISETYP': 'ccd',
-         'NOISESIG': 1.0,
-         'RDNOISE': 8.6,
-         'ADDNOISE': ADD_NOISE,
-         'FIBERDX': 0, 
-         'FIBERDY': -1.0*fiber_offset_y,
-         'FIBERRAD': fiber_rad,
-        'FIBRBLUR': fiber_blur,
-     },
-    { # observation 5: fiber position 5
-         'OBSINDEX': 4,
-         'INSTNAME': "DESI",
-         'OBSTYPE': 1,
-         'BANDPASS': "../data/Bandpass/DESI/z.dat",
-         'SKYMODEL': "../data/Skyspectra/skysb_grey.dat",
-         'NAXIS': 2,
-         'NAXIS1': 32,# Nx 
-         'NAXIS2': 30,# Ny
-         'PIXSCALE': 0.22,
-         'RSPEC': 5332,
-         'PSFTYPE': "airy_fwhm",
-         'PSFFWHM': atm_psf_fwhm,
-         'DIAMETER': 332.42,
-         'EXPTIME': 180,
-         'GAIN': 1.0,
-         'NOISETYP': 'ccd',
-         'NOISESIG': 1.0,
-         'RDNOISE': 8.6,
-         'ADDNOISE': ADD_NOISE,
-         'FIBERDX': 0, 
-         'FIBERDY': 0,
-         'FIBERRAD': fiber_rad,
-        'FIBRBLUR': fiber_blur,
-     },
-    { # observation 6: photometry image
-        'OBSINDEX': 5,
-        'INSTNAME': "CTIO",
-        'OBSTYPE': 0,
-        'BANDPASS': "../data/Bandpass/CTIO/DECam.r.dat",
-        'NAXIS': 2,
-        'NAXIS1': 32,# Nx
-        'NAXIS2': 30,# Ny
-        'PIXSCALE': 0.2637,
-        'PSFTYPE': "airy_fwhm",
-        'PSFFWHM': 1.0,
-        'DIAMETER': 378.2856,
-        'EXPTIME': 150,
-        'GAIN': 4.0,
-        'NOISETYP': 'ccd',
-        'NOISESIG': 1.0,
-        'SKYLEVEL': 40.4/4*150/15,
-        'RDNOISE': 7,
-        'ADDNOISE': ADD_NOISE,
-    }
-]
+##################### Setting up observation configurations ####################
+default_fiber_conf = {'INSTNAME': "DESI", 'OBSTYPE': 1,
+     'SKYMODEL': "../data/Skyspectra/skysb_grey.dat", 'PSFTYPE': "airy_fwhm",
+     'PSFFWHM': atm_psf_fwhm, 'DIAMETER': 332.42, 'EXPTIME': exptime_nominal,
+     'GAIN': 1.0, 'NOISETYP': 'ccd', 'ADDNOISE': ADD_NOISE, 
+     'FIBERRAD': fiber_rad, 'FIBRBLUR': fiber_blur,
+}
 
-def choose_fiber_conf(case):
-    if case==0:
-        # major+minor, 1+4 fibers
-        obs_conf = copy.deepcopy(default_obs_conf)
-    elif case==1:
-        # major, 1+2 fibers
-        obs_conf = copy.deepcopy([default_obs_conf[i] for i in [0,1,4,5]])
-        for i,conf in enumerate(obs_conf):
-            conf['OBSINDEX'] = i
-            if i<2:
-                conf['EXPTIME'] = 2 * conf['EXPTIME']
-    elif case==2:
-        # minor, 1+2 fibers
-        obs_conf = copy.deepcopy([default_obs_conf[i] for i in [2,3,4,5]])
-        for i,conf in enumerate(obs_conf):
-            conf['OBSINDEX'] = i
-            if i<2:
-                conf['EXPTIME'] = 2 * conf['EXPTIME']
-    elif case==3:
-        # semi-major+semi-minor, 1+2 fibers
-        obs_conf = copy.deepcopy([default_obs_conf[i] for i in [0,2,4,5]])
-        for i,conf in enumerate(obs_conf):
-            conf['OBSINDEX'] = i
-            if i<2:
-                conf['EXPTIME'] = 2 * conf['EXPTIME']
-    else:
-        print(f'Fiber configuration case {case} is not implemented yet!')
-        exit(-1)
-    return obs_conf
+default_photo_conf = {'INSTNAME': "CTIO/DECam", 'OBSTYPE': 0, 'NAXIS': 2,
+    'NAXIS1': 32, 'NAXIS2': 30, 'PIXSCALE': 0.2637, 'PSFTYPE': "airy_fwhm",
+    'PSFFWHM': 1.0, 'DIAMETER': 378.2856, 'EXPTIME': 150, 'GAIN': 4.0,
+    'NOISETYP': 'ccd', 'RDNOISE': 7, 'ADDNOISE': ADD_NOISE,
+}
 
+default_obs_conf, _index_ = [], 0
 
+### Fiber observations
+emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
+blockids = [0, 2, 3, 4]
+channels = ['b', 'r', 'r', 'z']
+rdnoise = [3.41, 2.6, 2.6, 2.6]
+### Choose fiber configurations
+if args.fiberconf==0:
+    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), 
+               (0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
+    OFFSETX = 1
+elif args.fiberconf==1:
+    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), (0,0)]
+    OFFSETX = 2
+elif args.fiberconf==2:
+    offsets = [(0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
+    OFFSETX = 2
+elif args.fiberconf==3:
+    offsets = [(fiber_offset_x, 0), (0, fiber_offset_y), (0,0)]
+    OFFSETX = 2
+else:
+    print(f'Fiber configuration case {args.fiberconf} is not implemented yet!')
+    exit(-1)
 
+for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
+    _bp = "../data/Bandpass/DESI/%s.dat"%(chn)
+    for (dx, dy) in offsets:
+        _conf = copy.deepcopy(default_fiber_conf)
+        _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp, 
+            'RDNOISE': rdn, 'FIBERDX': dx, 'FIBERDY': dy})
+        if np.abs(dx)>1e-3 and np.abs(dy)>1e-3:
+            _conf.update({'EPTIME': exptime_nominal*OFFSETX})
+        default_obs_conf.append(_conf)
+        _index_+=1
+
+### Photometry observations
+# Assume 150s exptime for all exposures
+# tune the sky level such that the 5-sigma limit are
+# 𝑔=24.0, 𝑟=23.4 and 𝑧=22.5
+# photometry_band = ['r', 'g', 'z']
+# sky_levels = [40.4/4*150/15, 19.02/4*150/40, 40.4/4*150/5]
+photometry_band = ['r', ]
+sky_levels = [40.4/4*150/15,]
+
+for chn, sky in zip(photometry_band, sky_levels):
+    _bp = "../data/Bandpass/CTIO/DECam.%s.dat"%chn
+    _conf = copy.deepcopy(default_photo_conf)
+    _conf.update({"OBSINDEX": _index_, 'BANDPASS': _bp, "SKYLEVEL": sky})
+    default_obs_conf.append(_conf)
+
+####################### Main function ##########################################
 def main(args, pool):
 
     # TODO: Try making datacube a global variable, as it may significantly
@@ -254,6 +142,7 @@ def main(args, pool):
     ncores = args.ncores
     mpi = args.mpi
     run_name = args.run_name
+    sigma_int = 0.05*args.sigma_int
     show = args.show
 
     flux_scaling_power = args.Iflux
@@ -264,7 +153,8 @@ def main(args, pool):
     hlr = 0.5 + 0.5*args.hlr 
     fiber_conf = args.fiberconf
 
-    ### Initialization
+    ########################### Initialization #################################
+    redshift = 0.3
     sampled_pars = [
         'g1',
         'g2',
@@ -326,15 +216,19 @@ def main(args, pool):
         'model_dimension':{
             'Nx': 64,
             'Ny': 62,
+            'lblue': 300,
+            'lred': 1200,
+            'resolution': 500000,
             'scale': 0.11, # arcsec
-            'lambda_range': [851, 856], # 1190-1370          
+            'lambda_range': [[482.3, 487.11], [629.7, 634.51], [642.4, 647.21], [648.7, 653.51], [851, 855.81]], 
             'lambda_res': 0.08, # nm
+            'super_sampling': 4,
             'lambda_unit': 'nm',
         },
         ### SED model
         # typical values: cont 4e-16, emline 1e-16-1e-15 erg/s/cm2/nm
         'sed':{
-            'z': 0.3,
+            'z': redshift,
             'continuum_type': 'temp',
             'restframe_temp': '../data/Simulation/GSB2.spec',
             'temp_wave_type': 'Ang',
@@ -343,16 +237,17 @@ def main(args, pool):
             'obs_cont_norm_wave': 850,
             'obs_cont_norm_flam': 3.0e-17*flux_scaling,
             'em_Ha_flux': 1.2e-16*flux_scaling,
-            'em_Ha_sigma': 0.26/4,
+            #'em_Ha_sigma': 0.26,
+            'em_Ha_sigma': sigma_int*(1+redshift),
             'em_O2_flux': 8.8e-17*flux_scaling*1,
-            'em_O2_sigma': (0.13, 0.13),
+            'em_O2_sigma': (sigma_int*(1+redshift), sigma_int*(1+redshift)),
             'em_O2_share': (0.45, 0.55),
             'em_O3_1_flux': 2.4e-17*flux_scaling*1,
-            'em_O3_1_sigma': 0.13,
+            'em_O3_1_sigma': sigma_int*(1+redshift),
             'em_O3_2_flux': 2.8e-17*flux_scaling*1,
-            'em_O3_2_sigma': 0.13,
+            'em_O3_2_sigma': sigma_int*(1+redshift),
             'em_Hb_flux': 1.2e-17*flux_scaling,
-            'em_Hb_sigma': 0.26,
+            'em_Hb_sigma': sigma_int*(1+redshift),
             # 'template': '../data/Simulation/GSB2.spec',
             # 'wave_type': 'Ang',
             # 'flux_type': 'flambda',
@@ -376,16 +271,16 @@ def main(args, pool):
             # },
         },
         ### observation configurations
-        'obs_conf':  choose_fiber_conf(fiber_conf)
+        'obs_conf': default_obs_conf,
     }
     pars = Pars(sampled_pars, meta_pars)
 
+    ### Outputs
     #cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
     cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
     outdir = os.path.join(cube_dir, run_name)
-    ### Loading data vector 
-    #datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/simufiber_3.fits"
-    #dv = FiberDataVector(file=datafile)
+    outfile_sampler = os.path.join(outdir, 'sampler/%s_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, args.sigma_int, fiber_conf))
+    outfile_dv = os.path.join(outdir, 'dv/%s_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, args.sigma_int, fiber_conf))
 
     #-----------------------------------------------------------------
     # Setup sampled posterior
@@ -402,176 +297,40 @@ def main(args, pool):
     size = comm.Get_size()
     rank = comm.Get_rank()
 
-    ### use the runner class approach
-    if _USER_RUNNER_CLASS_:
-        if sampler == 'zeus':
-            print('Setting up KLensZeusRunner')
-
-            runner = KLensZeusRunner(
-                nwalkers, ndims, log_posterior, dv, pars
-                )
-
-        elif sampler == 'emcee':
-            print('Setting up KLensEmceeRunner')
-
-            runner = KLensEmceeRunner(
-                nwalkers, ndims, log_posterior, dv, pars
-                )
-
-        if (not args.mpi) and args.ncores==1:
-            print("Single process!")
-            pool = None 
-        else:
-            print("Multi-process! MPI=%s, ncores=%d"%(args.mpi, args.ncores))
-            pool = schwimmbad.choose_pool(
-                mpi=args.mpi, processes=args.ncores
-                )
-        if isinstance(pool, MPIPool):
-            if not pool.is_master():
-                print("[%d/%d] wait"%(rank, size))
-                pool.wait(callback=_callback_)
-                sys.exit(0)
-            else:
-                print("[%d/%d] go"%(rank, size))
-        print('>>>>>>>>>> [%d/%d] Starting mcmc run <<<<<<<<<<'%(rank, size))
-        runner.run(pool, nsteps, vb=True)
-
-        runner.burn_in = nsteps // 2
-
-        outdir = os.path.join(cube_dir, run_name)
-        utils.make_dir(outdir)
-        if (sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
-            # The sampler isn't pickleable for some reason in this scenario
-            # Save whole chain
-            outfile = os.path.join(outdir, 'test-mcmc-chain.pkl')
-            chain = runner.sampler.get_chain(flat=True)
-            print(f'pickling chain to {outfile}')
-            with open(outfile, 'wb') as f:
-                pickle.dump(chain, f)
-        else:
-            outfile = os.path.join(outdir, 'sampler_%d.pkl'%flux_scaling_power)
-            print(f'Pickling sampler to {outfile}')
-            with open(outfile, 'wb') as f:
-                pickle.dump(runner.sampler, f)
-
-            outfile = os.path.join(outdir, 'runner_%d.pkl'%flux_scaling_power)
-            print(f'Pickling runner to {outfile}')
-            with open(outfile, 'wb') as f:
-                pickle.dump(runner, f)
+    ######################### Run MCMC sampler #################################
+    if (not args.mpi) and args.ncores==1:
+        pool = None 
     else:
-        if (not args.mpi) and args.ncores==1:
-            print("Single process!")
-            pool = None 
+        pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.ncores)
+    if isinstance(pool, MPIPool):
+        if not pool.is_master():
+            pool.wait(callback=_callback_)
+            sys.exit(0)
         else:
-            print("Multi-process! MPI=%s, ncores=%d"%(args.mpi, args.ncores))
-            pool = schwimmbad.choose_pool(
-                mpi=args.mpi, processes=args.ncores
-                )
-        if isinstance(pool, MPIPool):
-            if not pool.is_master():
-                print("[%d/%d] wait"%(rank, size))
-                pool.wait(callback=_callback_)
-                sys.exit(0)
-            else:
-                print("[%d/%d] go"%(rank, size))
-                if not os.path.exists(outdir):
-                    utils.make_dir(outdir)
-                if not os.path.exists(os.path.join(outdir, "dv")):
-                    utils.make_dir(os.path.join(outdir, "dv"))
-                if not os.path.exists(os.path.join(outdir, "sampler")):
-                    utils.make_dir(os.path.join(outdir, "sampler"))
-        print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
-        MCMCsampler = emcee.EnsembleSampler(
-            nwalkers, ndims, log_posterior,
-            args=[None, pars], pool=pool
-            )
-        p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std, 
-            size=nwalkers)
-        
-        MCMCsampler.run_mcmc(p0, nsteps, progress=True)
+            if not os.path.exists(outdir):
+                utils.make_dir(outdir)
+            if not os.path.exists(os.path.join(outdir, "dv")):
+                utils.make_dir(os.path.join(outdir, "dv"))
+            if not os.path.exists(os.path.join(outdir, "sampler")):
+                utils.make_dir(os.path.join(outdir, "sampler"))
+    print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
+    MCMCsampler = emcee.EnsembleSampler(nwalkers, ndims, log_posterior,
+        args=[None, pars], pool=pool)
+    p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std, 
+        size=nwalkers)
+    MCMCsampler.run_mcmc(p0, nsteps, progress=True)
 
-        outfile = os.path.join(outdir, 
-            'sampler/%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
-        print(f'Pickling sampler to {outfile}')
-        with open(outfile, 'wb') as f:
-            pickle.dump(MCMCsampler, f)
-    outfile = os.path.join(outdir, 'dv/%s_sini%.2f_hlr%.2f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, fiber_conf))
-    print(f'Saving data vector to {outfile}')
-    dv = get_GlobalDataVector(0)
-    dv.to_fits(outfile, overwrite=True)
+    ########################## Save MCMC outputs ###############################
+    print(f'Pickling sampler to {outfile_sampler}')
+    with open(outfile_sampler, 'wb') as f:
+        pickle.dump(MCMCsampler, f)
     
-    exit(0)
-    outfile = os.path.join(outdir, 'chains.png')
-    print(f'Saving chain plots to {outfile}')
-    runner.plot_chains(
-        outfile=outfile, show=show
-        )
+    print(f'Saving data vector to {outfile_dv}')
+    dv = get_GlobalDataVector(0)
+    dv.to_fits(outfile_dv, overwrite=True)
 
-    runner.compute_MAP()
-    map_medians = runner.MAP_medians
-    print('(median) MAP values:')
-    for name, indx in pars_order.items():
-        m = map_medians[indx]
-        print(f'{name}: {m:.4f}')
-
-    outfile = os.path.join(outdir, 'compare-data-to-map.png')
-    print(f'Plotting MAP comparison to data in {outfile}')
-    runner.compare_MAP_to_data(outfile=outfile, show=show)
-
-    outfile = os.path.join(outdir, 'corner-map.png')
-    print(f'Saving corner plot compare to MAP in {outfile}')
-    title = 'Reference lines are param MAP values'
-    runner.plot_corner(
-        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
-        )
-
-    if sampler == 'emcee':
-        blobs = runner.sampler.blobs
-    elif sampler == 'zeus':
-        blobs = runner.sampler.get_blobs()
-
-    outfile = os.path.join(outdir, 'chain-blob.pkl')
-    print(f'Saving prior & likelihood values to {outfile}')
-    data = {
-        'prior': blobs[:,:,0],
-        'likelihood': blobs[:,:,1],
-        # TODO: generalize or remove after debugging!
-        # 'image': blobs[:,:,2],
-        # 'cont_template': blobs[:,:,3],
-        # 'mle_coeff': blobs[:,:,4],
-    }
-    with open(outfile, 'wb') as f:
-        pickle.dump(data, f)
-
-    outfile = os.path.join(outdir, 'chain-probabilities.png')
-    print(f'Saving prior & likelihood value plot to {outfile}')
-    prior = blobs[:,indx,0]
-    like = blobs[:,indx,1]
-    indx = np.random.randint(0, high=nwalkers)
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 4))
-    plt.subplot(131)
-    plt.plot(prior, label='prior', c='tab:blue')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-    plt.subplot(132)
-    plt.plot(like, label='likelihood', c='tab:orange')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-    plt.subplot(133)
-    plt.plot(prior, label='prior', c='tab:blue')
-    plt.plot(like, label='likelihood', c='tab:orange')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
-
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
+    ######################### Analysis the chains ##############################
+    
 
     return 0
 

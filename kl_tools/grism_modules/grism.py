@@ -21,8 +21,8 @@ from time import time
 
 sys.path.insert(0, '../')
 import utils as utils
-#import parameters as parameters
-from cube import CubePars
+import parameters
+#from cube import CubePars
 import emission
 import kltools_grism_module_2 as m
 from datavector import DataVector
@@ -38,7 +38,7 @@ parser.add_argument('--test', action='store_true', default=False,
 
 ### Grism-specific pars here
 
-class GrismPars(CubePars):
+class GrismPars(parameters.CubePars):
 
     # update the required/optional/generated fields
     _req_fields = ['model_dimension', 'sed', 'intensity', 'velocity', 'priors']

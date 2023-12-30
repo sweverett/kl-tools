@@ -77,6 +77,21 @@ def get_GlobalDataVector(i):
     assert i<len(GlobalDataVector), f'Requesting GlobalDataVector {i} out of {len(GlobalDataVector)}!'
     return GlobalDataVector[i]
 
+Global_lambdas_hires = []
+Global_lambdas = []
+def init_GlobalLambdas_hires(lambdas_hires):
+    global Global_lambdas_hires
+    Global_lambdas_hires = lambdas_hires
+def get_GlobalLambdas_hires(i):
+    global Global_lambdas_hires
+    return Global_lambdas_hires[i]
+def init_GlobalLambdas(lambdas):
+    global Global_lambdas
+    Global_lambdas = lambdas
+def get_GlobalLambdas(i):
+    global Global_lambdas
+    return Global_lambdas[i]
+
 class LogBase(object):
     '''
     Base class for a probability dist that holds the meta and
@@ -1257,90 +1272,72 @@ class FiberLikelihood(LogLikelihood):
         - parameters: Pars object
         - datavector: FiberDataVector object
         '''
+        super(FiberLikelihood, self).__init__(parameters, DataVector())
+        _meta = parameters.meta.copy()
+        _mdim = {'model_dimension': _meta['model_dimension'],
+                 'run_options': _meta['run_options']}
         ### Case 1: Build data vector from input fiducial parameters
         if datavector is None:
             print("FiberLikelihood: Generating data vector from fid pars...")
-            super(FiberLikelihood, self).__init__(parameters, DataVector())
+            ### preparing observation configuration
+            _conf = _meta.pop('obs_conf')
+            _fid = kwargs["sampled_theta_fid"]
+            self.Nobs = len(_conf)
+            init_Cube_lists([cube.FiberModelCube(_mdim, c) for c in _conf])
             self._set_model_dimension()
-            # set FiberPars and FiberModelCube list
-            if parameters.meta.get('obs_conf', None) is None:
-                raise ValueError(f'parameters must have obs_conf if '+\
-                    f'data vector is not provided!')
-            if kwargs.get('sampled_theta_fid', None) is None:
-                raise ValueError(f'sampled_theta_fid must be set when '+\
-                    f'data vector is not provided!')
-            meta_copy = parameters.meta.copy()
-            obs_conf_list = meta_copy.pop('obs_conf')
-            self.Nobs = len(obs_conf_list)
-            init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
-            init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
-            # generate fiducial images and DataVector object
-            fid_img_list, fid_noise_list = self.get_images(kwargs['sampled_theta_fid'], force_noise_free=False, return_noise=True)
+            ### generate fiducial images and DataVector object
+            _d, _n = self.get_images(_fid, force_noise_free=False, return_noise=True)
             _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
-            _data_header = obs_conf_list
             init_GlobalDataVector([FiberDataVector(
-                 header=_header, data_header=_data_header, 
-                 data=fid_img_list, noise=fid_noise_list)])
+                 header=_header, data_header=_conf, 
+                 data=_d, noise=_n)])
             # set the fiducial images to C++ routine
             print("FiberLikelihood: Caching the (fiducial) data vector...")
         ### Case 2: Build data vector from input FiberDataVector object 
         else:
-            super(FiberLikelihood, self).__init__(parameters, DataVector())
             init_GlobalDataVector([datavector])
             self._set_model_dimension()
-            meta_copy = parameters.meta.copy()
-            if meta_copy.get('obs_conf', None) is not None:
-                print(f'Ignoring obs_conf in parameters, use the ones from data vector')
-                meta_copy.pop(obs_conf)
-            obs_conf_list = datavector.get_config_list()
+            if _meta.get('obs_conf', None) is not None:
+                print(f'Use obs_conf from datavector not parameters')
+                _meta.pop(obs_conf)
+            _conf = datavector.get_config_list()
             self.Nobs = datavector.Nobs
-            init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
-            init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
+            # init_CubePars_lists([cube.FiberPars(meta_copy.pars, obs_conf_list[i]) for i in range(self.Nobs)])
+            # init_Cube_lists([cube.FiberModelCube(get_CubePars(i)) for i in range(self.Nobs)])
+            init_Cube_lists([cube.FiberModelCube(_mdim, c) for c in _conf])
         return
 
     def _set_model_dimension(self):
         # build model lambda-y-x grid
+        # Note: lambda can have a several patches
         # TODO: retrieve header in a consistent way
-        _lr = self.meta['model_dimension']['lambda_range']
-        _li, _lf = _lr[0], _lr[1]
-        self._dl = self.meta['model_dimension']['lambda_res']
-        self._lambdas = np.array([(l, l+self._dl) for l in np.arange(_li, _lf, self._dl)])
-        self.mNspec = self._lambdas.shape[0]
+        wave_limit = np.atleast_2d(self.meta['model_dimension']['lambda_range'])
+        self.N_SED_block = wave_limit.shape[0]
+        self.dwave = np.atleast_1d(self.meta['model_dimension']['lambda_res'])
+        self.Nsub = np.atleast_1d(self.meta['model_dimension']['super_sampling'])
+        if self.dwave.shape[0]==1:
+            self.dwave = np.tile(self.dwave, self.N_SED_block)
+        if self.Nsub.shape[0]==1:
+            self.Nsub = np.tile(self.Nsub, self.N_SED_block)
+        assert (self.dwave.shape[0]==self.N_SED_block) & (self.Nsub.shape[0]==self.N_SED_block)
+        # wavelength extraction grid (normal resolution)
+        lb_lo = [np.arange(l,r,dw) for (l,r),dw in zip(wave_limit, self.dwave)]
+        lambdas=[np.array([lb,lb+dw]).T for lb,dw in zip(lb_lo,self.dwave)]
+        init_GlobalLambdas(lambdas)
+        #self.lambdas=[np.array([lb,lb+dw]).T for lb,dw in zip(lb_lo,self.dwave)]
+        self.mNlam = [grid.shape[0] for grid in lambdas]
+        # wavelength modeling grid (super resolution)
+        lb_hi = [np.arange(lb[0],lb[-1]+dw-dw/Nsub/2,dw/Nsub) for lb,dw,Nsub in zip(lb_lo, self.dwave, self.Nsub)]
+        #self.lambdas_hires = [np.array([lb, lb+dw/Nsub]).T for lb,dw,Nsub in zip(lb_hi, self.dwave, self.Nsub)]
+        lambdas_hires = [np.array([lb, lb+dw/Nsub]).T for lb,dw,Nsub in zip(lb_hi, self.dwave, self.Nsub)]
+        init_GlobalLambdas_hires(lambdas_hires)
+        self.mNlam_hires = [grid.shape[0] for grid in lambdas_hires]
+       
+        # spatial grid
         self.mNx = self.meta['model_dimension']['Nx']
         self.mNy = self.meta['model_dimension']['Ny']
         self.mscale = self.meta['model_dimension']['scale']
         return
-
-    def _setup_model(self, theta_pars, datavector):
-        '''
-        Setup the model datacube given the input theta_pars and datavector
-
-        theta_pars: dict
-            Dictionary of sampled pars
-        '''
-        # create grid of pixel centers in image coordinates
-        # 'xy' indexing is the usual imshow y-x scheme
-        X, Y = utils.build_map_grid(self.mNx, self.mNy, 
-            indexing='xy', scale=self.mscale)
-        # create 2D velocity & intensity maps given sampled transformation
-        # parameters
-        vmap = self.setup_vmap(theta_pars)
-        imap = self.setup_imap(theta_pars)
-        try:
-            use_numba = self.meta['run_options']['use_numba']
-        except KeyError:
-            use_numba = False
-        # evaluate maps at pixel centers in obs plane
-        v_array = vmap('obs', X, Y, normalized=True, use_numba=use_numba)
-        
-        # get both the emission line and continuum image
-        _pars = self.meta.copy_with_sampled_pars(theta_pars)
-        _pars['run_options']['imap_return_gal'] = True
-        i_array, gal = imap.render(theta_pars, None, _pars)
-        #self.i_array = i_array
-        dc_array, sed = self._construct_model_datacube(theta_pars, 
-            v_array, i_array, gal)
-        return dc_array, gal, sed
 
     def get_images(self, theta, force_noise_free=True, return_noise=False):
         ''' Get simulated images and data given parameter values
@@ -1349,17 +1346,23 @@ class FiberLikelihood(LogLikelihood):
         noise_list = []
         # unpack sampled params
         theta_pars = self.theta2pars(theta)
-        # setup model corresponding to cube.DataCube type
+        # evaluate 3D model cube
         dc_array, gal, sed = self._setup_model(theta_pars, None)
+        # evaluate observed data
         for i in range(self.Nobs):
-            #_img, _noise = self.FiberModelCubes[i].observe(dc_array, gal, sed, force_noise_free)
-            _img, _noise = get_Cube(i).observe(dc_array, gal, sed, force_noise_free)
+            fc = get_Cube(i)
+            if fc.Fpars.is_dispersed:
+                iblock = fc.conf['SEDBLKID']
+                _img, _noise = fc.observe(dc_array[iblock], gal, sed, force_noise_free)
+            else:
+                _img, _noise = fc.observe(None, gal, sed, force_noise_free)
             image_list.append(_img)
             noise_list.append(_noise)
         if return_noise:
             return image_list, noise_list
         else:
             return image_list
+
     def _log_likelihood(self, theta, datavector, model):
         '''
         theta: list
@@ -1369,94 +1372,138 @@ class FiberLikelihood(LogLikelihood):
         model: DataCube
             The model datacube object, truncated to desired lambda bounds
         '''
-        #start_time = time()*1000
-
+        dc_array, gal, sed = model[0], model[1], model[2]
         loglike = 0
         dv = get_GlobalDataVector(0)
         for i in range(self.Nobs):
-            #img, _ = self.FiberModelCubes[i].observe(model[0],model[1],model[2])
-            img, _ = get_Cube(i).observe(model[0], model[1], model[2])
-            #data = self.datavector.get_data(i)
-            #noise = self.datavector.get_noise(i)
+            fc = get_Cube(i)
+            if fc.Fpars.is_dispersed: 
+                iblock = fc.conf['SEDBLKID']
+                img, _ = fc.observe(dc_array[iblock], gal, sed)
+            else:
+                img, _ = fc.observe(None, gal, sed)
             data = dv.get_data(i)
             noise = np.std(dv.get_noise(i))
             chi2 = np.sum(((data-img)/noise)**2)
             loglike += -0.5*chi2
 
-        #print("---- calculate dchi2 | %.2f ms -----" % (time()*1000 - start_time))
-        # NOTE: Actually slower due to extra matrix evals...
-        # diff_2 = (datacube.data - model.data).reshape(Nspec, Nx*Ny)
-        # chi2_2 = diff_2.dot(inv_cov.dot(diff_2.T))
-        # loglike2 = -0.5*chi2_2.trace()
         return loglike
 
-    def _construct_model_datacube(self, theta_pars, v_array, i_array, gal):
+    def _setup_model(self, theta_pars, datavector):
         '''
-        Create the model datacube from model slices, using the evaluated
-        velocity and intensity maps, SED, etc.
+        Setup the model datacube given the input theta_pars and datavector
 
         theta_pars: dict
-            A dict of the sampled mcmc params for both the velocity
-            map and the tranformation matrices
-        v_array: np.array (2D)
-            The vmap evaluated at image pixel positions for sampled pars.
-            (Must be normalzied)
-        i_array: np.array (2D)
-            The imap evaluated at image pixel positions for sampled pars
-        cont_array: np.array (2D)
-            The imap of the fitted or modeled continuum
-        datacube: DataCube
-            Datavector datacube truncated to desired lambda bounds
+            Dictionary of sampled pars
         '''
-        lambda_cen = np.mean(self._lambdas, axis=1)
-        sed = self._setup_sed(self.meta)
+        _meta_update = self.meta.copy_with_sampled_pars(theta_pars)
+        _meta_update['run_options']['imap_return_gal'] = True
+        try:
+            use_numba = _meta_update['run_options']['use_numba']
+        except KeyError:
+            use_numba = False
+
+        # create grid of pixel centers in image coordinates
+        # 'xy' indexing is the usual imshow y-x scheme
+        X, Y = utils.build_map_grid(self.mNx, self.mNy, indexing='xy', scale=self.mscale)
+        # create 2D velocity & intensity maps given sampled transformation
+        # parameters, and evaluate maps at pixel centers in obs plane
+        vmap = self.setup_vmap(theta_pars)
+        imap = self.setup_imap(theta_pars, _meta_update)
+        v_array = vmap('obs', X, Y, normalized=True, use_numba=use_numba)
+        i_array, gal = imap.render(theta_pars, None, _meta_update, im_type='emission')
+
+        # create observer-frame SED and the 3D model cubes, block-by-block
+        sed = self.setup_sed(_meta_update)
+        dc_array = []
+        #dc_array, sed = self._construct_model_datacube(theta_pars, _pars,
+        #    v_array, i_array, gal)
+        for iblock in range(self.N_SED_block):
+            # high resolution wavelength grid
+            #lambda_cen_hires = self.lambdas_hires[iblock].mean(axis=1)
+            lambda_cen_hires = get_GlobalLambdas_hires(iblock).mean(axis=1)
+            mshape = lambda_cen_hires.shape+v_array.shape
+            # apply Doppler shift due to LoS velocity
+            w_mesh = np.outer(lambda_cen_hires, 1./(1.+ v_array)).flatten()
+            # evaluate SED (phot/s/cm2) at observer frame (w/ LoS velocity)
+            sed_mesh = (sed(w_mesh)*self.dwave[iblock]/self.Nsub[iblock]).reshape(mshape)
+            dc = sed_mesh*i_array[np.newaxis,:,:]/(1+v_array[np.newaxis,:, :])
+            # reduce at low resolution grid
+            indices = np.arange(0, self.mNlam_hires[iblock], self.Nsub[iblock])
+            #dc_array.append(np.add.reduceat(dc, indices, axis=0))
+            dc_array.append(np.asarray([np.sum(dc[x:x+self.Nsub[iblock], :, :], axis=0) for x in indices]))
         # build Doppler-shifted datacube
         # self.lambda_cen = observed frame lambda grid
         # w_mesh = rest frame wavelengths evaluated on observed frame grid
         # To make energy conserved, dc_array in units of 
         # photons / (s cm2)
-        w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
-        w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
-        # photons/s/cm2 in the 3D grid
-        dc_array = sed(w_mesh.flatten()) * self._dl
-        dc_array = dc_array.reshape(w_mesh.shape) * \
-                        i_array[np.newaxis, :, :] /\
-                        (1+v_array[np.newaxis, :, :]) 
+        # w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
+        # w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
+        # # photons/s/cm2 in the 3D grid
+        # dc_array = sed(w_mesh.flatten()) * self._dl
+        # dc_array = dc_array.reshape(w_mesh.shape) * \
+        #                 i_array[np.newaxis, :, :] /\
+        #                 (1+v_array[np.newaxis, :, :]) 
 
-        return dc_array, sed
+        return dc_array, gal, sed
+
+    # def _construct_model_datacube(self, theta_pars, meta, v_array, i_array, gal):
+    #     '''
+    #     Create the model datacube from model slices, using the evaluated
+    #     velocity and intensity maps, SED, etc.
+
+    #     theta_pars: dict
+    #         A dict of the sampled mcmc params for both the velocity
+    #         map and the tranformation matrices
+    #     v_array: np.array (2D)
+    #         The vmap evaluated at image pixel positions for sampled pars.
+    #         (Must be normalzied)
+    #     i_array: np.array (2D)
+    #         The imap evaluated at image pixel positions for sampled pars
+    #     cont_array: np.array (2D)
+    #         The imap of the fitted or modeled continuum
+    #     datacube: DataCube
+    #         Datavector datacube truncated to desired lambda bounds
+    #     '''
+    #     lambda_cen = np.mean(self._lambdas, axis=1)
+    #     sed = self.setup_sed(meta)
+    #     # build Doppler-shifted datacube
+    #     # self.lambda_cen = observed frame lambda grid
+    #     # w_mesh = rest frame wavelengths evaluated on observed frame grid
+    #     # To make energy conserved, dc_array in units of 
+    #     # photons / (s cm2)
+    #     w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
+    #     w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
+    #     # photons/s/cm2 in the 3D grid
+    #     dc_array = sed(w_mesh.flatten()) * self._dl
+    #     dc_array = dc_array.reshape(w_mesh.shape) * \
+    #                     i_array[np.newaxis, :, :] /\
+    #                     (1+v_array[np.newaxis, :, :]) 
+
+    #     return dc_array, sed
 
     @classmethod
-    def _setup_sed(cls, meta):
+    def setup_sed(cls, meta):
         return emission.ObsFrameSED(meta['sed'])
 
-    def setup_imap(self, theta_pars):
+    @classmethod
+    def setup_imap(cls, theta_pars, meta):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
-        datacube: DataCube
-            Datavector datacube truncated to desired lambda bounds
-        '''
-        imap = self._setup_imap(theta_pars, self.meta)
-        return imap
-
-    @classmethod
-    def _setup_imap(cls, theta_pars, meta):
-        '''
-        See setup_imap(). Only runs if a new imap for the sample
-        is needed
+        meta: MetaPars
+            Updated MetaPars that record necessary information
         '''
 
         # Need to check if any basis func parameters are
         # being sampled over
-        pars = meta.copy_with_sampled_pars(theta_pars)
 
-        imap_pars = deepcopy(pars['intensity'])
-        imap_type = imap_pars['type']
-        del imap_pars['type']
-        imap_pars['theory_Nx'] = pars['model_dimension']['Nx']
-        imap_pars['theory_Ny'] = pars['model_dimension']['Ny']
-        imap_pars['scale'] = pars['model_dimension']['scale']
+        imap_pars = deepcopy(meta['intensity'])
+        imap_type = imap_pars.pop('type')
+        imap_pars['theory_Nx'] = meta['model_dimension']['Nx']
+        imap_pars['theory_Ny'] = meta['model_dimension']['Ny']
+        imap_pars['scale'] = meta['model_dimension']['scale']
 
         return intensity.build_intensity_map(imap_type, None, imap_pars)
 

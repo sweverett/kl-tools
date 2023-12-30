@@ -17,6 +17,7 @@ import utils
 _h = constants.h.to('erg s').value
 _c = constants.c.to('nm/s').value
 _c_kms = constants.c.to('km/s').value
+_c_nms = constants.c.to('nm/s').value
 
 ### Emission line table
 # NOTE: These are the emission line wavelengths
@@ -55,9 +56,9 @@ _default_sed_pars = {
     'z': 0.0,
     ### **obs-frame** SED wavelength grid limits, nm
     'lblue': 50,
-    'lred': 50000,
+    'lred': 2000,
     # spectral resolution at 1 micron, assuming dispersion per pixel
-    'resolution': 3000,
+    'resolution': 100000,
     'thin': -1,
     ### **rest-frame** continuum
     'continuum_type': 'func', # func, template, spec?
@@ -221,7 +222,7 @@ class ObsFrameSED(SED):
         Initialize SED class object with parameters dictionary
         '''
         self.pars = copy.deepcopy(_default_sed_pars)
-        super(ObsFrameSED, self).__init__(self.pars['lblue'], self.pars['lred'], 3000, 'nm')
+        super(ObsFrameSED, self).__init__(self.pars['lblue'], self.pars['lred'], self.pars['resolution'], 'nm')
         self.blue_limit, self.red_limit = self.pars['lblue']*u.nm, self.pars['lred']*u.nm
         if sed_meta is not None:
             self.updatePars(self.pars, sed_meta)
@@ -230,7 +231,7 @@ class ObsFrameSED(SED):
         self.inventory = {
             'total':     self.obs_frame_sed, 
             'continuum': self.continuum, 
-            'emissions': self.emission,
+            'emissions': self.emissions,
         }
 
     def __call__(self, wave, new_pars=None, component='total', flux_type='fphotons'):
@@ -253,10 +254,16 @@ class ObsFrameSED(SED):
             
     
     def calculate_obsframe_sed(self, pars):
-        self.continuum = self.addContinuum(pars)
-        self.emissions_list = self.addEmissionLines(pars)
-        self.emission = np.sum(self.emissions_list)
-        self.obs_frame_sed = self.continuum + self.emission
+        meta_obs_wave = np.arange(self.pars['lblue'], self.pars['lred'], 
+            1000/self.pars['resolution'])
+        self.continuum, _cont_tab = self.addContinuum(pars, meta_obs_wave)
+        self.emissions, _emis_tab = self.addEmissionLines(pars, meta_obs_wave)
+        #self.emission = np.sum(self.emissions_list)
+        _total_tab = gs.LookupTable(meta_obs_wave, 
+            _cont_tab(meta_obs_wave) + _emis_tab(meta_obs_wave), 
+            interpolant='linear')
+        #self.obs_frame_sed = self.continuum + self.emission
+        self.obs_frame_sed = gs.SED(_total_tab, "nm", "flambda", fast=True, interpolant='linear')
         if pars['thin'] > 0:
             self.obs_frame_sed = self.obs_frame_sed.thin(rel_err=pars['thin'])
         
@@ -276,62 +283,90 @@ class ObsFrameSED(SED):
         return recompute
     
     @classmethod
-    def wrap_restframe_emline_string(cls, center, sigma, share, redshift):
+    def wrap_emline_string(cls, center, sigma, share):
         eml_fmt = 'np.exp(-0.5*((wave-%le)/%le)**2)*%le/np.sqrt(2*np.pi*%le**2)'
-        _cen, _sig, _shr = np.atleast_1d(center), np.atleast_1d(sigma)/(1.+redshift), np.atleast_1d(share)
+        _cen, _sig, _shr = np.atleast_1d(center), np.atleast_1d(sigma), np.atleast_1d(share)
         assert _cen.shape == _sig.shape == _shr.shape, 'center, sigma, share have inconsistent shape!'
         eml_strings = ' + '.join([eml_fmt%(_c,_s,_f,_s) for _c,_s,_f in zip(_cen, _sig, _shr)])
         return eml_strings
             
     @classmethod
-    def addEmissionLines(cls, pars):
+    def addEmissionLines(cls, pars, meta_obs_wave):
         # Gaussian emission line profile (no spectra resolution convolved)
-        emline_list, z = [], pars['z']
+        meta_obsframe_flux = np.zeros(meta_obs_wave.shape)
         # loop through emission lines in the meta parameters
         for emline,vacwave in LINE_LAMBDAS.items():
             if pars.get(f'em_{emline}_flux', None) is not None:
                 # get obs-frame line width (nm), line flux (erg/s/cm2), and doublet share
                 zsys = pars.get(f'em_{emline}_vsys', 0.0)/_c_kms # redshift due to systemic velocity
-                wsys = vacwave.to('nm').value*(1.+zsys)
-                obs_sigma = pars[f'em_{emline}_sigma']/(1.+zsys)
+                obs_wcen  = vacwave.to('nm').value*(1.+zsys)*(1.+pars['z'])
+                obs_sigma = pars[f'em_{emline}_sigma']
                 obs_flux  = pars[f'em_{emline}_flux']
                 share = pars.get(f'em_{emline}_share', 1.0)
                 assert np.isclose(np.sum(share), 1.0), 'emission line share does not add up to 1!'
                 # the redshift argument only changes the wavelength, keeping flux density fixed
-                emlstr = cls.wrap_restframe_emline_string(wsys, obs_sigma, share, z)
-                emline_list.append(gs.SED(emlstr, wave_type='nm', flux_type='flambda', redshift=z)*obs_flux)
-        return emline_list
+                emlstr = cls.wrap_emline_string(obs_wcen, obs_sigma, share)
+                emlsed = eval('lambda wave:'+emlstr) # erg/s/cm2/nm
+                meta_obsframe_flux += emlsed(meta_obs_wave)*obs_flux
+                #emline_list.append(gs.SED(emlstr, wave_type='nm', flux_type='flambda', redshift=z)*obs_flux)
+        _table = gs.LookupTable(meta_obs_wave, meta_obsframe_flux, 
+            interpolant='linear', )
+        _sed = gs.SED(_table, "nm", "flambda", fast=True, interpolant='linear')
+        return _sed, _table
     
     @classmethod
-    def addContinuum(cls, pars):
+    def addContinuum(cls, pars, meta_obs_wave):
         # TODO: add support to other continuum methods: desi spectra
+        # acceptable continuum types: lambda string, template file
         if pars['continuum_type'] == 'func':
             cont = gs.SED(pars['continuum_func'], wave_type='nm', flux_type='flambda', redshift=pars['z'])
+            #cont = eval('lambda wave:'+pars['continuum_func']) # erg/s/cm2/nm
         elif pars['continuum_type'] == 'temp':
             template = pars['restframe_temp']
             if not os.path.isfile(template):
                 raise OSError(f'Can not find template file {template}!')
-            cont = gs.SED(template, wave_type=pars['temp_wave_type'], flux_type=pars['temp_flux_type'],
-                         redshift=pars['z'])
+            #_temp = np.genfromtxt(template)
+            # convert wavelength and flux to nm and flambda
+            #wave_factor = {'nm': 1, 
+            #               'ang': 10, 
+            #               'angstrom': 10, 
+            #               'aa': 10}[pars['temp_wave_type'].lower()]
+            #flux_factor = {'flambda': wave_factor,
+            #                'fnu': _c_nms/(_temp[:,0]/wave_factor)**2,
+            #                'fphotons': wave_factor**2*_h*_c/_temp[:,0],
+            #                '1': wave_factor}[pars['temp_flux_type']]
+            #cont = gs.LookupTable(
+            #    _temp[:,0]/wave_factor*(1.+pars['z']), _temp[:,1]*flux_factor, 
+            #    interpolant='linear')
+            cont = gs.SED(template, pars['temp_wave_type'], 
+                pars['temp_flux_type'], redshift=pars['z'])
         else:
             raise ValueError(f'Continuum type {pars["continuum_type"]} is not yet supported. '+\
                              f'Only (func, temp) are supported now.')
+        #meta_obsframe_flux = cont(meta_obs_wave)
+        #_table = gs.LookupTable(meta_obs_wave, meta_obsframe_flux, interpolant='linear')
+        #_sed = gs.SED(_table, "nm", "flambda", fast=True, interpolant='linear')
+
         # normalization: either specify flux at specific wavelength (do not require emission line)
         # or specify band magnitude (need to subtract emission line flux)
         if pars.get('cont_norm_method', 'flux') == 'flux':
-            # note that the normalizing flux density in `withFluxDensity` has units of phot/s/cm2/nm
-            # while `obs_cont_norm_flam` has units of erg/s/cm2/nm
-            return cont.withFluxDensity(pars['obs_cont_norm_flam']/(_h*_c/pars['obs_cont_norm_wave']), 
-                                        pars['obs_cont_norm_wave'])
+            # note for the units 
+            # `withFluxDensity`:    phot/s/cm2/nm
+            # `obs_cont_norm_flam`: erg/s/cm2/nm
+            _sed = cont.withFluxDensity(
+                pars['obs_cont_norm_flam']/(_h*_c/pars['obs_cont_norm_wave']), 
+                pars['obs_cont_norm_wave'])
         elif pars.get('cont_norm_method', 'flux') == 'mag':
             # TODO: compensate for emission line fluxes here
             norm_band = gs.Bandpass(pars['obs_norm_band'], wave_type='nm').withZeropoint('AB')
-            return cont.withMagnitude(pars['obs_norm_mag'], norm_band)
+            _sed = cont.withMagnitude(pars['obs_norm_mag'], norm_band)
         else:
             # do not normalize
             warnings.warn(f'cont_norm_method is set to {pars["cont_norm_method"]} which is neither '+\
                           f'flux nor mag. Skip continuum normalizing...')
-            return cont
+        _tab = gs.LookupTable(meta_obs_wave,
+                _sed(meta_obs_wave)*_h*_c/meta_obs_wave, interpolant='linear')
+        return _sed, _tab
     
     def calculateMagnitude(self, bandpass, zp='AB', component='total'):
         bp = gs.Bandpass(bandpass, wave_type='nm').withZeropoint(zp)

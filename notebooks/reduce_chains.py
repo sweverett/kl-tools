@@ -23,6 +23,7 @@ import kltools_grism_module_2 as m
 from parameters import Pars, SampledPars, MetaPars, MCMCPars
 import priors
 import utils
+import likelihood
 from likelihood import LogPosterior, FiberLikelihood, get_Cube
 from datavector import DataVector, FiberDataVector
 import emission
@@ -33,23 +34,44 @@ parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
 parser.add_argument('-Iflux', type=int, default=0,help='Flux bin index')
 parser.add_argument('-sini', type=int, default=0, help='sin(i) bin index')
-parser.add_argument('-hlr', type=int, default=1.5, help='image hlr bin index')
+parser.add_argument('-hlr', type=int, default=0, help='image hlr bin index')
+parser.add_argument('-sigma_int', type=int, default=1, help='Intrinsic eml sig')
 parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
+parser.add_argument('-EXPTIME', type=int, default=600, help='Exposure time in s')
 args = parser.parse_args()
 
 flux_bin = args.Iflux
 flux_scaling = 1.2**flux_bin
 sini = args.sini*0.1 + 0.05
 hlr = 0.5+0.5*args.hlr 
+sigma_int = 0.05*args.sigma_int
 fiberconf = args.fiberconf
-if fiberconf==0:
-    Nspec=5 # both major and minor
-elif (fiberconf==1) or (fiberconf==2) or (fiberconf==3):
-    Nspec=3 # major; minor; semi-major/minor
-elif fiberconf==4:
-    Nspec=4 # 3+1
+
+fiber_blur = 3.4 # pixels
+atm_psf_fwhm = 1.0 # arcsec
+fiber_rad = 0.75 # arcsec
+fiber_offset_x = 1.5 # arcsec
+fiber_offset_y = 1.5 # arcsec
+exptime_nominal = args.EXPTIME # seconds
+ADD_NOISE = False
+
+emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
+blockids = [0, 2, 3, 4]
+if args.fiberconf==0:
+    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), 
+               (0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
+    Nspec = 5
+elif args.fiberconf==1:
+    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), (0,0)]
+    Nspec = 3
+elif args.fiberconf==2:
+    offsets = [(0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
+    Nspec = 3
+elif args.fiberconf==3:
+    offsets = [(fiber_offset_x, 0), (0, fiber_offset_y), (0,0)]
+    Nspec = 3
 else:
-    print(f'Fiber conf = {fiberconf} is not supported!')
+    print(f'Fiber configuration case {args.fiberconf} is not implemented yet!')
     exit(-1)
 
 
@@ -61,7 +83,7 @@ def return_lse_func(xs, ys, ivars):
     return lambda x: alpha*(x-xc) + yc
 
 def fit_cont(flux, wave, noise, emline_name, redshift):
-    emline_obs_wave = LINE_LAMBDAS[emline_name].to('Angstrom').value * (1+redshift)
+    emline_obs_wave = np.mean(LINE_LAMBDAS[emline_name].to('Angstrom').value) * (1+redshift)
     #print(f'{emline_name} at z={redshift} is {emline_obs_wave} A')
     cont_wave = ((emline_obs_wave-20 < wave) & (wave < emline_obs_wave-10)) | \
                     ((emline_obs_wave+10 < wave) & (wave < emline_obs_wave+20))
@@ -69,7 +91,7 @@ def fit_cont(flux, wave, noise, emline_name, redshift):
     return return_lse_func(xs, ys, ivars)
 
 def get_emline_snr(flux, wave, noise, emline_name, redshift, subtract_cont=False):
-    emline_obs_wave = LINE_LAMBDAS[emline_name].to('Angstrom').value * (1+redshift)
+    emline_obs_wave = np.mean(LINE_LAMBDAS[emline_name].to('Angstrom').value) * (1+redshift)
     #print(f'{emline_name} at z={redshift} is {emline_obs_wave} A')
     if not subtract_cont:
         wave_range = (emline_obs_wave-10 < wave) & (wave < emline_obs_wave+10)
@@ -82,6 +104,7 @@ def get_emline_snr(flux, wave, noise, emline_name, redshift, subtract_cont=False
     return SNR
 
 ### (Default) Meta parameters used in the chains setting
+redshift = 0.3
 default_meta = {
     ### shear and alignment
     'g1': 'sampled',
@@ -127,14 +150,18 @@ default_meta = {
     'model_dimension':{
         'Nx': 64,
         'Ny': 62,
+        'lblue': 300,
+        'lred': 1200,
+        'resolution': 500000,
         'scale': 0.11, # arcsec
-        'lambda_range': [851, 856], # 1190-1370          
+        'lambda_range': [[482.3, 487.11], [629.7, 634.51], [642.4, 647.21], [648.7, 653.51], [851, 855.81]],     
         'lambda_res': 0.08, # nm
+        'super_sampling': 4,
         'lambda_unit': 'nm',
     },
     ### SED model
     'sed':{
-            'z': 0.3,
+            'z': redshift,
             'continuum_type': 'temp',
             'restframe_temp': '../data/Simulation/GSB2.spec',
             'temp_wave_type': 'Ang',
@@ -143,16 +170,17 @@ default_meta = {
             'obs_cont_norm_wave': 850,
             'obs_cont_norm_flam': 3.0e-17*flux_scaling,
             'em_Ha_flux': 1.2e-16*flux_scaling,
-            'em_Ha_sigma': 0.26,
+            #'em_Ha_sigma': 0.26,
+            'em_Ha_sigma': sigma_int*(1+redshift),
             'em_O2_flux': 8.8e-17*flux_scaling*1,
-            'em_O2_sigma': (0.13, 0.13),
+            'em_O2_sigma': (sigma_int*(1+redshift), sigma_int*(1+redshift)),
             'em_O2_share': (0.45, 0.55),
             'em_O3_1_flux': 2.4e-17*flux_scaling*1,
-            'em_O3_1_sigma': 0.13,
+            'em_O3_1_sigma': sigma_int*(1+redshift),
             'em_O3_2_flux': 2.8e-17*flux_scaling*1,
-            'em_O3_2_sigma': 0.13,
+            'em_O3_2_sigma': sigma_int*(1+redshift),
             'em_Hb_flux': 1.2e-17*flux_scaling,
-            'em_Hb_sigma': 0.26,
+            'em_Hb_sigma': sigma_int*(1+redshift),
 #        'template': '../data/Simulation/GSB2.spec',
 #        'wave_type': 'Ang',
 #        'flux_type': 'flambda',
@@ -202,7 +230,8 @@ param_limit = [
 
 ### Pickled runner and sampler
 #DATA_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/bgs_like_array_tnom600/"
-DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+#DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+DATA_DIR = os.path.join("../tests/test_data", args.run_name)
 FIG_DIR = os.path.join(DATA_DIR, "figs")
 SUM_DIR = os.path.join(DATA_DIR, "summary_stats")
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
@@ -214,11 +243,11 @@ Path(os.path.join(FIG_DIR, "trace")).mkdir(parents=True, exist_ok=True)
 Path(os.path.join(FIG_DIR, "posterior")).mkdir(parents=True, exist_ok=True)
 
 sampler_fn = os.path.join(DATA_DIR, 
-    "sampler/%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
+    "sampler/%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl"%(flux_bin, sini, hlr, args.sigma_int, fiberconf))
 ### Data vector used in the code
 datafile = os.path.join(DATA_DIR, 
-    "dv/%d_sini%.2f_hlr%.2f_fiberconf%d.pkl"%(flux_bin, sini, hlr, fiberconf))
-postfix = "sim_%d_sini%.2f_hlr%.2f_fiberconf%d"%(flux_bin, sini, hlr, fiberconf)
+    "dv/%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl"%(flux_bin, sini, hlr, args.sigma_int, fiberconf))
+postfix = "sim_%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d"%(flux_bin, sini, hlr, args.sigma_int, fiberconf)
 
 Nparams = len(sampled_pars)
 
@@ -286,44 +315,75 @@ rmag = obsSED.calculateMagnitude("../data/Bandpass/CTIO/DECam.r.dat")
 pars = Pars(sampled_pars, meta_pars)
 log_posterior = LogPosterior(pars, dv, likelihood='fiber')
 loglike = log_posterior.log_likelihood
-wave = get_Cube(0).lambdas.mean(axis=1)*10 # Angstrom
+
+#wave = likelihood.get_GlobalLambdas()
+#wave = get_Cube(0).lambdas.mean(axis=1)*10 # Angstrom
 images_bestfit = loglike.get_images(sampled_pars_bestfit)
 
 ### 5. fiber spectra
 ### ================
-Ha_center = LINE_LAMBDAS['Ha'].to('Angstrom').value * (1+pars.meta['sed']['z'])
-fig, axes = plt.subplots(1,Nspec, figsize=(2*Nspec,2), sharey=True)
-for i in range(Nspec):
-    ax = axes[i]
-    snr = get_emline_snr(dv.get_data(i), wave, dv.get_noise(i), 'Ha', 
-               pars.meta['sed']['z'], subtract_cont=True)
-    if i==Nspec-1:
-        SNR_best=snr
-    fiberpos = (dv.get_config(i)['FIBERDX'],dv.get_config(i)['FIBERDY'])
-    ax.plot(wave, dv.get_data(i)+dv.get_noise(i), color='grey', drawstyle='steps')
-    ax.plot(wave, dv.get_data(i), color='k', label='data')
-    ax.plot(wave, images_bestfit[i], label='bestfit', ls=':', color='r')
-    ax.text(0.05, 0.02, "S/N=%.2f"%snr, transform=ax.transAxes)
-    ax.set(xlim=[Ha_center-20, Ha_center+20], xlabel='Wavelength [A]')
-    ax.text(0.05, 0.9, '(%.1f", %.1f")'%(fiberpos[0], fiberpos[1]), transform=ax.transAxes)
-axes[0].legend(frameon=False)
-axes[0].set(ylabel='ADU')
+fig, axes = plt.subplots(len(offsets),len(emlines), figsize=(2*len(emlines),2*len(offsets)))
+
+_obs_id_, SNR_best = 0, []
+for j, (emline, bid) in enumerate(zip(emlines, blockids)):
+    wave = likelihood.get_GlobalLambdas(bid).mean(axis=1)
+    emline_cen = np.mean(LINE_LAMBDAS[emline].to('Angstrom').value) * (1+pars.meta['sed']['z'])
+    for i, (dx, dy) in enumerate(offsets):
+        ax = axes[i,j]
+        snr = get_emline_snr(dv.get_data(_obs_id_)+0*dv.get_noise(_obs_id_), 
+                             wave*10, dv.get_noise(_obs_id_), emline, 
+                             pars.meta['sed']['z'], subtract_cont=True)
+        ax.plot(wave*10, dv.get_data(_obs_id_)+dv.get_noise(_obs_id_), color="grey", drawstyle="steps")
+        ax.text(0.05,0.05, "SNR=%.3f"%snr, transform=ax.transAxes, color='red', weight='bold')
+        ax.text(0.05,0.9, "(%.1f, %.1f)"%(dx, dy), transform=ax.transAxes, color='red', weight='bold')
+        ax.plot(wave*10, images_bestfit[_obs_id_], ls='-', color="k")
+        # ax.axvline(emline_cen-20, c='grey', ls='-.')
+        # ax.axvline(emline_cen+20, c='grey', ls='-.')
+        # ax.axvline(emline_cen-10, c='grey', ls=':')
+        # ax.axvline(emline_cen+10, c='grey', ls=':')
+        if j==0:
+            ax.set(ylabel='Flux [ADU]')
+        if (np.abs(dx)<1e-3) & (np.abs(dy)<1e-3):
+            SNR_best.append(snr)
+        _obs_id_+=1
+    axes[len(offsets)-1, j].set(xlabel="Wavelength [A]")
+    axes[0, j].set(title=f'{emline}')
+plt.xlabel('wavelength [A]')
+plt.ylabel('ADU')
+# Ha_center = LINE_LAMBDAS['Ha'].to('Angstrom').value * (1+pars.meta['sed']['z'])
+# fig, axes = plt.subplots(Nspec,  figsize=(2*Nspec,2), sharey=True)
+# for i in range(Nspec):
+#     ax = axes[i]
+#     #print(dv.get_data(i).shape)
+#     snr = get_emline_snr(dv.get_data(i), wave, dv.get_noise(i), 'Ha', 
+#                pars.meta['sed']['z'], subtract_cont=True)
+#     if i==Nspec-1:
+#         SNR_best=snr
+#     fiberpos = (dv.get_config(i)['FIBERDX'],dv.get_config(i)['FIBERDY'])
+#     ax.plot(wave, dv.get_data(i)+dv.get_noise(i), color='grey', drawstyle='steps')
+#     ax.plot(wave, dv.get_data(i), color='k', label='data')
+#     ax.plot(wave, images_bestfit[i], label='bestfit', ls=':', color='r')
+#     ax.text(0.05, 0.02, "S/N=%.2f"%snr, transform=ax.transAxes)
+#     ax.set(xlim=[Ha_center-20, Ha_center+20], xlabel='Wavelength [A]')
+#     ax.text(0.05, 0.9, '(%.1f", %.1f")'%(fiberpos[0], fiberpos[1]), transform=ax.transAxes)
+# axes[0].legend(frameon=False)
+# axes[0].set(ylabel='ADU')
 plt.savefig(os.path.join(FIG_DIR, "spectra/"+postfix+".png"))
 plt.close(fig)
 
 ### 6. broad-band image
 ### ===================
 fig, axes = plt.subplots(1,3,figsize=(9,3), sharey=True)
-noisy_data = dv.get_data(Nspec)+dv.get_noise(Nspec)
-dchi2 = (((dv.get_data(Nspec)-images_bestfit[Nspec])/np.std(dv.get_noise(Nspec)))**2).sum()
+noisy_data = dv.get_data(_obs_id_)+dv.get_noise(_obs_id_)
+dchi2 = (((dv.get_data(_obs_id_)-images_bestfit[_obs_id_])/np.std(dv.get_noise(_obs_id_)))**2).sum()
 
 Ny, Nx = noisy_data.shape
-extent = np.array([-Nx/2, Nx/2, -Ny/2, Ny/2])*dv.get_config(Nspec)['PIXSCALE']
+extent = np.array([-Nx/2, Nx/2, -Ny/2, Ny/2])*dv.get_config(_obs_id_)['PIXSCALE']
 
 cb = axes[0].imshow(noisy_data, origin='lower', extent=extent)
 vmin, vmax = cb.get_clim()
-axes[1].imshow(images_bestfit[Nspec], origin='lower', vmin=vmin, vmax=vmax, extent=extent)
-axes[2].imshow(noisy_data-images_bestfit[Nspec], origin='lower', vmin=vmin, vmax=vmax, extent=extent)
+axes[1].imshow(images_bestfit[_obs_id_], origin='lower', vmin=vmin, vmax=vmax, extent=extent)
+axes[2].imshow(noisy_data-images_bestfit[_obs_id_], origin='lower', vmin=vmin, vmax=vmax, extent=extent)
 
 
 plt.colorbar(cb, ax=axes.ravel().tolist(), location='right', fraction=0.0135,
@@ -338,9 +398,10 @@ axes[0].set(xlabel="X [arcsec]", ylabel="Y [arcsec]")
 axes[1].set(xlabel="X [arcsec]")
 axes[2].set(xlabel="X [arcsec]")
 
-for i in range(Nspec):
-    conf = dv.get_config(i)
-    dx, dy, rad = conf['FIBERDX'],conf['FIBERDY'],conf['FIBERRAD']
+for (dx, dy) in offsets:
+    rad = fiber_rad
+    #conf = dv.get_config(i)
+    #dx, dy, rad = conf['FIBERDX'],conf['FIBERDY'],conf['FIBERRAD']
     circ = Circle((dx, dy), rad, fill=False, ls='-.', color='red')
     axes[0].add_patch(circ)
     axes[0].text(dx, dy, "+", ha='center', va='center', color='red')
@@ -351,7 +412,7 @@ plt.close(fig)
 ### 7. save summary stats
 ### =====================
 with open(os.path.join(SUM_DIR,postfix+".dat"), "w") as fp:
-    res1 = "%d %f %.2f %.2f %d %le %le"%(flux_bin, rmag, sini, hlr, fiberconf, sigma_e_rms, SNR_best)
+    res1 = "%d %f %.2f %.2f %d %le %le"%(flux_bin, rmag, sini, hlr, fiberconf, sigma_e_rms, np.max(SNR_best))
     pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
     pars_errs = [marge_stat.parWithName(key).err for key in sampled_pars]
     res2 = ' '.join("%le"%bias for bias in pars_bias)

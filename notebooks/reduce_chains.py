@@ -50,31 +50,38 @@ fiberconf = args.fiberconf
 fiber_blur = 3.4 # pixels
 atm_psf_fwhm = 1.0 # arcsec
 fiber_rad = 0.75 # arcsec
-fiber_offset_x = 1.5 # arcsec
-fiber_offset_y = 1.5 # arcsec
+fiber_offset = 1.5 # arcsec
+#fiber_offset_y = 1.5 # arcsec
 exptime_nominal = args.EXPTIME # seconds
 ADD_NOISE = False
 
 emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
-blockids = [0, 2, 3, 4]
+blockids = [0, 1, 2, 3]
 if args.fiberconf==0:
-    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), 
-               (0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
-    Nspec = 5
+    offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
+               (fiber_offset*np.cos(np.pi/2),   fiber_offset*np.sin(np.pi/2)),
+               (fiber_offset*np.cos(np.pi),   fiber_offset*np.sin(np.pi)),
+               (fiber_offset*np.cos(3*np.pi/2), fiber_offset*np.sin(3*np.pi/2)),
+               (0,0)]
+    OFFSETX = 1
 elif args.fiberconf==1:
-    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), (0,0)]
-    Nspec = 3
+    offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
+               (fiber_offset*np.cos(np.pi),   fiber_offset*np.sin(np.pi)),
+               (0,0)]
+    OFFSETX = 2
 elif args.fiberconf==2:
-    offsets = [(0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
-    Nspec = 3
+    offsets = [(fiber_offset*np.cos(np.pi/2),   fiber_offset*np.sin(np.pi/2)),
+               (fiber_offset*np.cos(3*np.pi/2), fiber_offset*np.sin(3*np.pi/2)),
+               (0,0)]
+    OFFSETX = 2
 elif args.fiberconf==3:
-    offsets = [(fiber_offset_x, 0), (0, fiber_offset_y), (0,0)]
-    Nspec = 3
+    offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
+               (fiber_offset*np.cos(np.pi/2),   fiber_offset*np.sin(np.pi/2)),
+               (0,0)]
+    OFFSETX = 2
 else:
     print(f'Fiber configuration case {args.fiberconf} is not implemented yet!')
     exit(-1)
-
-
 
 def return_lse_func(xs, ys, ivars):
     xc = np.sum(xs*ivars)/np.sum(ivars)
@@ -154,7 +161,8 @@ default_meta = {
         'lred': 1200,
         'resolution': 500000,
         'scale': 0.11, # arcsec
-        'lambda_range': [[482.3, 487.11], [629.7, 634.51], [642.4, 647.21], [648.7, 653.51], [851, 855.81]],     
+        'lambda_range': [[482.3, 487.11], #[629.7, 634.51], 
+[642.4, 647.21], [648.7, 653.51], [851, 855.81]],     
         'lambda_res': 0.08, # nm
         'super_sampling': 4,
         'lambda_unit': 'nm',
@@ -229,9 +237,8 @@ param_limit = [
 ]
 
 ### Pickled runner and sampler
-#DATA_DIR = "/xdisk/timeifler/jiachuanxu/kl_fiber/bgs_like_array_tnom600/"
-#DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
-DATA_DIR = os.path.join("../tests/test_data", args.run_name)
+DATA_DIR = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+#DATA_DIR = os.path.join("../tests/test_data", args.run_name)
 FIG_DIR = os.path.join(DATA_DIR, "figs")
 SUM_DIR = os.path.join(DATA_DIR, "summary_stats")
 Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
@@ -243,11 +250,11 @@ Path(os.path.join(FIG_DIR, "trace")).mkdir(parents=True, exist_ok=True)
 Path(os.path.join(FIG_DIR, "posterior")).mkdir(parents=True, exist_ok=True)
 
 sampler_fn = os.path.join(DATA_DIR, 
-    "sampler/%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl"%(flux_bin, sini, hlr, args.sigma_int, fiberconf))
+    "sampler/%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl"%(flux_bin, sini, hlr, sigma_int, fiberconf))
 ### Data vector used in the code
 datafile = os.path.join(DATA_DIR, 
-    "dv/%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl"%(flux_bin, sini, hlr, args.sigma_int, fiberconf))
-postfix = "sim_%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d"%(flux_bin, sini, hlr, args.sigma_int, fiberconf)
+    "dv/%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl"%(flux_bin, sini, hlr, sigma_int, fiberconf))
+postfix = "sim_%d_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d"%(flux_bin, sini, hlr, sigma_int, fiberconf)
 
 Nparams = len(sampled_pars)
 

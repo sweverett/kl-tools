@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=klfiber
-#SBATCH --output=KL_fiber-%A_%a.out
+#SBATCH --output=/xdisk/timeifler/jiachuanxu/kl_fiber/outputs/KL_fiber-%A_%a.out
 #SBATCH --nodes=1
-#SBATCH --ntasks=8
+#SBATCH --ntasks=12
 #SBATCH --array=1-800
 #SBATCH --cpus-per-task=1
 
@@ -15,7 +15,7 @@
 
 #SBATCH --account=timeifler
 
-#SBATCH --time=3:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jiachuanxu@arizona.edu
 
@@ -29,8 +29,8 @@ conda activate kltools
 
 # 2 fiber configurations x 12 SNR bins x 4 hlr x 10 sinis; 960
 DATADIR=/xdisk/timeifler/jiachuanxu/kl_fiber
-RUN=SNR-HDR_tnom900
-NSTEPS=5000
+RUN=SNR-HDR_multiline_3image_tnom900
+NSTEPS=10000
 TNOM=900
 SCRIPT=test_fiber_mcmc_run.py
 NCPUS=${SLURM_NTASKS}

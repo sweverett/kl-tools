@@ -62,8 +62,8 @@ args = parser.parse_args()
 fiber_blur = 3.4 # pixels
 atm_psf_fwhm = 1.0 # arcsec
 fiber_rad = 0.75 # arcsec
-fiber_offset_x = 1.5 # arcsec
-fiber_offset_y = 1.5 # arcsec
+fiber_offset = 1.5 # arcsec
+#fiber_offset_y = 1.5 # arcsec
 exptime_nominal = args.EXPTIME # seconds
 ADD_NOISE = False
 
@@ -85,22 +85,31 @@ default_obs_conf, _index_ = [], 0
 
 ### Fiber observations
 emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
-blockids = [0, 2, 3, 4]
+blockids = [0, 1, 2, 3]
 channels = ['b', 'r', 'r', 'z']
 rdnoise = [3.41, 2.6, 2.6, 2.6]
 ### Choose fiber configurations
 if args.fiberconf==0:
-    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), 
-               (0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
+    offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
+               (fiber_offset*np.cos(np.pi/2),   fiber_offset*np.sin(np.pi/2)),
+               (fiber_offset*np.cos(np.pi),   fiber_offset*np.sin(np.pi)),
+               (fiber_offset*np.cos(3*np.pi/2), fiber_offset*np.sin(3*np.pi/2)),
+               (0,0)]
     OFFSETX = 1
 elif args.fiberconf==1:
-    offsets = [(fiber_offset_x, 0), (-fiber_offset_x, 0), (0,0)]
+    offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
+               (fiber_offset*np.cos(np.pi),   fiber_offset*np.sin(np.pi)),
+               (0,0)]
     OFFSETX = 2
 elif args.fiberconf==2:
-    offsets = [(0, fiber_offset_y), (0, -fiber_offset_y), (0,0)]
+    offsets = [(fiber_offset*np.cos(np.pi/2),   fiber_offset*np.sin(np.pi/2)),
+               (fiber_offset*np.cos(3*np.pi/2), fiber_offset*np.sin(3*np.pi/2)),
+               (0,0)]
     OFFSETX = 2
 elif args.fiberconf==3:
-    offsets = [(fiber_offset_x, 0), (0, fiber_offset_y), (0,0)]
+    offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
+               (fiber_offset*np.cos(np.pi/2),   fiber_offset*np.sin(np.pi/2)),
+               (0,0)]
     OFFSETX = 2
 else:
     print(f'Fiber configuration case {args.fiberconf} is not implemented yet!')
@@ -113,7 +122,7 @@ for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
         _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp, 
             'RDNOISE': rdn, 'FIBERDX': dx, 'FIBERDY': dy})
         if np.abs(dx)>1e-3 and np.abs(dy)>1e-3:
-            _conf.update({'EPTIME': exptime_nominal*OFFSETX})
+            _conf.update({'EXPTIME': exptime_nominal*OFFSETX})
         default_obs_conf.append(_conf)
         _index_+=1
 
@@ -121,10 +130,10 @@ for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
 # Assume 150s exptime for all exposures
 # tune the sky level such that the 5-sigma limit are
 # 𝑔=24.0, 𝑟=23.4 and 𝑧=22.5
-# photometry_band = ['r', 'g', 'z']
-# sky_levels = [40.4/4*150/15, 19.02/4*150/40, 40.4/4*150/5]
-photometry_band = ['r', ]
-sky_levels = [40.4/4*150/15,]
+photometry_band = ['r', 'g', 'z']
+sky_levels = [40.4/4*150/15, 19.02/4*150/40, 40.4/4*150/5]
+#photometry_band = ['r', ]
+#sky_levels = [40.4/4*150/15,]
 
 for chn, sky in zip(photometry_band, sky_levels):
     _bp = "../data/Bandpass/CTIO/DECam.%s.dat"%chn
@@ -165,9 +174,14 @@ def main(args, pool):
         'rscale',
         'hlr',
         ]
-    sampled_pars_value = [0.0, 0.0, 0, sini, 0.0, 300.0, hlr, hlr]
+    sampled_pars_value = [
+        0.0, 0.0, 0, sini, 
+        0.0, 300.0, hlr, 
+        hlr]
     sampled_pars_std = np.array(
-        [0.01, 0.01, 0.01, 0.01, 2, 5, 0.01, 0.01]
+        [0.01, 0.01, 0.01, 0.01, 
+         2, 5, 0.01, 
+         0.01]
         )/1000
     sampled_pars_value_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_value)}
     meta_pars = {
@@ -183,7 +197,7 @@ def main(args, pool):
             'theta_int': priors.UniformPrior(-np.pi, np.pi),
             'sini': priors.UniformPrior(0, 1.),
             'v0': priors.GaussPrior(0, 10),
-            #'vcirc': priors.UniformPrior(10, 800),
+            'vcirc': priors.UniformPrior(10, 800),
             'vcirc': priors.GaussPrior(300, 80, clip_sigmas=3),
             'rscale': priors.UniformPrior(0.1, 5),
             'hlr': priors.UniformPrior(0.1, 5),
@@ -194,6 +208,9 @@ def main(args, pool):
             'v0': 'sampled',
             'vcirc': 'sampled',
             'rscale': 'sampled',
+            #'v0': 0.0,
+            #'vcirc': 300.0,
+            #'rscale': 1.5,
         },
         ### intensity model
         'intensity': {
@@ -220,7 +237,8 @@ def main(args, pool):
             'lred': 1200,
             'resolution': 500000,
             'scale': 0.11, # arcsec
-            'lambda_range': [[482.3, 487.11], [629.7, 634.51], [642.4, 647.21], [648.7, 653.51], [851, 855.81]], 
+            'lambda_range': [[482.3, 487.11], #[629.7, 634.51], 
+                             [642.4, 647.21], [648.7, 653.51], [851, 855.81]], 
             'lambda_res': 0.08, # nm
             'super_sampling': 4,
             'lambda_unit': 'nm',
@@ -279,8 +297,8 @@ def main(args, pool):
     #cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
     cube_dir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber")
     outdir = os.path.join(cube_dir, run_name)
-    outfile_sampler = os.path.join(outdir, 'sampler/%s_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, args.sigma_int, fiber_conf))
-    outfile_dv = os.path.join(outdir, 'dv/%s_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, args.sigma_int, fiber_conf))
+    outfile_sampler = os.path.join(outdir, 'sampler/%s_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, sigma_int, fiber_conf))
+    outfile_dv = os.path.join(outdir, 'dv/%s_sini%.2f_hlr%.2f_intsig%.3f_fiberconf%d.pkl'%(flux_scaling_power, sini, hlr, sigma_int, fiber_conf))
 
     #-----------------------------------------------------------------
     # Setup sampled posterior

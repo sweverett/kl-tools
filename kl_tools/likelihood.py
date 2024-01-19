@@ -336,7 +336,7 @@ class LogLikelihood(LogBase):
 
         return log_det
 
-    def setup_vmap(self, theta_pars):
+    def setup_vmap(self, theta_pars, meta):
         '''
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
@@ -346,12 +346,17 @@ class LogLikelihood(LogBase):
         '''
 
         try:
-            model_name = self.pars['velocity']['model']
+            #model_name = self.pars['velocity']['model']
+            model_name = meta['velocity']['model']
         except KeyError:
             model_name = 'default'
+        for key in ['v0', 'vcirc', 'rscale']:
+            if theta_pars.get(key, None) is None:
+                theta_pars[key] = meta['velocity'][key]
 
         # no extras for this func
-        return self._setup_vmap(theta_pars, self.meta, model_name)
+        #return self._setup_vmap(theta_pars, self.meta, model_name)
+        return self._setup_vmap(theta_pars, meta, model_name)
 
     @classmethod
     def _setup_vmap(cls, theta_pars, meta_pars, model_name):
@@ -1408,7 +1413,7 @@ class FiberLikelihood(LogLikelihood):
         X, Y = utils.build_map_grid(self.mNx, self.mNy, indexing='xy', scale=self.mscale)
         # create 2D velocity & intensity maps given sampled transformation
         # parameters, and evaluate maps at pixel centers in obs plane
-        vmap = self.setup_vmap(theta_pars)
+        vmap = self.setup_vmap(theta_pars, _meta_update)
         imap = self.setup_imap(theta_pars, _meta_update)
         v_array = vmap('obs', X, Y, normalized=True, use_numba=use_numba)
         i_array, gal = imap.render(theta_pars, None, _meta_update, im_type='emission')

@@ -83,7 +83,7 @@ parser.add_argument('-sigma_int', type=int, default=1, help='Intrinsic eml sig')
 parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
 parser.add_argument('-EXP_OFFSET', type=int, default=600, 
     help='Exposure time of offset fibers, in second')
-parser.add_argument('-EXP_PHOTO', type=int, default=150, 
+parser.add_argument('-EXP_PHOTO', type=int, default=-1, 
     help='Exposure time of photometry image, in second')
 parser.add_argument('-PA', type=int, default=0, help='Position angle')
 parser.add_argument('-NPHOT', type=int, default=1, help='# of photometry image')
@@ -175,15 +175,17 @@ for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
 photometry_band = ['r', 'g', 'z']
 #sky_levels = [40.4/4*150/15, 19.02/4*150/40, 40.4/4*150/5]
 sky_levels = [44.54, 19.02, 168.66]
+LS_DR9_exptime = [50, 90, 80]
 #photometry_band = ['r', ]
 #sky_levels = [40.4/4*150/15,]
 
-for chn, sky in zip(photometry_band[:args.NPHOT], sky_levels[:args.NPHOT]):
-    _bp = "../data/Bandpass/CTIO/DECam.%s.dat"%chn
+for i in range(args.NPHOT):
+    _bp = "../data/Bandpass/CTIO/DECam.%s.dat"%photometry_band[i]
     _conf = copy.deepcopy(default_photo_conf)
-    _conf.update({"OBSINDEX": _index_, 'BANDPASS': _bp, "SKYLEVEL": sky,
-        "EXPTIME": exptime_photo})
+    _conf.update({"OBSINDEX": _index_, 'BANDPASS': _bp, "SKYLEVEL": sky_levels[i],
+        "EXPTIME": exptime_photo if exptime_photo>0 else LS_DR9_exptime[i]})
     default_obs_conf.append(_conf)
+    _index_+=1
 
 ####################### Main function ##########################################
 def main(args, pool):

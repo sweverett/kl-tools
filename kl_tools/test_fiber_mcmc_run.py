@@ -110,7 +110,7 @@ ADD_NOISE = False
 
 ##################### Setting up observation configurations ####################
 default_fiber_conf = {'INSTNAME': "DESI", 'OBSTYPE': 1,
-     'SKYMODEL': "../data/Skyspectra/skysb_grey.dat", 'PSFTYPE': "airy_fwhm",
+     'SKYMODEL': "../data/Skyspectra/spec-sky.dat", 'PSFTYPE': "airy_fwhm",
      'PSFFWHM': atm_psf_fwhm, 'DIAMETER': 332.42, 'EXPTIME': 180,
      'GAIN': 1.0, 'NOISETYP': 'ccd', 'ADDNOISE': ADD_NOISE, 
      'FIBERRAD': fiber_rad, 'FIBRBLUR': fiber_blur,
@@ -118,7 +118,7 @@ default_fiber_conf = {'INSTNAME': "DESI", 'OBSTYPE': 1,
 
 default_photo_conf = {'INSTNAME': "CTIO/DECam", 'OBSTYPE': 0, 'NAXIS': 2,
     'NAXIS1': 32, 'NAXIS2': 30, 'PIXSCALE': 0.2637, 'PSFTYPE': "airy_fwhm",
-    'PSFFWHM': 1.0, 'DIAMETER': 378.2856, 'EXPTIME': 150, 'GAIN': 4.0,
+    'PSFFWHM': 1.0, 'DIAMETER': 378.2856, 'EXPTIME': 50, 'GAIN': 4.0,
     'NOISETYP': 'ccd', 'RDNOISE': 7, 'ADDNOISE': ADD_NOISE,
 }
 
@@ -175,7 +175,7 @@ for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
 photometry_band = ['r', 'g', 'z']
 #sky_levels = [40.4/4*150/15, 19.02/4*150/40, 40.4/4*150/5]
 sky_levels = [44.54, 19.02, 168.66]
-LS_DR9_exptime = [50, 90, 80]
+LS_DR9_exptime = [60, 100, 80]
 #photometry_band = ['r', ]
 #sky_levels = [40.4/4*150/15,]
 

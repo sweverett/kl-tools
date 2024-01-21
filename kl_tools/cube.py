@@ -990,7 +990,7 @@ class FiberModelCube(DataVector):
         ========
         noise: GalSim Noise object
         '''
-        random_seed = config.get('RANDSEED', int(time()))
+        random_seed = config.get('RANDSEED', int(time()*1000))
         rng = galsim.BaseDeviate(random_seed+1)
 
         _type = config.get('NOISETYP', 'ccd').lower()

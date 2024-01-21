@@ -162,9 +162,9 @@ for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
         _conf = copy.deepcopy(default_fiber_conf)
         _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp, 
             'RDNOISE': rdn, 'FIBERDX': dx, 'FIBERDY': dy})
-        if np.abs(dx)>1e-3 and np.abs(dy)>1e-3:
+        if np.abs(dx)>1e-3 or np.abs(dy)>1e-3:
             _conf.update({'EXPTIME': exptime_offset*OFFSETX})
-        print(f'offset = ({dx}, {dy}); EXPTIME = {_conf["EXPTIME"]}')
+        print(f'offset = ({dx}, {dy}); EXPTIME = {_conf["EXPTIME"]} s')
         default_obs_conf.append(_conf)
         _index_+=1
 
@@ -184,6 +184,7 @@ for i in range(args.NPHOT):
     _conf = copy.deepcopy(default_photo_conf)
     _conf.update({"OBSINDEX": _index_, 'BANDPASS': _bp, "SKYLEVEL": sky_levels[i],
         "EXPTIME": exptime_photo if exptime_photo>0 else LS_DR9_exptime[i]})
+    print(f'Band {photometry_band[i]} EXPTIME={_conf["EXPTIME"]} s')
     default_obs_conf.append(_conf)
     _index_+=1
 
@@ -202,7 +203,7 @@ def main(args, pool):
     flux_scaling_power = args.Iflux
     #flux_scaling = 1.58489**flux_scaling_power
     #flux_scaling = 1.2**flux_scaling_power
-    flux_scaling = 10**((22-16)/2.5/9) ** flux_scaling_power
+    flux_scaling = (10**((22-16)/2.5/9)) ** flux_scaling_power
     sini = 0.05 + 0.1*args.sini
     assert (0<sini<1)
     hlr = 0.5 + 0.5*args.hlr 
@@ -575,7 +576,7 @@ def main(args, pool):
     ### 7. save summary stats
     ### =====================
     with open(os.path.join(sum_dir, filename_fmt+".dat"), "w") as fp:
-        res1 = "%d %f %.2f %.2f %le %d %d %le %le"%(args.Iflux, rmag, sini, hlr, PA, args.EXP_PHOTO, fiber_conf, sigma_e_rms, np.max(SNR_best))
+        res1 = "%d %.4f %.2f %.2f %le %d %d %le %le"%(args.Iflux, rmag, sini, hlr, PA, args.EXP_PHOTO, fiber_conf, sigma_e_rms, np.max(SNR_best))
         pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
         pars_errs = [ms.parWithName(key).err for key in sampled_pars]
         res2 = ' '.join("%le"%bias for bias in pars_bias)

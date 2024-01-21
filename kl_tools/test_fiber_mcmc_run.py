@@ -549,9 +549,12 @@ def main(args, pool):
                             vmin=vmin, vmax=vmax, extent=extent)
         plt.colorbar(cb, ax=row_axes.ravel().tolist(), location='right', 
             fraction=0.0135, label='ADU', pad=0.005)
-        ax1.text(0.05, 0.9, 'Data (noise-free)', color='white', transform=ax1.transAxes)
-        ax2.text(0.05, 0.9, 'Bestfit', color='white', transform=ax2.transAxes)
-        ax3.text(0.05, 0.9, 'Redisuals', color='white', transform=ax3.transAxes)
+        ax1.text(0.05, 0.9, '%s Data (noise-free)'%(photometry_band[i]), 
+            color='white', transform=ax1.transAxes)
+        ax2.text(0.05, 0.9, '%s Bestfit'%(photometry_band[i]), 
+            color='white', transform=ax2.transAxes)
+        ax3.text(0.05, 0.9, '%s Redisuals'%(photometry_band[i]), 
+            color='white', transform=ax3.transAxes)
         ax3.text(0.75, 0.9, r'$\Delta\chi^2=$%.1e'%(dchi2), color='white',
                         ha='center', transform=ax3.transAxes)
 

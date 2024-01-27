@@ -1,5 +1,6 @@
 from copy import deepcopy
-import utils
+
+import kl_tools.utils as utils
 
 import ipdb
 
@@ -89,6 +90,8 @@ class SampledPars(object):
                 raise TypeError('pars_order must have int values!')
 
         self.pars_order = pars_order
+
+        self.names = [*self.pars_order]
 
         return
 
@@ -240,4 +243,3 @@ class MCMCPars(MetaPars):
                 pars[key] = cls._set_sampled_pars(theta_pars, pars[key])
 
         return pars
-

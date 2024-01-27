@@ -1,13 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
-
-# def log_prior(theta):
-#     '''
-#     theta: Parameters sampled by zeus. Order defined in PARS_ORDER
-#     '''
-
-#     # Until implemented, contribute nothing to posterior
-#     return 0
+import scipy.stats
 
 class Prior(object):
     '''
@@ -36,20 +29,31 @@ class UniformPrior(Prior):
             raise TypeError('inclusive must be a bool!')
         self.left = left
         self.right = right
+        self.width = right - left
         self.inclusive = inclusive
         self.norm = 1. / (right - left)
 
         # There is no defined peak for a uniform dist
         self.peak = None
         self.cen = np.mean([left, right])
-        self.scale = None
+
+        # while there is not a strict scale to give, some fraction of the
+        # support is good enough for determining our initial sampling
+        self.scale = abs(right - left) / 4.
 
         return
 
-    def __call__(self, x, log=False):
+    def __call__(self, x, log=False, quantile=False):
         '''
-        log: Set to return the log of the probability
+        log: bool
+            Set to return the log of the probability
+        quantile: bool
+            Set to transform quantile x sampled from a unit hypercube to
+            its actual value by the inverse CDF of the prior function
         '''
+
+        if quantile is True:
+            return self._inv_cdf(x)
 
         val = self.norm
 
@@ -67,6 +71,9 @@ class UniformPrior(Prior):
                 return -np.inf
             else:
                 return np.log(val)
+
+    def _inv_cdf(self, quantile):
+        return self.left + self.width * quantile
 
 class GaussPrior(Prior):
     def __init__(self, mu, sigma, clip_sigmas=None, zero_boundary=None):
@@ -109,10 +116,17 @@ class GaussPrior(Prior):
 
         return
 
-    def __call__(self, x, log=False):
+    def __call__(self, x, log=False, quantile=False):
         '''
-        log: Set to return the log of the probability
+        log: bool
+            Set to return the log of the probability
+        quantile: bool
+            Set to transform x sampled from a unit hypercube to
+            its actual value by the inverse CDF of the prior function
         '''
+
+        if quantile is True:
+            return self._inv_cdf(x)
 
         if self.clip_sigmas is not None:
             if (abs(x - self.mu) / self.sigma) > self.clip_sigmas:
@@ -134,3 +148,6 @@ class GaussPrior(Prior):
             return np.log(self.norm) + base
         else:
             return norm * np.exp(base)
+
+    def _inv_cdf(self, quantile):
+        return scipy.stats.norm(self.mu, self.sigma).ppf(quantile)

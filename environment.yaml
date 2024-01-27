@@ -1,7 +1,6 @@
 name: kltools
 channels:
   - defaults
-  - conda-forge
 dependencies:
   - astropy
   - numpy=1.22
@@ -20,3 +19,4 @@ dependencies:
   - fitsio
   - ipdb
   - scipy
+  - ultranest

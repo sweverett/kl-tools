@@ -15,8 +15,8 @@ import astropy.wcs as wcs
 import astropy.units as u
 from argparse import ArgumentParser
 
-import utils
-from emission import EmissionLine, LINE_LAMBDAS
+import kl_tools.utils as utils
+from kl_tools.emission import EmissionLine, LINE_LAMBDAS
 
 import ipdb
 

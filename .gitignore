@@ -127,3 +127,25 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# unittest plots and output
+tests/plots/
+
+# test run script outputs
+scripts/out/
+
+# data runs that might be saved here
+runs/
+jobs/
+
+# IDEs
+.vscode/
+
+# paper, for now
+paper/
+
+# data files
+data/
+
+# mac
+.DS_Store

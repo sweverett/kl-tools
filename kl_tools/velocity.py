@@ -58,7 +58,7 @@ class VelocityModel(object):
         # Make sure there are no undefined pars
         for name, val in self.pars.items():
             if val is None:
-                raise ValueError(f'{param} must be set!')
+                raise ValueError(f'{name} must be set!')
             if name not in self._model_params:
                 if name in self._ignore_params:
                     continue

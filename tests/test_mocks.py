@@ -162,6 +162,7 @@ class TestDefaultMockObservation(unittest.TestCase):
 
         self.mock_obs = DefaultMockObservation()
         self.mock_obs_basis = DefaultMockObservation(imap='basis')
+        self.mock_obs_psf = DefaultMockObservation(psf=False)
 
         try:
             wrong = DefaultMockObservation(imap='other')
@@ -212,6 +213,9 @@ class TestDefaultMockObservation(unittest.TestCase):
 
         outfile = os.path.join(outdir, 'default-mock-datacube-basis.png')
         self.mock_obs_basis.datacube.plot(show=False, outfile=outfile)
+
+        outfile = os.path.join(outdir, 'default-mock-datacube-psf.png')
+        self.mock_obs_psf.datacube.plot(show=False, outfile=outfile)
 
         return
 

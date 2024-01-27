@@ -61,11 +61,23 @@ class MockObservation(object):
             self.true_pars, self.datacube_pars
             )
 
+        try:
+            datacube.set_psf(self.datacube_pars['psf'])
+        except KeyError:
+            pass
+
         self.datacube = datacube
         self.true_vmap = true_vmap
         self.true_im = true_im
 
         return
+
+    @property
+    def psf(self) -> gs.GSObject:
+        try:
+            return self.datacube_pars['psf']
+        except KeyError:
+            return None
 
     def plot(self, plot_kwargs:dict) -> None:
         '''
@@ -100,7 +112,7 @@ class DefaultMockObservation(MockObservation):
     _true_flux = 1.8e4
     _true_hlr = 3.5
 
-    _datacube_pars = {
+    _base_datacube_pars = {
         # image meta pars
         'Nx': 40, # pixels
         'Ny': 40, # pixels
@@ -108,7 +120,6 @@ class DefaultMockObservation(MockObservation):
         # intensity meta pars
         'true_flux': _true_flux, # counts
         'true_hlr': _true_hlr, # pixels
-        'imap_type': 'inclined_exp',
         # velocty meta pars
         'v_model': 'centered',
         'v_unit': Unit('km/s'),
@@ -124,7 +135,12 @@ class DefaultMockObservation(MockObservation):
 
     }
 
+    _datacube_exp_pars = {
+        'imap_type': 'inclined_exp',
+    }
+
     _datacube_basis_pars = {
+        'imap_type': 'basis',
         'basis_type': 'exp_shapelets',
         'use_basis_as_truth': True,
         'basis_kwargs': {
@@ -134,10 +150,14 @@ class DefaultMockObservation(MockObservation):
         }
     }
 
-    def __init__(self, imap: str='inclined_exp') -> None:
+    _psf = gs.Gaussian(fwhm=0.8)
+
+    def __init__(self, imap: str='inclined_exp', psf: bool=True) -> None:
         '''
         imap: str
             The type of intensity map to use for the mock observation. If 'basis', then the true intensity map is the defined basis fit to the galsim-produced image defined in the default _datacube_pars image type
+        psf: bool
+            Set to include the default PSF in the datacube model generation
         '''
 
         if imap == 'inclined_exp':
@@ -147,8 +167,20 @@ class DefaultMockObservation(MockObservation):
         else:
             raise ValueError('imap must be inclined_exp or basis')
 
+        if psf is True:
+            self.datacube_pars.update({'psf': self._psf})
+
         # datacube_pars is set according to imap type in the respective setup method
-        super().__init__(self._true_pars, self.datacube_pars)
+        if imap == 'inclined_exp':
+            exp_pars = {
+                'flux': self._true_flux,
+                'hlr': self._true_hlr,
+            }
+            true_pars = {**self._true_pars, **exp_pars}
+        elif imap == 'basis':
+            true_pars = self._true_pars
+
+        super().__init__(true_pars, self.datacube_pars)
 
         return
 
@@ -157,7 +189,9 @@ class DefaultMockObservation(MockObservation):
         Setup a mock observation using an inclined exponential disk
         '''
 
-        self.datacube_pars = self._datacube_pars
+        self.datacube_pars = {
+            **self._base_datacube_pars, **self._datacube_exp_pars
+        }
 
         return
 
@@ -166,12 +200,14 @@ class DefaultMockObservation(MockObservation):
         Setup a mock observation using a basis intensity map
         '''
 
+        pudb.set_trace()
         self.datacube_pars = {
-            **self._datacube_pars, **self._datacube_basis_pars
+            **self._base_datacube_pars, **self._datacube_basis_pars
         }
 
         return
 
+# NOTE: This is kept for backwards compatability
 def setup_likelihood_test(true_pars: dict, datacube_pars: dict) -> Union[DataCube, VelocityMap, gs.Image]:
     '''
     Setup a test datacube, velocity map, and intensity map given

@@ -6,8 +6,6 @@ from astropy.units import Unit
 from kl_tools.mocks import MockObservation, DefaultMockObservation
 import kl_tools.utils as utils
 
-import pudb
-
 class TestMockObservation(unittest.TestCase):
     def setUp(self) -> None:
         # Set up any necessary objects or data for the tests

@@ -200,7 +200,6 @@ class DefaultMockObservation(MockObservation):
         Setup a mock observation using a basis intensity map
         '''
 
-        pudb.set_trace()
         self.datacube_pars = {
             **self._base_datacube_pars, **self._datacube_basis_pars
         }

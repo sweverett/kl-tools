@@ -15,7 +15,6 @@ import kl_tools.intensity as intensity
 import kl_tools.utils as utils
 
 import ipdb
-import pudb
 
 class MockObservation(object):
     '''
@@ -302,10 +301,12 @@ def _fill_test_datacube(datacube: DataCube, true_pars: dict, pars: dict) -> Unio
         'hlr': pars['true_hlr'],
     }
 
-    try:
-        imap_type = pars['imap_type']
-    except KeyError:
-        imap_type = 'inclined_exp'
+    # NOTE: While the following would seem to make sense, what we actually do is make the imap using an exp profile w/ truth parameters and *then* fit the basis to the produced image
+    # try:
+    #     imap_type = pars['imap_type']
+    # except KeyError:
+    #     imap_type = 'inclined_exp'
+    imap_type = 'inclined_exp'
 
     try:
         use_basis = pars['use_basis_as_truth']
@@ -318,7 +319,7 @@ def _fill_test_datacube(datacube: DataCube, true_pars: dict, pars: dict) -> Unio
         psf = None
 
     # a slight abuse of API call here, passing a dummy datacube to
-    # instantiate the desired type as truth (likely inclined exp)
+    # instantiate the desired type as truth
     imap = intensity.build_intensity_map(imap_type, datacube, imap_pars)
     true_im = imap.render(true_pars, datacube, pars)
 

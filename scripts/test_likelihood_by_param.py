@@ -151,13 +151,15 @@ def main(args):
     if imap == 'inclined_exp':
         intensity_dict = {
             'type': 'inclined_exp',
+            'flux': 'sampled',
+            'hlr': 'sampled',
         }
     elif imap == 'basis':
         # For most tests, you want to use an identical basis model as the datacube generation. You can of course use a different basis model if testing model misspecification
         intensity_dict = {
             'type': 'basis',
             'basis_type': obs.datacube_pars['basis_type'],
-            'basis_kwargs': obs.datacube_pars['basis_kwargs']
+            'basis_kwargs': obs.datacube_pars['basis_kwargs'],
         }
 
     mcmc_pars = {
@@ -249,11 +251,6 @@ def main(args):
 
     sampled_pars = list(obs.true_pars)
 
-    if imap == 'inclined_exp':
-        sampled_pars.append([obs._true_flux, obs._true_hlr])
-
-
-    pudb.set_trace()
     pars = Pars(sampled_pars, mcmc_pars)
     pars_order = pars.sampled.pars_order
 
@@ -320,7 +317,10 @@ def main(args):
     # TODO: Can add a multiprocessing pool here if needed
     k = 1
     for par, par_range in test_pars.items():
-        print(f'Starting loop over {par}: {par_range}')
+        start = f'{par_range[0]:.3f}'
+        end = f'{par_range[1]:.3f}'
+        delta = f'{par_range[2]:.3f}'
+        print(f'Starting loop over {par}: ({start}, {end}; {delta})')
 
         # fresh copy
         theta_pars = deepcopy(obs.true_pars)

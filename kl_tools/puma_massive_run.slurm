@@ -3,7 +3,9 @@
 #SBATCH --output=/xdisk/timeifler/jiachuanxu/kl_fiber/outputs/KL_fiber-%A_%a.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=12
-#SBATCH --array=1-800
+###SBATCH --array=1-800
+###SBATCH --array=47,160,162,163,164,165,214,215,216,217
+#SBATCH --array=32,33,34,42,168,169,614,615,616,625,634,642,643,658
 #SBATCH --cpus-per-task=1
 
 ### >>> High priority purchase-in time
@@ -15,7 +17,7 @@
 
 #SBATCH --account=timeifler
 
-#SBATCH --time=24:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jiachuanxu@arizona.edu
 
@@ -29,9 +31,9 @@ conda activate kltools
 
 # 2 fiber configurations x 12 SNR bins x 4 hlr x 10 sinis; 960
 DATADIR=/xdisk/timeifler/jiachuanxu/kl_fiber
-RUN=SNR-HDR_multiline_3image_tnom900
+RUN=SNR-HDR_multiline_3image_tnom600_margFlux
 NSTEPS=10000
-TNOM=900
+TNOM=600
 SCRIPT=test_fiber_mcmc_run.py
 NCPUS=${SLURM_NTASKS}
 hit=0
@@ -54,13 +56,13 @@ do
 				hit=$((${hit}+1))
 				if [ ${hit} -eq ${SLURM_ARRAY_TASK_ID} ]
 				then
-                    for subit in 0 1 2
-                    do
+                    #for subit in 0 1 2
+                    #do
 					    # run chains
-					    mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=$(( b + subit * 10)) -sini=${d} -hlr=${c} -fiberconf=${a} -EXPTIME=${TNOM} --mpi
+					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b} -sini=${d} -hlr=${c} -PA=0 -fiberconf=${a} -EXP_OFFSET=${TNOM} -NPHOT=3 --mpi
 					    # reduce chains
-					    python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=$(( b + subit * 10))  -sini=${d} -hlr=${c} -fiberconf=${a}
-                    done
+					    #python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=$(( b + subit * 10))  -sini=${d} -hlr=${c} -fiberconf=${a}
+                    #done
 
 #					# run chains
 #					mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=${b}  -sini=${d} -hlr=${c} -fiberconf=$(( a + 2)) --mpi

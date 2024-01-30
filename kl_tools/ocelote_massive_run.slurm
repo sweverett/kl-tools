@@ -29,7 +29,7 @@ conda activate kltools
 
 # 2 fiber configurations x 12 SNR bins x 4 hlr x 10 sinis; 960
 DATADIR=/xdisk/timeifler/jiachuanxu/kl_fiber
-RUN=SNR-HDR_multiline_3image_tnom600
+RUN=SNR-HDR_multiline_3image_tnom600_margFlux
 NSTEPS=10000
 TNOM=600
 SCRIPT=test_fiber_mcmc_run.py
@@ -57,9 +57,9 @@ do
                     for subit in 0 1 2
                     do
 					    # run chains
-					    mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=$(( b + subit * 10)) -sini=${d} -hlr=${c} -fiberconf=${a} -EXPTIME=${TNOM} --mpi
+					    mpirun -n ${NCPUS} --mca btl tcp,self --oversubscribe python ${SCRIPT} ${NSTEPS} -run_name=${RUN} -Iflux=$(( b + subit * 10)) -sini=${d} -hlr=${c} -sigma_int=1 -PA=0 -fiberconf=${a} -EXP_OFFSET=${TNOM} -NPHOT=3 --mpi
 					    # reduce chains
-					    python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=$(( b + subit * 10))  -sini=${d} -hlr=${c} -fiberconf=${a}
+					    #python ../notebooks/reduce_chains.py -run_name=${RUN} -Iflux=$(( b + subit * 10))  -sini=${d} -hlr=${c} -fiberconf=${a}
                     done
 
 #					# run chains

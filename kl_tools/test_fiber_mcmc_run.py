@@ -81,9 +81,9 @@ parser.add_argument('-sini', type=int, default=0, help='sin(i) bin index')
 parser.add_argument('-hlr', type=int, default=0, help='image hlr bin index')
 parser.add_argument('-sigma_int', type=int, default=1, help='Intrinsic eml sig')
 parser.add_argument('-fiberconf', type=int, default=0, help='fiber conf index')
-parser.add_argument('-EXP_OFFSET', type=int, default=600, 
+parser.add_argument('-EXP_OFFSET', type=int, default=600,
     help='Exposure time of offset fibers, in second')
-parser.add_argument('-EXP_PHOTO', type=int, default=-1, 
+parser.add_argument('-EXP_PHOTO', type=int, default=-1,
     help='Exposure time of photometry image, in second')
 parser.add_argument('-PA', type=int, default=0, help='Position angle')
 parser.add_argument('-NPHOT', type=int, default=1, help='# of photometry image')
@@ -112,7 +112,7 @@ ADD_NOISE = False
 default_fiber_conf = {'INSTNAME': "DESI", 'OBSTYPE': 1,
      'SKYMODEL': "../data/Skyspectra/spec-sky.dat", 'PSFTYPE': "airy_fwhm",
      'PSFFWHM': atm_psf_fwhm, 'DIAMETER': 332.42, 'EXPTIME': 180,
-     'GAIN': 1.0, 'NOISETYP': 'ccd', 'ADDNOISE': ADD_NOISE, 
+     'GAIN': 1.0, 'NOISETYP': 'ccd', 'ADDNOISE': ADD_NOISE,
      'FIBERRAD': fiber_rad, 'FIBRBLUR': fiber_blur,
 }
 
@@ -125,10 +125,14 @@ default_photo_conf = {'INSTNAME': "CTIO/DECam", 'OBSTYPE': 0, 'NAXIS': 2,
 default_obs_conf, _index_ = [], 0
 
 ### Fiber observations
-emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
-blockids = [0, 1, 2, 3]
-channels = ['b', 'r', 'r', 'z']
-rdnoise = [3.41, 2.6, 2.6, 2.6]
+# emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
+# blockids = [0, 1, 2, 3]
+# channels = ['b', 'r', 'r', 'z']
+# rdnoise = [3.41, 2.6, 2.6, 2.6]
+emlines = ['Ha']
+blockids = [0]
+channels = ['z']
+rdnoise = [2.6]
 ### Choose fiber configurations
 if args.fiberconf==0:
     offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
@@ -160,7 +164,7 @@ for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
     _bp = "../data/Bandpass/DESI/%s.dat"%(chn)
     for (dx, dy) in offsets:
         _conf = copy.deepcopy(default_fiber_conf)
-        _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp, 
+        _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp,
             'RDNOISE': rdn, 'FIBERDX': dx, 'FIBERDY': dy})
         if np.abs(dx)>1e-3 or np.abs(dy)>1e-3:
             _conf.update({'EXPTIME': exptime_offset*OFFSETX})
@@ -206,7 +210,7 @@ def main(args, pool):
     flux_scaling = (10**((22-16)/2.5/9)) ** flux_scaling_power
     sini = 0.05 + 0.1*args.sini
     assert (0<sini<1)
-    hlr = 0.5 + 0.5*args.hlr 
+    hlr = 0.5 + 0.5*args.hlr
     fiber_conf = args.fiberconf
 
     ########################### Initialization #################################
@@ -221,15 +225,18 @@ def main(args, pool):
         'rscale',
         'hlr',
         'em_Ha_flux',
-        'em_O2_flux',
-        'em_O3_1_flux',
-        'em_O3_2_flux',
+        #'em_O2_flux',
+        #'em_O3_1_flux',
+        #'em_O3_2_flux',
         'obs_cont_norm_flam',
+        'ffnorm_0', 'ffnorm_1', 'ffnorm_2', 'ffnorm_3'
         ]
     print(f'Sampled parameters: {sampled_pars}')
-    sampled_pars_label = ['g_1', 'g_2', r'{\theta}_{\mathrm{int}}', 
-    r'\mathrm{sin}(i)', 'v_0', 'v_\mathrm{circ}', 'r_\mathrm{scale}', 
-    r'\mathrm{hlr}', r'F_\mathrm{H\alpha}', r'F_\mathrm{[OII]}', r'F_\mathrm{[OIII]4960}', r'F_\mathrm{[OIII]5008}', r'F_\mathrm{cont}']
+    sampled_pars_label = ['g_1', 'g_2', r'{\theta}_{\mathrm{int}}',
+    r'\mathrm{sin}(i)', 'v_0', 'v_\mathrm{circ}', 'r_\mathrm{scale}',
+    r'\mathrm{hlr}', r'F_\mathrm{H\alpha}', #r'F_\mathrm{[OII]}', r'F_\mathrm{[OIII]4960}', r'F_\mathrm{[OIII]5008}',
+    r'F_\mathrm{cont}', r'ff_\mathrm{norm}^0', r'ff_\mathrm{norm}^1',
+                          r'ff_\mathrm{norm}^2', r'ff_\mathrm{norm}^3']
     param_limit = [
         [-0.2, 0.2],
         [-0.2, 0.2],
@@ -239,19 +246,24 @@ def main(args, pool):
         [0.0, 800],
         [0, 5],
         [0, 5],
-        [1e-21, 1e-11],[1e-21, 1e-11],[1e-21, 1e-11],[1e-21, 1e-11],[1e-21, 1e-11]
+        [1e-21, 1e-11],[1e-21, 1e-11],#[1e-21, 1e-11],[1e-21, 1e-11],[1e-21, 1e-11]
+        [1e-2, 1e2], [1e-2, 1e2], [1e-2, 1e2], [1e-2, 1e2]
     ]
     sampled_pars_value = [
-        0.0, 0.0, 
-        PA, 
-        sini, 
-        0.0, 300.0, hlr, hlr, 
-        1.2e-16*flux_scaling, 8.8e-17*flux_scaling, 
-        2.4e-17*flux_scaling, 2.8e-17*flux_scaling, 3.0e-17*flux_scaling]
+        0.0, 0.0,
+        PA,
+        sini,
+        0.0, 300.0, hlr, hlr,
+        1.2e-16*flux_scaling, #8.8e-17*flux_scaling, 2.4e-17*flux_scaling, 2.8e-17*flux_scaling,
+        3.0e-17*flux_scaling,
+        1.0, 1.0, 1.0, 1.0,
+        ]
     sampled_pars_std = np.array(
-        [0.01, 0.01, 0.01, 0.01, 
-         2, 5, 0.01, 
-         0.01, 1e-18, 1e-19, 1e-19, 1e-19, 1e-19]
+        [0.01, 0.01, 0.01, 0.01,
+         2, 5, 0.01,
+         0.01, 1e-18, 1e-19, #1e-19, 1e-19, 1e-19,
+         0.1, 0.1, 0.1, 0.1,
+         ]
         )/1000
     sampled_pars_value_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_value)}
     meta_pars = {
@@ -260,15 +272,19 @@ def main(args, pool):
         'g1': 'sampled',
         'theta_int': 'sampled',
         'sini': 'sampled',
+        'ffnorm_0': 'sampled',
+        'ffnorm_1': 'sampled',
+        'ffnorm_2': 'sampled',
+        'ffnorm_3': 'sampled',
         ### priors
         'priors': {
             'g1': priors.UniformPrior(-0.5, 0.5),
             'g2': priors.UniformPrior(-0.5, 0.5),
-            'theta_int': priors.UniformPrior(-np.pi, np.pi),
-            'sini': priors.UniformPrior(0, 1.),
+            'theta_int': priors.UniformPrior(-np.pi/2., np.pi/2.),
+            'sini': priors.UniformPrior(-1., 1.),
             'v0': priors.GaussPrior(0, 10),
             #'vcirc': priors.UniformPrior(10, 800),
-            'vcirc': priors.GaussPrior(300, 80, clip_sigmas=3),
+            'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
             'rscale': priors.UniformPrior(0.1, 5),
             'hlr': priors.UniformPrior(0.1, 5),
         },
@@ -299,7 +315,7 @@ def main(args, pool):
             #'remove_continuum': True,
             'use_numba': False
         },
-        ### 3D underlying model dimension 
+        ### 3D underlying model dimension
         'model_dimension':{
             'Nx': 64,
             'Ny': 62,
@@ -307,8 +323,10 @@ def main(args, pool):
             'lred': 1200,
             'resolution': 500000,
             'scale': 0.11, # arcsec
-            'lambda_range': [[482.3, 487.11], #[629.7, 634.51], 
-                             [642.4, 647.21], [648.7, 653.51], [851, 855.81]], 
+            'lambda_range': [#[482.3, 487.11], [629.7, 634.51],
+                             #[642.4, 647.21], [648.7, 653.51],
+                             [851, 855.81],
+                             ],
             'lambda_res': 0.08, # nm
             'super_sampling': 4,
             'lambda_unit': 'nm',
@@ -328,15 +346,15 @@ def main(args, pool):
             # 'em_Ha_flux': 1.2e-16*flux_scaling,
             'em_Ha_flux': 'sampled',
             'em_Ha_sigma': sigma_int*(1+redshift),
-            # 'em_O2_flux': 8.8e-17*flux_scaling*1,
-            'em_O2_flux': 'sampled',
+            'em_O2_flux': 8.8e-17*flux_scaling*1,
+            # 'em_O2_flux': 'sampled',
             'em_O2_sigma': (sigma_int*(1+redshift), sigma_int*(1+redshift)),
             'em_O2_share': (0.45, 0.55),
-            # 'em_O3_1_flux': 2.4e-17*flux_scaling*1,
-            'em_O3_1_flux': 'sampled',
+            'em_O3_1_flux': 2.4e-17*flux_scaling*1,
+            # 'em_O3_1_flux': 'sampled',
             'em_O3_1_sigma': sigma_int*(1+redshift),
-            # 'em_O3_2_flux': 2.8e-17*flux_scaling*1,
-            'em_O3_2_flux': "sampled",
+            'em_O3_2_flux': 2.8e-17*flux_scaling*1,
+            # 'em_O3_2_flux': "sampled",
             'em_O3_2_sigma': sigma_int*(1+redshift),
             'em_Hb_flux': 1.2e-17*flux_scaling,
             'em_Hb_sigma': sigma_int*(1+redshift),
@@ -373,7 +391,7 @@ def main(args, pool):
 
     fig_dir = os.path.join(outdir, "figs")
     sum_dir = os.path.join(outdir, "summary_stats")
-    
+
     filename_fmt = "%s_sini%.2f_hlr%.2f_intsig%.3f_PA%d_TPHOT%d_fiberconf%d"%\
         (flux_scaling_power, sini, hlr, sigma_int, args.PA, args.EXP_PHOTO, fiber_conf)
     outfile_sampler = os.path.join(outdir, "sampler", filename_fmt+".pkl")
@@ -397,7 +415,7 @@ def main(args, pool):
 
     ######################### Run MCMC sampler #################################
     if (not args.mpi) and args.ncores==1:
-        pool = None 
+        pool = None
     else:
         pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.ncores)
     if isinstance(pool, MPIPool):
@@ -426,7 +444,7 @@ def main(args, pool):
     print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
     MCMCsampler = emcee.EnsembleSampler(nwalkers, ndims, log_posterior,
         args=[None, pars], pool=pool)
-    p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std, 
+    p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std,
         size=nwalkers)
     MCMCsampler.run_mcmc(p0, nsteps, progress=True)
 
@@ -434,7 +452,8 @@ def main(args, pool):
     print(f'Pickling sampler to {outfile_sampler}')
     with open(outfile_sampler, 'wb') as f:
         pickle.dump(MCMCsampler, f)
-    
+    #with open(outfile_sampler, 'rb') as f:
+    #    MCMCsampler = pickle.load(f)
     print(f'Saving data vector to {outfile_dv}')
     dv = get_GlobalDataVector(0)
     dv.to_fits(outfile_dv, overwrite=True)
@@ -472,7 +491,7 @@ def main(args, pool):
     ### ================
     g = plots.get_subplot_plotter()
     g.settings.title_limit_fontsize = 14
-    g.triangle_plot([samples,], filled=True, 
+    g.triangle_plot([samples,], filled=True,
                     markers=sampled_pars_value_dict,
                     marker_args = {'lw':2, 'ls':'--', 'color':'k'},
                     #param_limits={k:v for k,v in zip(param_names, param_limit)}
@@ -481,7 +500,7 @@ def main(args, pool):
     g.export(os.path.join(fig_dir, "posterior", filename_fmt+".png"))
 
     ### 3. shape noise
-    ### ============== 
+    ### ==============
     ms = samples.getMargeStats()
     g1, eg1 = ms.parWithName('g1').mean, ms.parWithName('g1').err
     g2, eg2 = ms.parWithName('g2').mean, ms.parWithName('g2').err
@@ -494,13 +513,31 @@ def main(args, pool):
     sampled_pars_bestfit_dict = {k:v for k,v in zip(sampled_pars, sampled_pars_bestfit)}
     loglike = log_posterior.log_likelihood
     theory_cube, gal, sed = loglike._setup_model(sampled_pars_bestfit_dict, dv)
-    
+
     rmag = sed.calculateMagnitude("../data/Bandpass/CTIO/DECam.r.dat")
     #wave = likelihood.get_GlobalLambdas()
     #wave = get_Cube(0).lambdas.mean(axis=1)*10 # Angstrom
     images_bestfit = loglike.get_images(sampled_pars_bestfit)
 
-    ### 5. fiber spectra
+    ### 5. save summary stats
+    ### =====================
+    with open(os.path.join(sum_dir, filename_fmt+".dat"), "w") as fp:
+        res1 = "%d %.4f %.2f %.2f %le %d %d %le %le"%(args.Iflux, rmag, sini, hlr, PA, args.EXP_PHOTO, fiber_conf, sigma_e_rms, np.max(SNR_best))
+        pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
+        pars_errs = [ms.parWithName(key).err for key in sampled_pars]
+        res2 = ' '.join("%le"%bias for bias in pars_bias)
+        res3 = ' '.join("%le"%err for err in pars_errs)
+        fp.write(' '.join([res1, res2, res3])+'\n')
+    #if (args.Iflux==0) and (args.sini==0) and (args.hlr==0) and (args.fiberconf==0):
+    colname_fn = os.path.join(sum_dir,"colnames.dat")
+    if not os.path.exists(colname_fn):
+        with open(colname_fn, "w") as fp:
+            hdr1 = "# flux_bin rmag sini hlr PA EXPTIME_PHOTO fiberconf sn_rms snr_best"
+            hdr2 = ' '.join("%s_bias"%key for key in sampled_pars)
+            hdr3 = ' '.join("%s_std"%key for key in sampled_pars)
+            fp.write(' '.join([hdr1, hdr2, hdr3])+'\n')
+
+    ### 6. fiber spectra
     ### ================
     fig, axes = plt.subplots(len(offsets),len(emlines), figsize=(2*len(emlines),2*len(offsets)))
 
@@ -509,9 +546,12 @@ def main(args, pool):
         wave = likelihood.get_GlobalLambdas(bid).mean(axis=1)
         emline_cen = np.mean(LINE_LAMBDAS[emline].to('Angstrom').value) * (1+pars.meta['sed']['z'])
         for i, (dx, dy) in enumerate(offsets):
-            ax = axes[i,j]
-            snr = get_emline_snr(dv.get_data(_obs_id_), wave*10, 
-                                 dv.get_noise(_obs_id_), emline, 
+            if len(emlines)==1:
+                ax = axes[i]
+            else:
+                ax = axes[i,j]
+            snr = get_emline_snr(dv.get_data(_obs_id_), wave*10,
+                                 dv.get_noise(_obs_id_), emline,
                                  pars.meta['sed']['z'], subtract_cont=True)
             ax.plot(wave*10, dv.get_data(_obs_id_)+dv.get_noise(_obs_id_), color="grey", drawstyle="steps")
             ax.text(0.05,0.05, "SNR=%.3f"%snr, transform=ax.transAxes, color='red', weight='bold')
@@ -522,14 +562,18 @@ def main(args, pool):
             if (np.abs(dx)<1e-3) & (np.abs(dy)<1e-3):
                 SNR_best.append(snr)
             _obs_id_+=1
-        axes[len(offsets)-1, j].set(xlabel="Wavelength [A]")
-        axes[0, j].set(title=f'{emline}')
+        if len(emlines)>1:
+            axes[len(offsets)-1, j].set(xlabel="Wavelength [A]")
+            axes[0, j].set(title=f'{emline}')
+        else:
+            axes[len(offsets)-1].set(xlabel="Wavelength [A]")
+            axes[0].set(title=f'{emline}')
     plt.xlabel('wavelength [A]')
     plt.ylabel('ADU')
     plt.savefig(os.path.join(fig_dir, "spectra", filename_fmt+".png"))
     plt.close(fig)
 
-    ### 6. broad-band image
+    ### 7. broad-band image
     ### ===================
     fig, axes = plt.subplots(args.NPHOT,3,figsize=(9,3*args.NPHOT), sharey=True)
     for i in range(args.NPHOT):
@@ -543,17 +587,17 @@ def main(args, pool):
 
         cb = ax1.imshow(noisy_data, origin='lower', extent=extent)
         vmin, vmax = cb.get_clim()
-        ax2.imshow(images_bestfit[_obs_id_], origin='lower', 
+        ax2.imshow(images_bestfit[_obs_id_], origin='lower',
                             vmin=vmin, vmax=vmax, extent=extent)
         ax3.imshow(noisy_data-images_bestfit[_obs_id_], origin='lower',
                             vmin=vmin, vmax=vmax, extent=extent)
-        plt.colorbar(cb, ax=row_axes.ravel().tolist(), location='right', 
+        plt.colorbar(cb, ax=row_axes.ravel().tolist(), location='right',
             fraction=0.0135, label='ADU', pad=0.005)
-        ax1.text(0.05, 0.9, '%s Data (noise-free)'%(photometry_band[i]), 
+        ax1.text(0.05, 0.9, '%s Data (noise-free)'%(photometry_band[i]),
             color='white', transform=ax1.transAxes)
-        ax2.text(0.05, 0.9, '%s Bestfit'%(photometry_band[i]), 
+        ax2.text(0.05, 0.9, '%s Bestfit'%(photometry_band[i]),
             color='white', transform=ax2.transAxes)
-        ax3.text(0.05, 0.9, '%s Redisuals'%(photometry_band[i]), 
+        ax3.text(0.05, 0.9, '%s Redisuals'%(photometry_band[i]),
             color='white', transform=ax3.transAxes)
         ax3.text(0.75, 0.9, r'$\Delta\chi^2=$%.1e'%(dchi2), color='white',
                         ha='center', transform=ax3.transAxes)
@@ -576,31 +620,13 @@ def main(args, pool):
     plt.savefig(os.path.join(fig_dir,"image", filename_fmt+".png"))
     plt.close(fig)
 
-    ### 7. save summary stats
-    ### =====================
-    with open(os.path.join(sum_dir, filename_fmt+".dat"), "w") as fp:
-        res1 = "%d %.4f %.2f %.2f %le %d %d %le %le"%(args.Iflux, rmag, sini, hlr, PA, args.EXP_PHOTO, fiber_conf, sigma_e_rms, np.max(SNR_best))
-        pars_bias = [sampled_pars_bestfit_dict[key]-sampled_pars_value_dict[key] for key in sampled_pars]
-        pars_errs = [ms.parWithName(key).err for key in sampled_pars]
-        res2 = ' '.join("%le"%bias for bias in pars_bias)
-        res3 = ' '.join("%le"%err for err in pars_errs)
-        fp.write(' '.join([res1, res2, res3])+'\n')
-    #if (args.Iflux==0) and (args.sini==0) and (args.hlr==0) and (args.fiberconf==0):
-    colname_fn = os.path.join(sum_dir,"colnames.dat")
-    if not os.path.exists(colname_fn):
-        with open(colname_fn, "w") as fp:
-            hdr1 = "# flux_bin rmag sini hlr PA EXPTIME_PHOTO fiberconf sn_rms snr_best"
-            hdr2 = ' '.join("%s_bias"%key for key in sampled_pars)
-            hdr3 = ' '.join("%s_std"%key for key in sampled_pars)
-            fp.write(' '.join([hdr1, hdr2, hdr3])+'\n')
-
     return 0
 
 def _callback_():
     print("Worker exit!!!!!")
 
 if __name__ == '__main__':
-    
+
     rc = main(args, None)
 
     if rc == 0:

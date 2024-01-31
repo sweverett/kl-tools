@@ -1357,8 +1357,12 @@ class FiberLikelihood(LogLikelihood):
         for i in range(self.Nobs):
             fc = get_Cube(i)
             if fc.Fpars.is_dispersed:
-                iblock = fc.conf['SEDBLKID']
+                iblock, obsid = fc.conf['SEDBLKID'], fc.conf['OBSINDEX']
                 _img, _noise = fc.observe(dc_array[iblock], gal, sed, force_noise_free)
+                # apply a flux norm factor to cancel out shear impact on intensity profile, if it's offset fiber
+                dx, dy = fc.conf['FIBERDX'], fc.conf['FIBERDY']
+                if np.sqrt(dx*dx+dy*dy)>1e-3:
+                    _img *= theta_pars.get('ffnorm_%d'%obsid, 1.0)
             else:
                 _img, _noise = fc.observe(None, gal, sed, force_noise_free)
             image_list.append(_img)
@@ -1379,12 +1383,17 @@ class FiberLikelihood(LogLikelihood):
         '''
         dc_array, gal, sed = model[0], model[1], model[2]
         loglike = 0
+        theta_pars = self.theta2pars(theta)
         dv = get_GlobalDataVector(0)
         for i in range(self.Nobs):
             fc = get_Cube(i)
             if fc.Fpars.is_dispersed: 
-                iblock = fc.conf['SEDBLKID']
+                iblock, obsid = fc.conf['SEDBLKID'], fc.conf['OBSINDEX']
                 img, _ = fc.observe(dc_array[iblock], gal, sed)
+                # apply a flux norm factor to cancel out shear impact on intensity profile, if it's offset fiber
+                dx, dy = fc.conf['FIBERDX'], fc.conf['FIBERDY']
+                if np.sqrt(dx*dx+dy*dy)>1e-3:
+                    img *= theta_pars.get('ffnorm_%d'%obsid, 1.0)
             else:
                 img, _ = fc.observe(None, gal, sed)
             data = dv.get_data(i)

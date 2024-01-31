@@ -134,3 +134,53 @@ class GaussPrior(Prior):
             return np.log(self.norm) + base
         else:
             return norm * np.exp(base)
+
+class LognormalPrior(Prior):
+    def __init__(self, mu, dex, clip_sigmas=None):
+        '''
+        mu: mean of dist (not log)
+        dex: std in dex
+        clip_sigmas: if set, reject samples beyond this many sigmas
+                     from mu
+        '''
+
+        for p in [mu, dex]:
+            if not isinstance(p, (int, float)):
+                raise TypeError('Prior parameters must be floats or ints!')
+
+        if clip_sigmas is not None:
+            if not isinstance(clip_sigmas, (int, float)):
+                raise TypeError('clip_sigmas must be either an int or float!')
+            if clip_sigmas <= 0:
+                raise ValueError('clip_sigmas must be positive!')
+
+        self.mu = mu
+        assert mu>0, f'mu must be positive in LognormalPrior!'
+        self.dex = dex
+
+        self.norm = 1. / (dex * np.sqrt(2.*np.pi))
+        self.clip_sigmas = clip_sigmas
+
+        self.peak = np.log10(mu)
+        self.cen = np.log10(mu)
+        self.scale = self.dex
+
+        return
+
+    def __call__(self, x, log=False):
+        '''
+        log: Set to return the log of the probability
+        '''
+        if x<=0:
+            return -np.inf
+        if self.clip_sigmas is not None:
+            if (abs(np.log10(x) - self.cen) / self.scale) > self.clip_sigmas:
+                # sample clipped; ignore
+                return -np.inf
+
+        base = -0.5 * (np.log10(x) - self.cen)**2 / self.scale**2
+
+        if log is True:
+            return np.log(self.norm) + base
+        else:
+            return norm * np.exp(base)

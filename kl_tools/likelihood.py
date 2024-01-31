@@ -353,6 +353,9 @@ class LogLikelihood(LogBase):
         for key in ['v0', 'vcirc', 'rscale']:
             if theta_pars.get(key, None) is None:
                 theta_pars[key] = meta['velocity'][key]
+        for key in ['theta_int', 'sini']:
+            if theta_pars.get(key, None) is None:
+                theta_pars[key] = meta[key]
 
         # no extras for this func
         #return self._setup_vmap(theta_pars, self.meta, model_name)
@@ -1409,9 +1412,25 @@ class FiberLikelihood(LogLikelihood):
 
         theta_pars: dict
             Dictionary of sampled pars
+
+        # Three parameterization schemes are available for the Euler angle
+        # 1. sini_pa: parameterize through sin(inc) and pa
+        # 2. inc_pa: parameterize through inc and pa
+        # 3. eint: parametrize through eint_1 and eint_2 
+        #    **Warning: this parametrization has spin-2 symmetry, so it's missing half of the inclination parameter space, but could be useful when inferring with image-only**
         '''
         _meta_update = self.meta.copy_with_sampled_pars(theta_pars)
         _meta_update['run_options']['imap_return_gal'] = True
+        parametriz =  _meta_update['run_options'].get('alignment_params', 'sini_pa')
+        if parametriz=='inc_pa':
+            _meta_update['sini'] = np.sin(_meta_update['inc'])
+        elif parametriz=='eint':
+            eint1 = _meta_update['eint1']
+            eint2 = _meta_update['eint2']
+            eint = np.abs(eint1 + 1j * eint2)
+            _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
+            _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
+
         try:
             use_numba = _meta_update['run_options']['use_numba']
         except KeyError:

@@ -134,6 +134,7 @@ emlines = []
 blockids = []
 channels = []
 rdnoise = []
+
 ### Choose fiber configurations
 if args.fiberconf==0:
     offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
@@ -332,6 +333,7 @@ def main(args, pool):
     sampled_pars_value = [sampled_pars_value_dict[k] for k in sampled_pars]
     sampled_pars_std=np.array([sampled_pars_std_dict[k] for k in sampled_pars])
     sampled_pars_std /= 1000
+
     meta_pars = {
         ### shear and alignment
         'g1': 'sampled',
@@ -572,86 +574,87 @@ def main(args, pool):
 
     ### 6. fiber spectra
     ### ================
-    fig, axes = plt.subplots(len(offsets),len(emlines), figsize=(2*len(emlines),2*len(offsets)))
-
-    _obs_id_, SNR_best = 0, [-np.inf]
-    for j, (emline, bid) in enumerate(zip(emlines, blockids)):
-        wave = likelihood.get_GlobalLambdas(bid).mean(axis=1)
-        emline_cen = np.mean(LINE_LAMBDAS[emline].to('Angstrom').value) * (1+pars.meta['sed']['z'])
-        for i, (dx, dy) in enumerate(offsets):
-            if len(emlines)==1:
-                ax = axes[i]
-            else:
-                ax = axes[i,j]
-            snr = get_emline_snr(dv.get_data(_obs_id_), wave*10,
+    _obs_id_, SNR_best = 0, [-np.inf,]
+    if (len(emlines)>0):
+        fig, axes = plt.subplots(len(offsets),len(emlines), figsize=(2*len(emlines),2*len(offsets)))
+        for j, (emline, bid) in enumerate(zip(emlines, blockids)):
+            wave = likelihood.get_GlobalLambdas(bid).mean(axis=1)
+            emline_cen = np.mean(LINE_LAMBDAS[emline].to('Angstrom').value) * (1+pars.meta['sed']['z'])
+            for i, (dx, dy) in enumerate(offsets):
+                if len(emlines)==1:
+                    ax = axes[i]
+                else:
+                    ax = axes[i,j]
+                snr = get_emline_snr(dv.get_data(_obs_id_), wave*10,
                                  dv.get_noise(_obs_id_), emline,
                                  pars.meta['sed']['z'], subtract_cont=True)
-            ax.plot(wave*10, dv.get_data(_obs_id_)+dv.get_noise(_obs_id_), color="grey", drawstyle="steps")
-            ax.text(0.05,0.05, "SNR=%.3f"%snr, transform=ax.transAxes, color='red', weight='bold')
-            ax.text(0.05,0.9, "(%.1f, %.1f)"%(dx, dy), transform=ax.transAxes, color='red', weight='bold')
-            ax.plot(wave*10, images_bestfit[_obs_id_], ls='-', color="k")
-            if j==0:
-                ax.set(ylabel='Flux [ADU]')
-            if (np.abs(dx)<1e-3) & (np.abs(dy)<1e-3):
-                SNR_best.append(snr)
-            _obs_id_+=1
-        if len(emlines)>1:
-            axes[len(offsets)-1, j].set(xlabel="Wavelength [A]")
-            axes[0, j].set(title=f'{emline}')
-        else:
-            axes[len(offsets)-1].set(xlabel="Wavelength [A]")
-            axes[0].set(title=f'{emline}')
-    plt.xlabel('wavelength [A]')
-    plt.ylabel('ADU')
-    plt.savefig(os.path.join(fig_dir, "spectra", filename_fmt+".png"))
-    plt.close(fig)
+                ax.plot(wave*10, dv.get_data(_obs_id_)+dv.get_noise(_obs_id_), color="grey", drawstyle="steps")
+                ax.text(0.05,0.05, "SNR=%.3f"%snr, transform=ax.transAxes, color='red', weight='bold')
+                ax.text(0.05,0.9, "(%.1f, %.1f)"%(dx, dy), transform=ax.transAxes, color='red', weight='bold')
+                ax.plot(wave*10, images_bestfit[_obs_id_], ls='-', color="k")
+                if j==0:
+                    ax.set(ylabel='Flux [ADU]')
+                if (np.abs(dx)<1e-3) & (np.abs(dy)<1e-3):
+                    SNR_best.append(snr)
+                _obs_id_+=1
+            if len(emlines)>1:
+                axes[len(offsets)-1, j].set(xlabel="Wavelength [A]")
+                axes[0, j].set(title=f'{emline}')
+            else:
+                axes[len(offsets)-1].set(xlabel="Wavelength [A]")
+                axes[0].set(title=f'{emline}')
+        plt.xlabel('wavelength [A]')
+        plt.ylabel('ADU')
+        plt.savefig(os.path.join(fig_dir, "spectra", filename_fmt+".png"))
+        plt.close(fig)
 
     ### 7. broad-band image
     ### ===================
-    fig, axes = plt.subplots(args.NPHOT,3,figsize=(9,3*args.NPHOT), sharey=True)
-    for i in range(args.NPHOT):
-        row_axes = axes[:] if args.NPHOT==1 else axes[i,:]
-        ax1, ax2, ax3 = row_axes[0], row_axes[1], row_axes[2]
-        noisy_data = dv.get_data(_obs_id_)+dv.get_noise(_obs_id_)
-        dchi2 = (((dv.get_data(_obs_id_)-images_bestfit[_obs_id_])/np.std(dv.get_noise(_obs_id_)))**2).sum()
+    if args.NPHOT>0:
+        fig, axes = plt.subplots(args.NPHOT,3,figsize=(9,3*args.NPHOT), sharey=True)
+        for i in range(args.NPHOT):
+            row_axes = axes[:] if args.NPHOT==1 else axes[i,:]
+            ax1, ax2, ax3 = row_axes[0], row_axes[1], row_axes[2]
+            noisy_data = dv.get_data(_obs_id_)+dv.get_noise(_obs_id_)
+            dchi2 = (((dv.get_data(_obs_id_)-images_bestfit[_obs_id_])/np.std(dv.get_noise(_obs_id_)))**2).sum()
 
-        Ny, Nx = noisy_data.shape
-        extent = np.array([-Nx/2, Nx/2, -Ny/2, Ny/2])*dv.get_config(_obs_id_)['PIXSCALE']
+            Ny, Nx = noisy_data.shape
+            extent = np.array([-Nx/2, Nx/2, -Ny/2, Ny/2])*dv.get_config(_obs_id_)['PIXSCALE']
 
-        cb = ax1.imshow(noisy_data, origin='lower', extent=extent)
-        vmin, vmax = cb.get_clim()
-        ax2.imshow(images_bestfit[_obs_id_], origin='lower',
+            cb = ax1.imshow(noisy_data, origin='lower', extent=extent)
+            vmin, vmax = cb.get_clim()
+            ax2.imshow(images_bestfit[_obs_id_], origin='lower',
                             vmin=vmin, vmax=vmax, extent=extent)
-        ax3.imshow(noisy_data-images_bestfit[_obs_id_], origin='lower',
+            ax3.imshow(noisy_data-images_bestfit[_obs_id_], origin='lower',
                             vmin=vmin, vmax=vmax, extent=extent)
-        plt.colorbar(cb, ax=row_axes.ravel().tolist(), location='right',
+            plt.colorbar(cb, ax=row_axes.ravel().tolist(), location='right',
             fraction=0.0135, label='ADU', pad=0.005)
-        ax1.text(0.05, 0.9, '%s Data (noise-free)'%(photometry_band[i]),
+            ax1.text(0.05, 0.9, '%s Data (noise-free)'%(photometry_band[i]),
             color='white', transform=ax1.transAxes)
-        ax2.text(0.05, 0.9, '%s Bestfit'%(photometry_band[i]),
+            ax2.text(0.05, 0.9, '%s Bestfit'%(photometry_band[i]),
             color='white', transform=ax2.transAxes)
-        ax3.text(0.05, 0.9, '%s Redisuals'%(photometry_band[i]),
+            ax3.text(0.05, 0.9, '%s Redisuals'%(photometry_band[i]),
             color='white', transform=ax3.transAxes)
-        ax3.text(0.75, 0.9, r'$\Delta\chi^2=$%.1e'%(dchi2), color='white',
+            ax3.text(0.75, 0.9, r'$\Delta\chi^2=$%.1e'%(dchi2), color='white',
                         ha='center', transform=ax3.transAxes)
 
 
-        for (dx, dy) in offsets:
-            rad = fiber_rad
-            #conf = dv.get_config(i)
-            #dx, dy, rad = conf['FIBERDX'],conf['FIBERDY'],conf['FIBERRAD']
-            circ = Circle((dx, dy), rad, fill=False, ls='-.', color='red')
-            ax1.add_patch(circ)
-            ax1.text(dx, dy, "+", ha='center', va='center', color='red')
+            for (dx, dy) in offsets:
+                rad = fiber_rad
+                #conf = dv.get_config(i)
+                #dx, dy, rad = conf['FIBERDX'],conf['FIBERDY'],conf['FIBERRAD']
+                circ = Circle((dx, dy), rad, fill=False, ls='-.', color='red')
+                ax1.add_patch(circ)
+                ax1.text(dx, dy, "+", ha='center', va='center', color='red')
 
-        ax1.set(ylabel="Y [arcsec]")
-        if i==args.NPHOT-1:
-            for ax in row_axes:
-                ax.set(xlabel="X [arcsec]")
-        _obs_id_ += 1
+            ax1.set(ylabel="Y [arcsec]")
+            if i==args.NPHOT-1:
+                for ax in row_axes:
+                    ax.set(xlabel="X [arcsec]")
+            _obs_id_ += 1
 
-    plt.savefig(os.path.join(fig_dir,"image", filename_fmt+".png"))
-    plt.close(fig)
+        plt.savefig(os.path.join(fig_dir,"image", filename_fmt+".png"))
+        plt.close(fig)
 
     ### 5. save summary stats
     ### =====================

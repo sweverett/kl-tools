@@ -231,10 +231,10 @@ def main(args, pool):
     r'\mathrm{sin}(i)', 'v_0', 'v_\mathrm{circ}', 'r_\mathrm{scale}', 
     r'\mathrm{hlr}', r'F_\mathrm{H\alpha}', r'F_\mathrm{[OII]}', r'F_\mathrm{[OIII]4960}', r'F_\mathrm{[OIII]5008}', r'F_\mathrm{cont}']
     param_limit = [
-        [-0.2, 0.2],
-        [-0.2, 0.2],
         [-1.0, 1.0],
-        [0.0, 1.0],
+        [-1.0, 1.0],
+        [-np.pi/2., np.pi/2.], # theta_int
+        [-1.0, 1.0], # sini
         [-100, 100],
         [0.0, 800],
         [0, 5],
@@ -264,8 +264,8 @@ def main(args, pool):
         'priors': {
             'g1': priors.UniformPrior(-0.5, 0.5),
             'g2': priors.UniformPrior(-0.5, 0.5),
-            'theta_int': priors.UniformPrior(-np.pi, np.pi),
-            'sini': priors.UniformPrior(0, 1.),
+            'theta_int': priors.UniformPrior(-np.pi/2., np.pi/2.),
+            'sini': priors.UniformPrior(-1., 1.),
             'v0': priors.GaussPrior(0, 10),
             #'vcirc': priors.UniformPrior(10, 800),
             'vcirc': priors.GaussPrior(300, 80, clip_sigmas=3),

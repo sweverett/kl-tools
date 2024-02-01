@@ -293,7 +293,9 @@ class LogLikelihood(LogBase):
         theta_pars = self.theta2pars(theta)
 
         # setup model corresponding to datavector type
-        model = self._setup_model(theta_pars, datavector)
+        model, imap = self._setup_model(
+            theta_pars, datavector, return_imap=True
+            )
 
         # NOTE: in rare cases, the model will return a NaN datacube due
         # to failure to find an inverse of the design matrix when using
@@ -491,7 +493,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         return loglike
 
-    def _setup_model(self, theta_pars, datacube):
+    def _setup_model(self, theta_pars, datacube, return_imap=False):
         '''
         Setup the model datacube given the input datacube datacube
 
@@ -499,6 +501,8 @@ class DataCubeLikelihood(LogLikelihood):
             Dictionary of sampled pars
         datacube: DataCube
             Datavector datacube truncated to desired lambda bounds
+        return_imap: bool
+            Set to return the tuple (model, imap)
         '''
 
         Nx, Ny = datacube.Nx, datacube.Ny
@@ -531,7 +535,11 @@ class DataCubeLikelihood(LogLikelihood):
             theta_pars, v_array, i_array, cont_array, datacube
             )
 
-        return model_datacube
+        # TODO: I don't like this implementation, but for now will handle the case in which basis function marginalization requires imap return
+        if return_imap is True:
+            return model_datacube, imap
+        else:
+            return model_datacube
 
     def setup_imap(self, theta_pars, datacube):
         '''

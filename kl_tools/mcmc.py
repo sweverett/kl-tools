@@ -2,6 +2,7 @@ from abc import abstractmethod
 import types
 import numpy as np
 import os
+import sys
 from astropy.table import Table
 from multiprocessing import Pool
 import schwimmbad
@@ -13,7 +14,7 @@ from corner import corner
 
 import zeus
 import emcee
-# import pocomc as pc
+import pocomc as pc
 import ultranest
 
 import kl_tools.utils as utils
@@ -222,7 +223,7 @@ class MCMCRunner(object):
 
         else:
             # don't have much to go on
-            self.start = scale * np.random.rand(self.nwalkers, self.ndim)
+            self.start = init_scale * np.random.rand(self.nwalkers, self.ndim)
 
         return
 
@@ -910,7 +911,36 @@ class UltranestRunner(MCMCRunner):
         except KeyError:
             self.resume = False
 
+        try:
+            # first, look for explicit setting
+            wrapped_pars = kwargs['wrapped_params']
+        except KeyError:
+            try:
+                # next, ask the pars object
+                wrapped_pars = self.pars.sampled.get_wrapped_pars()
+            except AttributeError:
+                # finally, don't set
+                self.wrapped_params = None
+
+        if wrapped_pars is not None:
+            self.set_wrapped_params(wrapped_pars)
+
         super(UltranestRunner, self).__init__(*args, **kwargs)
+
+        return
+
+    def set_wrapped_params(self, wrapped_params: list) -> None:
+        '''
+        Set which sampled parameters have a wrapped parameter space (e.g. a circle)
+        '''
+
+        len_wrapped = len(wrapped_params)
+        len_sampled = len(self.pars.sampled)
+
+        if len_wrapped != len_sampled:
+            raise ValueError(f'wrapped_params has len {len_wrapped} while pars.sampled has len {len_sampled}')
+
+        self.wrapped_params = wrapped_params
 
         return
 
@@ -920,7 +950,8 @@ class UltranestRunner(MCMCRunner):
             self.loglike,
             transform=self.logprior,
             log_dir=self.log_dir,
-            resume=self.resume
+            resume=self.resume,
+            wrapped_params=self.wrapped_params
             )
 
         return sampler

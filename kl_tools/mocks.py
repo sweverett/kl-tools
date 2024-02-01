@@ -114,7 +114,7 @@ class DefaultMockObservation(MockObservation):
     _base_datacube_pars = {
         # image meta pars
         'Nx': 40, # pixels
-        'Ny': 40, # pixels
+        'Ny': 30, # pixels
         'pix_scale': 0.5, # arcsec / pixel
         # intensity meta pars
         'true_flux': _true_flux, # counts
@@ -128,10 +128,7 @@ class DefaultMockObservation(MockObservation):
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        's2n': 1000000,
-        'true_flux': 1.8e4,
-        'true_hlr': 3.5,
-
+        's2n': 10000000,
     }
 
     _datacube_exp_pars = {
@@ -151,12 +148,14 @@ class DefaultMockObservation(MockObservation):
 
     _psf = gs.Gaussian(fwhm=0.8)
 
-    def __init__(self, imap: str='inclined_exp', psf: bool=True) -> None:
+    def __init__(self, imap: str='inclined_exp', psf: bool=True, s2n: float=None) -> None:
         '''
         imap: str
             The type of intensity map to use for the mock observation. If 'basis', then the true intensity map is the defined basis fit to the galsim-produced image defined in the default _datacube_pars image type
         psf: bool
             Set to include the default PSF in the datacube model generation
+        s2n: float
+            The signal-to-noise ratio of the mock observation. Defaults to the value in the _base_datacube_pars
         '''
 
         if imap == 'inclined_exp':
@@ -168,6 +167,9 @@ class DefaultMockObservation(MockObservation):
 
         if psf is True:
             self.datacube_pars.update({'psf': self._psf})
+
+        if s2n is not None:
+            self.datacube_pars.update({'s2n': s2n})
 
         # datacube_pars is set according to imap type in the respective setup method
         if imap == 'inclined_exp':

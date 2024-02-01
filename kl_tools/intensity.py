@@ -232,6 +232,9 @@ class InclinedExponential(IntensityMap):
                 print('Rendering failed! Making blank image')
                 self.image = np.zeros((self.nx, self.ny))
 
+        # NOTE: this is because the returned image array is indexed by numpy, so (y,x) instead of our desired (x,y)
+        self.image = self.image.swapaxes(0,1)
+
         return
 
     def plot_fit(self, datacube, show=True, close=True, outfile=None,
@@ -649,7 +652,7 @@ class IntensityMapFitter(object):
 
         return det
 
-    def _initialize_fit(theta_pars, pars):
+    def _initialize_fit(self, theta_pars, pars):
         '''
         Setup needed quantities for finding MLE combination of basis
         funcs, along with marginalization factor from the determinant

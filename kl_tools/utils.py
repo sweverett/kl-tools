@@ -44,7 +44,7 @@ def read_yaml(yaml_file):
     with open(yaml_file, 'r') as stream:
         return yaml.safe_load(stream)
 
-def build_map_grid(Nx, Ny):
+def build_map_grid(Nx, Ny, indexing='ij'):
     '''
     We define the grid positions as the center of pixels
 
@@ -63,7 +63,7 @@ def build_map_grid(Nx, Ny):
     assert len(x) == Nx
     assert len(y) == Ny
 
-    X, Y = np.meshgrid(x, y, indexing='ij')
+    X, Y = np.meshgrid(x, y, indexing=indexing)
 
     return X, Y
 
@@ -189,6 +189,11 @@ def get_test_dir():
     base_dir = get_base_dir()
     return base_dir / 'tests'
 
+def get_script_dir():
+    base_dir = get_base_dir()
+    return base_dir / 'scripts'
+
 BASE_DIR = get_base_dir()
 MODULE_DIR = get_module_dir()
 TEST_DIR = get_test_dir()
+SCRIPT_DIR = get_script_dir()

@@ -134,7 +134,7 @@ def main(args):
     psf = args.psf
     show = args.show
 
-    outdir = os.path.join(utils.TEST_DIR, 'test_likelihood_by_param')
+    outdir = os.path.join(utils.SCRIPT_DIR, 'out', 'test_likelihood_by_param')
 
     if run_name is not None:
         outdir = os.path.join(outdir, run_name)
@@ -143,7 +143,7 @@ def main(args):
 
     # We use the same mock observation for the baseline tests
     # This could be modified to create your own custom observation for the test
-    obs = mocks.DefaultMockObservation(imap=imap, psf=psf)
+    obs = mocks.DefaultMockObservation(imap=imap, psf=psf, s2n=100000)
 
     velocity_dict = {
         'model': obs.datacube_pars['v_model'],

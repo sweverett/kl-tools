@@ -3,7 +3,7 @@ import numpy as np
 from astropy import units
 
 from kl_tools.velocity import VelocityModel, OffsetVelocityModel, VelocityMap, get_model_types, build_model
-from kl_tools.utils import get_test_dir, make_dir
+from kl_tools.utils import get_test_dir, make_dir, build_map_grid
 
 class TestVelocityModel(unittest.TestCase):
     def setUp(self) -> None:
@@ -187,6 +187,44 @@ class TestVelocityMap(unittest.TestCase):
         outfile = str(outdir / 'vmap-all-offset.png')
         offset_vmap.plot_all_planes(
             plot_kwargs=plot_kwargs, show=show, outfile=outfile, center=center,
+            )
+
+        return
+
+    def test_plot_rectangle_vmap(self) -> None:
+        outdir = self.plot_dir
+        vmap = self.vmap
+        show = self.show
+        center = True
+
+        Nx, Ny = 50, 30
+        X, Y = build_map_grid(Nx, Ny)
+
+        outfile = str(outdir /  'speedmap-transorms-rect.png')
+        vmap.plot_map_transforms(
+            outfile=outfile, show=show, speed=True, center=center,
+            X=X, Y=Y
+            )
+
+        outfile = str(outdir / 'vmap-transorms-rect.png')
+        vmap.plot_map_transforms(
+            outfile=outfile, show=show, speed=False, center=center,
+            X=X, Y=Y
+            )
+
+        # now for offset model
+        offset_vmap = self.offset_vmap
+
+        outfile = str(outdir / 'speedmap-transorms-offset-rect.png')
+        offset_vmap.plot_map_transforms(
+            outfile=outfile, show=show, speed=True, center=center,
+            X=X, Y=Y
+            )
+
+        outfile = str(outdir / 'vmap-transorms-offset-rect.png')
+        offset_vmap.plot_map_transforms(
+            outfile=outfile, show=show, speed=False, center=center,
+            X=X, Y=Y
             )
 
         return

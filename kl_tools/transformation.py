@@ -2,6 +2,8 @@ from abc import abstractmethod
 import numpy as np
 import pudb
 
+import kl_tools.numba_transformation as nb
+
 '''
 This file contains transformation functions. These
 are all static functions so that numba can be used
@@ -105,27 +107,27 @@ class TransformableImage(object):
 
         if plane == 'obs':
             if use_numba is True:
-                func = _nb_eval_in_obs_plane
+                func = nb.eval_in_obs_plane
             else:
                 func = self._eval_in_obs_plane
         elif plane == 'cen':
             if use_numba is True:
-                func = _nb_eval_in_cen_plane
+                func = nb.eval_in_cen_plane
             else:
                 func = self._eval_in_cen_plane
         elif plane == 'source':
             if use_numba is True:
-                func = _nb_eval_in_source_plane
+                func = nb.eval_in_source_plane
             else:
                 func = self._eval_in_source_plane
         elif plane == 'gal':
             if use_numba is True:
-                func = _nb_eval_in_gal_plane
+                func = nb.eval_in_gal_plane
             else:
                 func = self._eval_in_gal_plane
         elif plane == 'disk':
             if use_numba is True:
-                func = _nb_eval_in_disk_plane
+                func = nb.eval_in_disk_plane
             else:
                 func = self._eval_in_disk_plane
 
@@ -141,16 +143,16 @@ class TransformableImage(object):
         plane: str
             The name of the plane to evaluate the map in the given
             coords
-        speed: bool
-            Set to True to return speed map instead of velocity
         use_numba: bool
             Set to True to use numba versions of transformations
         '''
 
+        pars = self.transform_pars
+
+
         func = self._get_plane_eval_func(plane, use_numba=use_numba)
 
-        return func(pars, x, y, speed=speed)
-
+        return func(pars, x, y)
     @classmethod
     def _eval_in_obs_plane(cls, pars, x, y, **kwargs):
         '''

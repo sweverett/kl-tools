@@ -471,8 +471,13 @@ class VelocityMap(TransformableImage):
 
         return
 
-    def plot_map_transforms(self, size=None, outfile=None, show=True, close=True,
-                            speed=False, center=True, rmax=None):
+    def plot_map_transforms(self, size=None, outfile=None, show=True, close=True, speed=False, center=True, rmax=None, X=None, Y=None):
+        '''
+        X, Y: np.ndarray (2d)
+            Original grid positions to evaluate the velocity map on, in the disk plane. Defaults to (-rmax, rmax) in 100 steps
+        rmax: float
+            Maximum rendering distance from disk center. Defaults to 5 times the rscale of the vmap
+        '''
 
         pars = self.model.pars
 
@@ -485,16 +490,20 @@ class VelocityMap(TransformableImage):
 
         Nr = 100
 
-        Nx = 2*Nr + 1
-        dx = 2*rmax / Nx
-        x = np.arange(-rmax, rmax+dx, dx)
-        y = np.arange(-rmax, rmax+dx, dx)
+        if (X is None) and (Y is None):
+            Nx = 2*Nr + 1
+            dx = 2*rmax / Nx
+            x = np.arange(-rmax, rmax+dx, dx)
+            y = np.arange(-rmax, rmax+dx, dx)
 
-        # uniform grid in disk plane
-        # Xdisk, Ydisk= np.meshgrid(x, y)
-        X, Y = np.meshgrid(x, y)
+            # uniform grid in disk plane
+            # Xdisk, Ydisk= np.meshgrid(x, y)
+            X, Y = np.meshgrid(x, y)
 
-        xlim, ylim = [-rmax, rmax], [-rmax, rmax]
+            xlim, ylim = [-rmax, rmax], [-rmax, rmax]
+        else:
+            xlim = [np.min(X), np.max(X)]
+            ylim = [np.min(Y), np.max(Y)]
 
         if speed is True:
             mtype = 'Speed'

@@ -460,7 +460,7 @@ def main(args, pool):
     # Setup sampler
 
     ndims = log_posterior.ndims
-    nwalkers = 2*ndims
+    nwalkers = 4*ndims
     print(f'Param space dimension = {ndims}; Number of walkers = {nwalkers}')
     size = comm.Get_size()
     rank = comm.Get_rank()

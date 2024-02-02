@@ -13,7 +13,11 @@ import pickle
 import schwimmbad
 import mpi4py
 from mpi4py import MPI
-comm = MPI.COMM_WORLD
+try:
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+except:
+    rank = 0
 from schwimmbad import MPIPool
 from argparse import ArgumentParser
 from astropy.units import Unit
@@ -86,7 +90,8 @@ parser.add_argument('-EXP_OFFSET', type=int, default=600,
 parser.add_argument('-EXP_PHOTO', type=int, default=-1,
     help='Exposure time of photometry image, in second')
 parser.add_argument('-PA', type=int, default=0, help='Position angle')
-parser.add_argument('-NPHOT', type=int, default=1, help='# of photometry image')
+parser.add_argument('-PHOT_MASK', type=int, default=1, help='# of photometry image')
+parser.add_argument('-SPEC_MASK', type=int, default=1, help='# of fiber spectra')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
 group = parser.add_mutually_exclusive_group()
@@ -122,18 +127,21 @@ default_photo_conf = {'INSTNAME': "CTIO/DECam", 'OBSTYPE': 0, 'NAXIS': 2,
 default_obs_conf, _index_ = [], 0
 
 ### Fiber observations
-# emlines = ['O2', 'O3_1', 'O3_2', 'Ha']
-# blockids = [0, 1, 2, 3]
-# channels = ['b', 'r', 'r', 'z']
-# rdnoise = [3.41, 2.6, 2.6, 2.6]
-# emlines = ['Ha']
-# blockids = [0]
-# channels = ['z']
-# rdnoise = [2.6]
-emlines = []
-blockids = []
-channels = []
-rdnoise = []
+emlines = ['O2', 'Hb', 'O3_1', 'O3_2', 'Ha']
+channels = ['b', 'r', 'r', 'r', 'z']
+rdnoise = [3.41, 2.6, 2.6, 2.6, 2.6]
+wavelength_range = np.array([
+                        [482.3, 487.11], 
+                        [629.7, 634.51],
+                        [642.4, 647.21], 
+                        [648.7, 653.51],
+                        [851, 855.81],
+                    ])
+assert args.SPEC_MASK < 2**(len(emlines)), f'Maximum SPEC_MASK allow by {len(emlines)} emission lines: {2**(len(emlines))-1}'
+spec_mask_str = ("{0:0%db}"%len(emlines)).format(args.SPEC_MASK)
+spec_mask = np.array([int(bit) for bit in spec_mask_str])
+Nspec_used = np.sum(spec_mask)
+blockids = [int(np.sum(spec_mask[:i])*spec_mask[i]) for i in range(len(spec_mask))]
 
 ### Choose fiber configurations
 if args.fiberconf==0:
@@ -162,43 +170,54 @@ else:
     print(f'Fiber configuration case {args.fiberconf} is not implemented yet!')
     exit(-1)
 
-for eml, bid, chn, rdn in zip(emlines, blockids, channels, rdnoise):
-    _bp = "../data/Bandpass/DESI/%s.dat"%(chn)
-    for (dx, dy) in offsets:
-        print("Adding Observation %d: spectra"%_index_)
-        _conf = copy.deepcopy(default_fiber_conf)
-        _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp,
-            'RDNOISE': rdn, 'FIBERDX': dx, 'FIBERDY': dy})
-        if np.abs(dx)>1e-3 or np.abs(dy)>1e-3:
-            _conf.update({'EXPTIME': exptime_offset*OFFSETX})
-        print(f'offset = ({dx}, {dy}); EXPTIME = {_conf["EXPTIME"]} s')
-        default_obs_conf.append(_conf)
-        _index_+=1
+#for i, (eml, bid, chn, rdn) in enumerate(zip(emlines, blockids, channels, rdnoise)):
+for i in range(len(emlines)):
+    if spec_mask[i]==1:
+        eml, bid, chn, rdn = emlines[i], blockids[i], channels[i], rdnoise[i]
+        _bp = "../data/Bandpass/DESI/%s.dat"%(chn)
+        for (dx, dy) in offsets:
+            if rank==0:
+                print("\n==== Adding Observation %d: %s spectra"%(_index_, eml))
+            _conf = copy.deepcopy(default_fiber_conf)
+            _conf.update({'OBSINDEX': _index_, 'SEDBLKID': bid, 'BANDPASS': _bp,
+                'RDNOISE': rdn, 'FIBERDX': dx, 'FIBERDY': dy})
+            if np.abs(dx)>1e-3 or np.abs(dy)>1e-3:
+                _conf.update({'EXPTIME': exptime_offset*OFFSETX})
+            if rank==0:
+                print(f'offset = ({dx:.2f}, {dy:.2f}); EXPTIME = {_conf["EXPTIME"]} s')
+            default_obs_conf.append(_conf)
+            _index_+=1
 
 ### Photometry observations
 # Assume 150s exptime for all exposures
 # tune the sky level such that the 5-sigma limit are
-# 𝑔=24.0, 𝑟=23.4 and 𝑧=22.5
+# g=24.0, r=23.4 and z=22.5
 photometry_band = ['r', 'g', 'z']
-#sky_levels = [40.4/4*150/15, 19.02/4*150/40, 40.4/4*150/5]
 sky_levels = [44.54, 19.02, 168.66]
 LS_DR9_exptime = [60, 100, 80]
+assert args.PHOT_MASK < 2**(len(photometry_band)), f'Maximum PHOT_MASK allow by {len(photometry_band)} photometry bands: {2**(len(photometry_band))-1}'
+phot_mask = np.array([int(bit) for bit in ("{0:0%db}"%len(photometry_band)).format(args.PHOT_MASK)])
+Nphot_used = np.sum(phot_mask)
+
 #photometry_band = ['r', ]
 #sky_levels = [40.4/4*150/15,]
 
-for i in range(args.NPHOT):
-    print("Adding Observation %d: image"%_index_)
-    _bp = "../data/Bandpass/CTIO/DECam.%s.dat"%photometry_band[i]
-    _conf = copy.deepcopy(default_photo_conf)
-    _conf.update({"OBSINDEX": _index_, 'BANDPASS': _bp, "SKYLEVEL": sky_levels[i],
-        "EXPTIME": exptime_photo if exptime_photo>0 else LS_DR9_exptime[i]})
-    print(f'Band {photometry_band[i]} EXPTIME={_conf["EXPTIME"]} s')
-    default_obs_conf.append(_conf)
-    _index_+=1
+for i in range(len(photometry_band)):
+    if phot_mask[i]==1:
+        if rank==0:
+            print("\n==== Adding Observation %d: %s image"%(_index_, photometry_band[i]))
+        _bp = "../data/Bandpass/CTIO/DECam.%s.dat"%photometry_band[i]
+        _conf = copy.deepcopy(default_photo_conf)
+        _conf.update({"OBSINDEX": _index_, 'BANDPASS': _bp, "SKYLEVEL": sky_levels[i],
+            "EXPTIME": exptime_photo if exptime_photo>0 else LS_DR9_exptime[i]})
+        if rank==0:
+            print(f'Band {photometry_band[i]} EXPTIME={_conf["EXPTIME"]} s')
+        default_obs_conf.append(_conf)
+        _index_+=1
 
 ####################### Main function ##########################################
 def main(args, pool):
-
+    global rank
     # TODO: Try making datacube a global variable, as it may significantly
     # decrease execution time due to pickling only once vs. every model eval
     nsteps = args.nsteps
@@ -227,28 +246,36 @@ def main(args, pool):
     redshift = 0.3
     ################## Params Sampled & Fiducial Values ########################
     sampled_pars = [
-        'g1',
-        'g2',
-        #'theta_int',
-        #'sini',
+        # 'g1+eint1',
+        # 'g2+eint2',
+        # 'g1-eint1',
+        # 'g2-eint2',
+        "g1",
+        "g2",
         'eint1',
         'eint2',
-        #'v0',
-        #'vcirc',
-        #'rscale',
+        #'theta_int',
+        #'sini',
+        'v0',
+        'vcirc',
+        'rscale',
         'hlr',
-        #'em_Ha_flux',
+        'em_Ha_flux',
         #'em_O2_flux',
         #'em_O3_1_flux',
         #'em_O3_2_flux',
         'obs_cont_norm_flam',
-        #'ffnorm_0', 'ffnorm_1', 'ffnorm_2', 'ffnorm_3'
+        'ffnorm_0', 'ffnorm_1', 'ffnorm_2', 'ffnorm_3'
         ]
     sampled_pars_value_dict = {
         "g1": 0.0,
         "g2": 0.0,
         "eint1": eint1,
         "eint2": eint2,
+        'g1+eint1': 0.0+eint1,
+        'g2+eint2': 0.0+eint2,
+        'g1-eint1': 0.0-eint1,
+        'g2-eint2': 0.0-eint2,
         "theta_int": PA,
         "sini": sini,
         "v0": 0.0,
@@ -266,7 +293,8 @@ def main(args, pool):
         "ffnorm_3": 1.0, 
     }
     ########################### Supporting #################################
-    print(f'Sampled parameters: {sampled_pars}')
+    if rank==0:
+        print(f'Sampled parameters: {sampled_pars}')
     sampled_pars_label = {
         "g1": r'g_1', 
         "g2": r'g_2', 
@@ -287,6 +315,10 @@ def main(args, pool):
         "ffnorm_3": r'ff_\mathrm{norm}^{(3)}', 
         "eint1": r'e^\mathrm{int}_1',
         "eint2": r'e^\mathrm{int}_2',
+        'g1+eint1': r'g_1+e^\mathrm{int}_1',
+        'g2+eint2': r'g_2+e^\mathrm{int}_2',
+        'g1-eint1': r'g_1-e^\mathrm{int}_1',
+        'g2-eint2': r'g_2-e^\mathrm{int}_2',
     }
     param_limit = {
         "g1": [-1.0, 1.0],
@@ -308,6 +340,10 @@ def main(args, pool):
         "ffnorm_3": [1e-2, 1e2], 
         "eint1": [-1,1],
         "eint2": [-1,1],
+        'g1+eint1': [-2,2],
+        'g2+eint2': [-2,2],
+        'g1-eint1': [-2,2],
+        'g2-eint2': [-2,2],
     }
     sampled_pars_std_dict = {
         "g1": 0.01,
@@ -329,6 +365,10 @@ def main(args, pool):
         "ffnorm_1": 0.01, 
         "ffnorm_2": 0.01, 
         "ffnorm_3": 0.01, 
+        'g1+eint1': 0.01,
+        'g2+eint2': 0.01,
+        'g1-eint1': 0.01,
+        'g2-eint2': 0.01,
     }
     sampled_pars_value = [sampled_pars_value_dict[k] for k in sampled_pars]
     sampled_pars_std=np.array([sampled_pars_std_dict[k] for k in sampled_pars])
@@ -338,14 +378,18 @@ def main(args, pool):
         ### shear and alignment
         'g1': 'sampled',
         'g1': 'sampled',
-        #'theta_int': 'sampled',
-        #'sini': 'sampled',
         'eint1': 'sampled',
         'eint2': 'sampled',
-        # 'ffnorm_0': 'sampled',
-        # 'ffnorm_1': 'sampled',
-        # 'ffnorm_2': 'sampled',
-        # 'ffnorm_3': 'sampled',
+        #'theta_int': 'sampled',
+        #'sini': 'sampled',
+        # 'g1+eint1': 'sampled',
+        # 'g2+eint2': 'sampled',
+        # 'g1-eint1': 'sampled',
+        # 'g2-eint2': 'sampled',
+        'ffnorm_0': 'sampled',
+        'ffnorm_1': 'sampled',
+        'ffnorm_2': 'sampled',
+        'ffnorm_3': 'sampled',
         ### priors
         'priors': {
             'g1': priors.UniformPrior(-0.7, 0.7),
@@ -354,21 +398,21 @@ def main(args, pool):
             #'sini': priors.UniformPrior(-1., 1.),
             'eint1': priors.UniformPrior(-1., 1.),
             'eint2': priors.UniformPrior(-1., 1.),
-            #'v0': priors.GaussPrior(0, 10),
-            #'vcirc': priors.UniformPrior(10, 800),
-            #'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
-            #'rscale': priors.UniformPrior(0.1, 5),
+            'v0': priors.GaussPrior(0, 10),
+            'vcirc': priors.UniformPrior(10, 800),
+            'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
+            'rscale': priors.UniformPrior(0.1, 5),
             'hlr': priors.UniformPrior(0.1, 5),
         },
         ### velocity model
         'velocity': {
             'model': 'default',
-            #'v0': 'sampled',
-            #'vcirc': 'sampled',
-            #'rscale': 'sampled',
-            'v0': 0.0,
-            'vcirc': 300.0,
-            'rscale': 1.0,
+            'v0': 'sampled',
+            'vcirc': 'sampled',
+            'rscale': 'sampled',
+            #'v0': 0.0,
+            #'vcirc': 300.0,
+            #'rscale': 1.0,
         },
         ### intensity model
         'intensity': {
@@ -386,7 +430,7 @@ def main(args, pool):
             'run_mode': 'ETC',
             #'remove_continuum': True,
             'use_numba': False,
-            'alignment_params': 'eint', # 'eint' | 'inc_pa' | sini_pa
+            'alignment_params': 'eint', # eint | inc_pa | sini_pa | eint_eigen
         },
         ### 3D underlying model dimension
         'model_dimension':{
@@ -396,10 +440,7 @@ def main(args, pool):
             'lred': 1200,
             'resolution': 500000,
             'scale': 0.11, # arcsec
-            'lambda_range': [#[482.3, 487.11], [629.7, 634.51],
-                             #[642.4, 647.21], [648.7, 653.51],
-                             [851, 855.81],
-                             ],
+            'lambda_range': wavelength_range[np.where(spec_mask==1)[0]],
             'lambda_res': 0.08, # nm
             'super_sampling': 4,
             'lambda_unit': 'nm',
@@ -416,8 +457,8 @@ def main(args, pool):
             'obs_cont_norm_wave': 850,
             # 'obs_cont_norm_flam': 3.0e-17*flux_scaling,
             'obs_cont_norm_flam': 'sampled',
-            'em_Ha_flux': 1.2e-16*flux_scaling,
-            #'em_Ha_flux': 'sampled',
+            #'em_Ha_flux': 1.2e-16*flux_scaling,
+            'em_Ha_flux': 'sampled',
             'em_Ha_sigma': sigma_int*(1+redshift),
             'em_O2_flux': 8.8e-17*flux_scaling*1,
             # 'em_O2_flux': 'sampled',
@@ -438,8 +479,8 @@ def main(args, pool):
     pars = Pars(sampled_pars, meta_pars)
 
     ### Outputs
-    #outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
-    outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+    outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
+    #outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
 
     fig_dir = os.path.join(outdir, "figs")
     sum_dir = os.path.join(outdir, "summary_stats")
@@ -461,7 +502,8 @@ def main(args, pool):
 
     ndims = log_posterior.ndims
     nwalkers = 2*ndims
-    print(f'Param space dimension = {ndims}; Number of walkers = {nwalkers}')
+    if rank==0:
+        print(f'Param space dimension = {ndims}; Number of walkers = {nwalkers}')
     size = comm.Get_size()
     rank = comm.Get_rank()
 
@@ -495,18 +537,21 @@ def main(args, pool):
                 utils.make_dir(sum_dir)
     print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
     MCMCsampler = emcee.EnsembleSampler(nwalkers, ndims, log_posterior,
+        moves=[(emcee.moves.DEMove(), 0.8),(emcee.moves.DESnookerMove(), 0.2),],
         args=[None, pars], pool=pool)
     p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std,
         size=nwalkers)
     MCMCsampler.run_mcmc(p0, nsteps, progress=True)
 
     ########################## Save MCMC outputs ###############################
-    print(f'Pickling sampler to {outfile_sampler}')
+    if rank==0:
+        print(f'Pickling sampler to {outfile_sampler}')
     with open(outfile_sampler, 'wb') as f:
         pickle.dump(MCMCsampler, f)
     #with open(outfile_sampler, 'rb') as f:
     #    MCMCsampler = pickle.load(f)
-    print(f'Saving data vector to {outfile_dv}')
+    if rank==0:
+        print(f'Saving data vector to {outfile_dv}')
     dv = get_GlobalDataVector(0)
     dv.to_fits(outfile_dv, overwrite=True)
 
@@ -520,7 +565,8 @@ def main(args, pool):
 
     ### build getdist.MCSamples object from the chains
     goodwalkers = np.where(blobs[-1,:,1]>-100)[0]
-    print(f'Failed walkers {blobs.shape[1]-len(goodwalkers)}/{blobs.shape[1]}')
+    if rank==0:
+        print(f'Failed walkers {blobs.shape[1]-len(goodwalkers)}/{blobs.shape[1]}')
     samples = MCSamples(samples=[chains[nsteps//2:,gw,:] for gw in goodwalkers],
         loglikes=[-1*blobs[nsteps//2:,gw,:].sum(axis=1) for gw in goodwalkers],
         names = sampled_pars, 
@@ -558,7 +604,8 @@ def main(args, pool):
     g1, eg1 = ms.parWithName('g1').mean, ms.parWithName('g1').err
     g2, eg2 = ms.parWithName('g2').mean, ms.parWithName('g2').err
     sigma_e_rms = np.sqrt(eg1**2+eg2**2)
-    print(f'r.m.s. shape noise = {sigma_e_rms}')
+    if rank==0:
+        print(f'r.m.s. shape noise = {sigma_e_rms}')
 
     ### 4. best-fitting v.s. data
     ### =========================
@@ -610,10 +657,10 @@ def main(args, pool):
 
     ### 7. broad-band image
     ### ===================
-    if args.NPHOT>0:
-        fig, axes = plt.subplots(args.NPHOT,3,figsize=(9,3*args.NPHOT), sharey=True)
-        for i in range(args.NPHOT):
-            row_axes = axes[:] if args.NPHOT==1 else axes[i,:]
+    if Nphot_used>0:
+        fig, axes = plt.subplots(Nphot_used,3,figsize=(9,3*Nphot_used), sharey=True)
+        for i in range(Nphot_used):
+            row_axes = axes[:] if Nphot_used==1 else axes[i,:]
             ax1, ax2, ax3 = row_axes[0], row_axes[1], row_axes[2]
             noisy_data = dv.get_data(_obs_id_)+dv.get_noise(_obs_id_)
             dchi2 = (((dv.get_data(_obs_id_)-images_bestfit[_obs_id_])/np.std(dv.get_noise(_obs_id_)))**2).sum()
@@ -648,7 +695,7 @@ def main(args, pool):
                 ax1.text(dx, dy, "+", ha='center', va='center', color='red')
 
             ax1.set(ylabel="Y [arcsec]")
-            if i==args.NPHOT-1:
+            if i==Nphot_used-1:
                 for ax in row_axes:
                     ax.set(xlabel="X [arcsec]")
             _obs_id_ += 1

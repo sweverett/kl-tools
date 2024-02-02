@@ -1430,6 +1430,19 @@ class FiberLikelihood(LogLikelihood):
             eint = np.abs(eint1 + 1j * eint2)
             _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
             _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
+        elif parametriz=='eint_eigen':
+            eint1 = (_meta_update['g1+eint1'] - _meta_update['g1-eint1'])/2.
+            eint2 = (_meta_update['g2+eint2'] - _meta_update['g2-eint2'])/2.
+            g1 = (_meta_update['g1+eint1'] + _meta_update['g1-eint1'])/2.
+            g2 = (_meta_update['g2+eint2'] + _meta_update['g2-eint2'])/2.
+            eint = np.abs(eint1 + 1j * eint2)
+            _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
+            _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
+            _meta_update['g1'] = g1
+            _meta_update['g2'] = g2
+        else:
+            raise ValueError(f'Unsupported parametrization {parametriz}!')
+            exit(-1)
 
         try:
             use_numba = _meta_update['run_options']['use_numba']

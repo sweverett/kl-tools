@@ -15,9 +15,11 @@ import mpi4py
 from mpi4py import MPI
 try:
     comm = MPI.COMM_WORLD
+    size = comm.Get_size()
     rank = comm.Get_rank()
 except:
     rank = 0
+    size = 1
 from schwimmbad import MPIPool
 from argparse import ArgumentParser
 from astropy.units import Unit
@@ -217,7 +219,7 @@ for i in range(len(photometry_band)):
 
 ####################### Main function ##########################################
 def main(args, pool):
-    global rank
+    global rank, size
     # TODO: Try making datacube a global variable, as it may significantly
     # decrease execution time due to pickling only once vs. every model eval
     nsteps = args.nsteps
@@ -504,8 +506,6 @@ def main(args, pool):
     nwalkers = 2*ndims
     if rank==0:
         print(f'Param space dimension = {ndims}; Number of walkers = {nwalkers}')
-    size = comm.Get_size()
-    rank = comm.Get_rank()
 
     ######################### Run MCMC sampler #################################
     if (not args.mpi) and args.ncores==1:

@@ -481,8 +481,8 @@ def main(args, pool):
     pars = Pars(sampled_pars, meta_pars)
 
     ### Outputs
-    outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
-    #outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+    #outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
+    outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
 
     fig_dir = os.path.join(outdir, "figs")
     sum_dir = os.path.join(outdir, "summary_stats")
@@ -537,7 +537,7 @@ def main(args, pool):
                 utils.make_dir(sum_dir)
     print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
     MCMCsampler = emcee.EnsembleSampler(nwalkers, ndims, log_posterior,
-        moves=[(emcee.moves.DEMove(), 0.8),(emcee.moves.DESnookerMove(), 0.2),],
+        #moves=[(emcee.moves.DEMove(), 0.8),(emcee.moves.DESnookerMove(), 0.2),],
         args=[None, pars], pool=pool)
     p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std,
         size=nwalkers)

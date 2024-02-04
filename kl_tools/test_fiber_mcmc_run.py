@@ -550,7 +550,7 @@ def main(args, pool):
                 utils.make_dir(sum_dir)
     print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
     MCMCsampler = emcee.EnsembleSampler(nwalkers, ndims, log_posterior,
-        moves=[(emcee.moves.DEMove(), 0.8),(emcee.moves.DESnookerMove(), 0.2),],
+        #moves=[(emcee.moves.DEMove(), 0.8),(emcee.moves.DESnookerMove(), 0.2),],
         args=[None, pars], pool=pool)
     p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std,
         size=nwalkers)

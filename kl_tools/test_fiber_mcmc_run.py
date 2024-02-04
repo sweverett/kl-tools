@@ -256,8 +256,8 @@ def main(args, pool):
         "g2",
         'eint1',
         'eint2',
-        #'theta_int',
-        #'sini',
+        # 'theta_int',
+        # 'sini',
         'v0',
         'vcirc',
         'rscale',
@@ -382,8 +382,8 @@ def main(args, pool):
         'g1': 'sampled',
         'eint1': 'sampled',
         'eint2': 'sampled',
-        #'theta_int': 'sampled',
-        #'sini': 'sampled',
+        # 'theta_int': 'sampled',
+        # 'sini': 'sampled',
         # 'g1+eint1': 'sampled',
         # 'g2+eint2': 'sampled',
         # 'g1-eint1': 'sampled',
@@ -418,10 +418,23 @@ def main(args, pool):
         },
         ### intensity model
         'intensity': {
+            ### Inclined Exp profile
             'type': 'inclined_exp',
             'flux': 1.0, # counts
             'hlr': 'sampled',
             #'hlr': 1.0
+            ### Basis function profile
+            # 'type': 'basis',
+            # 'basis_type':'exp_shapelets',# (shape|sersic|exp_shape)-lets
+            # 'basis_kwargs': {
+            #     'Nmax': 12, # fiducial=12
+            #     'plane': 'obs', # obs|disk
+            #     'beta': 0.37, # n12-exp_shapelet
+            #     # 'beta': 1.45, # n20-sersiclet
+            #     # 'beta': 'sampled',
+            #     'index': 1,
+            #     'b': 1,
+            # }
         },
         ### misc
         'units': {
@@ -481,8 +494,8 @@ def main(args, pool):
     pars = Pars(sampled_pars, meta_pars)
 
     ### Outputs
-    outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
-    #outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+    #outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
+    outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
 
     fig_dir = os.path.join(outdir, "figs")
     sum_dir = os.path.join(outdir, "summary_stats")

@@ -1422,27 +1422,28 @@ class FiberLikelihood(LogLikelihood):
         _meta_update = self.meta.copy_with_sampled_pars(theta_pars)
         _meta_update['run_options']['imap_return_gal'] = True
         parametriz =  _meta_update['run_options'].get('alignment_params', 'sini_pa')
-        if parametriz=='inc_pa':
-            _meta_update['sini'] = np.sin(_meta_update['inc'])
-        elif parametriz=='eint':
-            eint1 = _meta_update['eint1']
-            eint2 = _meta_update['eint2']
-            eint = np.abs(eint1 + 1j * eint2)
-            _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
-            _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
-        elif parametriz=='eint_eigen':
-            eint1 = (_meta_update['g1+eint1'] - _meta_update['g1-eint1'])/2.
-            eint2 = (_meta_update['g2+eint2'] - _meta_update['g2-eint2'])/2.
-            g1 = (_meta_update['g1+eint1'] + _meta_update['g1-eint1'])/2.
-            g2 = (_meta_update['g2+eint2'] + _meta_update['g2-eint2'])/2.
-            eint = np.abs(eint1 + 1j * eint2)
-            _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
-            _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
-            _meta_update['g1'] = g1
-            _meta_update['g2'] = g2
-        else:
-            raise ValueError(f'Unsupported parametrization {parametriz}!')
-            exit(-1)
+        if _meta_update['intensity']['type']=='inclined_exp':
+            if parametriz=='inc_pa':
+                _meta_update['sini'] = np.sin(_meta_update['inc'])
+            elif parametriz=='eint':
+                eint1 = _meta_update['eint1']
+                eint2 = _meta_update['eint2']
+                eint = np.abs(eint1 + 1j * eint2)
+                _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
+                _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
+            elif parametriz=='eint_eigen':
+                eint1 = (_meta_update['g1+eint1'] - _meta_update['g1-eint1'])/2.
+                eint2 = (_meta_update['g2+eint2'] - _meta_update['g2-eint2'])/2.
+                g1 = (_meta_update['g1+eint1'] + _meta_update['g1-eint1'])/2.
+                g2 = (_meta_update['g2+eint2'] + _meta_update['g2-eint2'])/2.
+                eint = np.abs(eint1 + 1j * eint2)
+                _meta_update['theta_int'] = np.angle(eint1 + 1j * eint2)/2.
+                _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
+                _meta_update['g1'] = g1
+                _meta_update['g2'] = g2
+            else:
+                raise ValueError(f'Unsupported parametrization {parametriz}!')
+                exit(-1)
 
         try:
             use_numba = _meta_update['run_options']['use_numba']

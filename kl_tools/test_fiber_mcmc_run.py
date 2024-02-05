@@ -254,20 +254,20 @@ def main(args, pool):
         # 'g2-eint2',
         "g1",
         "g2",
-        'eint1',
-        'eint2',
+        # 'eint1',
+        # 'eint2',
         # 'theta_int',
         # 'sini',
-        'v0',
-        'vcirc',
-        'rscale',
-        'hlr',
-        'em_Ha_flux',
+        # 'v0',
+        # 'vcirc',
+        # 'rscale',
+        # 'hlr',
+        # 'em_Ha_flux',
         #'em_O2_flux',
         #'em_O3_1_flux',
         #'em_O3_2_flux',
-        'obs_cont_norm_flam',
-        'ffnorm_0', 'ffnorm_1', 'ffnorm_2', 'ffnorm_3'
+        # 'obs_cont_norm_flam',
+        # 'ffnorm_0', 'ffnorm_1', 'ffnorm_2', 'ffnorm_3'
         ]
     sampled_pars_value_dict = {
         "g1": 0.0,
@@ -380,49 +380,55 @@ def main(args, pool):
         ### shear and alignment
         'g1': 'sampled',
         'g1': 'sampled',
-        'eint1': 'sampled',
-        'eint2': 'sampled',
+        #'eint1': 'sampled',
+        #'eint2': 'sampled',
+        'eint1': sampled_pars_value_dict['eint1'],
+        'eint2': sampled_pars_value_dict['eint2'],
         # 'theta_int': 'sampled',
         # 'sini': 'sampled',
         # 'g1+eint1': 'sampled',
         # 'g2+eint2': 'sampled',
         # 'g1-eint1': 'sampled',
         # 'g2-eint2': 'sampled',
-        'ffnorm_0': 'sampled',
-        'ffnorm_1': 'sampled',
-        'ffnorm_2': 'sampled',
-        'ffnorm_3': 'sampled',
+        #'ffnorm_0': 'sampled',
+        #'ffnorm_1': 'sampled',
+        #'ffnorm_2': 'sampled',
+        #'ffnorm_3': 'sampled',
+        'ffnorm_0': sampled_pars_value_dict['ffnorm_0'],
+        'ffnorm_1': sampled_pars_value_dict['ffnorm_1'],
+        'ffnorm_2': sampled_pars_value_dict['ffnorm_2'],
+        'ffnorm_3': sampled_pars_value_dict['ffnorm_3'],
         ### priors
         'priors': {
             'g1': priors.UniformPrior(-0.7, 0.7),
             'g2': priors.UniformPrior(-0.7, 0.7),
             #'theta_int': priors.UniformPrior(-np.pi/2., np.pi/2.),
             #'sini': priors.UniformPrior(-1., 1.),
-            'eint1': priors.UniformPrior(-1., 1.),
-            'eint2': priors.UniformPrior(-1., 1.),
-            'v0': priors.GaussPrior(0, 10),
-            'vcirc': priors.UniformPrior(10, 800),
-            'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
-            'rscale': priors.UniformPrior(0.1, 5),
-            'hlr': priors.UniformPrior(0.1, 5),
+            #'eint1': priors.UniformPrior(-1., 1.),
+            #'eint2': priors.UniformPrior(-1., 1.),
+            #'v0': priors.GaussPrior(0, 10),
+            #'vcirc': priors.UniformPrior(10, 800),
+            #'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
+            #'rscale': priors.UniformPrior(0.1, 5),
+            #'hlr': priors.UniformPrior(0.1, 5),
         },
         ### velocity model
         'velocity': {
             'model': 'default',
-            'v0': 'sampled',
-            'vcirc': 'sampled',
-            'rscale': 'sampled',
-            #'v0': 0.0,
-            #'vcirc': 300.0,
-            #'rscale': 1.0,
+            #'v0': 'sampled',
+            #'vcirc': 'sampled',
+            #'rscale': 'sampled',
+            'v0': 0.0,
+            'vcirc': 300.0,
+            'rscale': 1.0,
         },
         ### intensity model
         'intensity': {
             ### Inclined Exp profile
             'type': 'inclined_exp',
             'flux': 1.0, # counts
-            'hlr': 'sampled',
-            #'hlr': 1.0
+            #'hlr': 'sampled',
+            'hlr': 1.0
             ### Basis function profile
             # 'type': 'basis',
             # 'basis_type':'exp_shapelets',# (shape|sersic|exp_shape)-lets
@@ -471,9 +477,11 @@ def main(args, pool):
             'cont_norm_method': 'flux',
             'obs_cont_norm_wave': 850,
             # 'obs_cont_norm_flam': 3.0e-17*flux_scaling,
-            'obs_cont_norm_flam': 'sampled',
+            #'obs_cont_norm_flam': 'sampled',
+            'obs_cont_norm_flam': sampled_pars_value_dict['obs_cont_norm_flam'],
             #'em_Ha_flux': 1.2e-16*flux_scaling,
-            'em_Ha_flux': 'sampled',
+            #'em_Ha_flux': 'sampled',
+            'em_Ha_flux': sampled_pars_value_dict['em_Ha_flux'],
             'em_Ha_sigma': sigma_int*(1+redshift),
             'em_O2_flux': 8.8e-17*flux_scaling*1,
             # 'em_O2_flux': 'sampled',
@@ -494,8 +502,8 @@ def main(args, pool):
     pars = Pars(sampled_pars, meta_pars)
 
     ### Outputs
-    #outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
-    outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
+    outdir = os.path.join(utils.TEST_DIR, 'test_data', args.run_name)
+    #outdir = os.path.join("/xdisk/timeifler/jiachuanxu/kl_fiber", args.run_name)
 
     fig_dir = os.path.join(outdir, "figs")
     sum_dir = os.path.join(outdir, "summary_stats")

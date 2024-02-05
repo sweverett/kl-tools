@@ -205,12 +205,21 @@ class LogPosterior(LogBase):
         '''
 
         logprior = self.log_prior(theta)
-
+        theta_pars = self.theta2pars(theta)
+        if ('g1' in theta_pars.keys()) and ('g2' in theta_pars.keys()):
+            if np.abs(theta_pars['g1'] + 1j*theta_pars['g2'])>1.:
+                logprior = -np.inf
+        if ('eint1' in theta_pars.keys()) and ('eint2' in theta_pars.keys()):
+            if np.abs(theta_pars['eint1'] + 1j*theta_pars['eint2'])>1.:
+                logprior = -np.inf
         if logprior == -np.inf:
             return -np.inf, self.blob(-np.inf, -np.inf)
 
         else:
             loglike = self.log_likelihood(theta, data)
+        if np.isnan(loglike):
+            print("loglike is NaN at theta = ", theta)
+            exit(-1)
 
         return logprior + loglike, self.blob(logprior, loglike)
 

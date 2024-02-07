@@ -323,8 +323,8 @@ class InclinedExponential(IntensityMap):
             self.image = gal.drawImage(nx=self.nx, ny=self.ny, 
                 scale=self.pix_scale).array
         except gs.GalSimFFTSizeError:
-            print(f'WARNING: FFT size too large, return -np.inf')
-            self.image = np.zeros([ny, nx])
+            #print(f'WARNING: FFT size too large, return -np.inf')
+            self.image = np.zeros([self.ny, self.nx])
         if pars.get('run_options', {}).get('imap_return_gal', False):
             return self.image, self.gal
         else:

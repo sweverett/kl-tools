@@ -400,17 +400,17 @@ def main(args, pool):
         'ffnorm_3': sampled_pars_value_dict['ffnorm_3'],
         ### priors
         'priors': {
-            'g1': priors.UniformPrior(-0.7, 0.7),
-            'g2': priors.UniformPrior(-0.7, 0.7),
+            'g1': priors.UniformPrior(-0.99, 0.99,),
+            'g2': priors.UniformPrior(-0.99, 0.99),
             #'theta_int': priors.UniformPrior(-np.pi/2., np.pi/2.),
             #'sini': priors.UniformPrior(-1., 1.),
-            #'eint1': priors.UniformPrior(-1., 1.),
-            #'eint2': priors.UniformPrior(-1., 1.),
-            #'v0': priors.GaussPrior(0, 10),
-            #'vcirc': priors.UniformPrior(10, 800),
-            #'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
-            #'rscale': priors.UniformPrior(0.1, 5),
-            #'hlr': priors.UniformPrior(0.1, 5),
+            'eint1': priors.UniformPrior(-0.99, 0.99),
+            'eint2': priors.UniformPrior(-0.99, 0.99),
+            'v0': priors.GaussPrior(0, 10),
+            'vcirc': priors.UniformPrior(10, 800),
+            'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
+            'rscale': priors.UniformPrior(0.1, 5),
+            'hlr': priors.UniformPrior(0.1, 5),
         },
         ### velocity model
         'velocity': {
@@ -507,6 +507,11 @@ def main(args, pool):
 
     fig_dir = os.path.join(outdir, "figs")
     sum_dir = os.path.join(outdir, "summary_stats")
+    #backend_fn = os.path.join(outdir, "chains_backend")
+    #if rank==0:
+    #    if os.path.exists(backend_fn):
+    #        os.remove(backend_fn)
+    #backend = emcee.backends.HDFBackend(backend_fn)
 
     filename_fmt = "%s_sini%.2f_hlr%.2f_intsig%.3f_PA%d_TPHOT%d_fiberconf%d"%\
         (flux_scaling_power, sini, hlr, sigma_int, args.PA, args.EXP_PHOTO, fiber_conf)
@@ -559,6 +564,7 @@ def main(args, pool):
     print('>>>>>>>>>> [%d/%d] Starting EMCEE run <<<<<<<<<<'%(rank, size))
     MCMCsampler = emcee.EnsembleSampler(nwalkers, ndims, log_posterior,
         #moves=[(emcee.moves.DEMove(), 0.8),(emcee.moves.DESnookerMove(), 0.2),],
+        #backend=backend,
         args=[None, pars], pool=pool)
     p0 = emcee.utils.sample_ball(sampled_pars_value, sampled_pars_std,
         size=nwalkers)

@@ -4,6 +4,8 @@ from pathlib import Path
 import yaml
 import matplotlib.colors as colors
 import pdb
+import copy
+import priors
 
 class ForkedPdb(pdb.Pdb):
     """A Pdb subclass that may be used
@@ -168,6 +170,88 @@ def set_cache_dir():
     cachedir = os.path.join(basedir, '.cache/')
     make_dir(cachedir) # will only create if it does not exist
     return cachedir
+
+def parse_param(config, params):
+    Nsampled = 0
+    for key in config.keys():
+        if type(config[key])==dict:
+            Nsampled += parse_param(config[key], params)
+        else:
+            if (config[key] == 'param')|(config[key] == 'Param')|(config[key] == 'PARAM'):
+                if "value" in params[key].keys():
+                    config[key] = params[key]['value']
+                elif "prior" in params[key].keys():
+                    config[key] = 'sampled'
+                    Nsampled += 1
+                else:
+                    print("WARNING: can not parse parameter %s in meta!"%key)
+    return Nsampled
+
+def parse_prior(config):
+    prior_type = config.get("dist", "flat")
+    if prior_type=="flat":
+        return priors.UniformPrior(config["min"], config["max"], 
+                                   inclusive=config.get("inclusive", False))
+    elif prior_type=="norm":
+        return priors.GaussPrior(config["loc"], config["scale"],
+                                 clip_sigmas=config.get("clip_sigmas", None),
+                                 zero_boundary=config.get("zero_boundary", None))
+    elif prior_type=="lognorm":
+        return priors.LognormalPrior(config["loc"], config["scale"], 
+                                   clip_sigmas=config.get("clip_sigmas", None))
+    else:
+        raise ValueError(f'Can not support prior of type {prior_type}!')
+
+def parse_propose(config):
+    # parse propose
+    if config["dist"] == "norm":
+        mean, std, proposal = config["loc"], config["scale"], config["proposal"]
+    else:
+        raise ValueError(f'Proposal distribution {config["dist"]} is not supported now!')
+    return mean, std, proposal
+
+def parse_yaml(filename):
+    config = read_yaml(filename)
+    sampled_pars = []
+    sample_ball_mean, sample_ball_std, sample_ball_proposal = {}, {}, {}
+    fidvals = {}
+    latex_labels = {}
+    derived = {}
+    # make a list of fiducial values of parameters being sampled
+    for key in config['params']:
+        if "prior" in config['params'][key].keys():
+            sampled_pars.append(key)
+            fidvals[key] = config['params'][key]["ref"]["loc"]
+        if "derived" in config['params'][key].keys():
+            derived[key] = config['params'][key]["derived"]
+        latex_labels[key] = config['params'][key].get("latex", key)
+    # start from the `meta` field and fill parameters that are set to `param`
+    Nsampled = parse_param(config['meta'], config['params'])
+    print(f'{Nsampled} parameters are being sampled: {sampled_pars}')
+    # set the priors in meta
+    config['meta']['priors'] = {}
+    for key in sampled_pars:
+        config['meta']['priors'][key] = parse_prior(config['params'][key]['prior'])
+    # set the MCMC initialized sample ball
+    for key in sampled_pars:
+        propose_mean, propose_std, proposal = parse_propose(config["params"][key]["ref"])
+        sample_ball_mean[key] = propose_mean
+        sample_ball_std[key] = propose_std
+        sample_ball_proposal[key] = proposal
+    # tune the observation configuration
+    Nobs = len(config['meta']['obs_conf'])
+    for i in range(Nobs):
+        config['meta']['obs_conf'][i]['OBSINDEX'] = i
+        if config['meta']['obs_conf'][i]['OBSTYPE'] == 'fiber':
+            config['meta']['obs_conf'][i]['OBSTYPE'] = 1
+        elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'image':
+            config['meta']['obs_conf'][i]['OBSTYPE'] = 0
+        else:
+            raise ValueError("Unrecognized observation type %s!"%(config['meta']['obs_conf'][i]['OBSTYPE']))
+    meta = copy.deepcopy(config['meta'])
+    mcmc = copy.deepcopy(config['mcmc'])
+    return sampled_pars, fidvals, latex_labels, derived, meta, mcmc, \
+        sample_ball_mean, sample_ball_std, sample_ball_proposal
 
 
 BASE_DIR = get_base_dir()

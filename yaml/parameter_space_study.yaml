@@ -1,0 +1,336 @@
+# Configuration YAML file for KL fiber simulations
+
+# parameters control the MCMC simulation settings
+mcmc:
+  nsteps: 20000
+  flux_scaling_base: 1.84785
+  monitor_autocorr: True
+  fiberconf: 0
+  Iflux: 3
+  Isini: 8
+  Ipa: 0
+  Ihlr: 1
+
+
+# (Might be) sampled parameters in simulation
+params:
+  g1: 
+    prior: 
+      min: -1.0 
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: g_1
+  g2:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: g_2
+  eint1:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: e^\mathrm{int}_1
+  eint2:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: e^\mathrm{int}_2
+  theta_int:
+    derived: 'lambda eint1, eint2: np.angle(eint1+1j*eint2)/2.'
+    latex: \theta_\mathrm{int}
+  sini:
+    derived: 'lambda eint1, eint2: np.sin(2*np.arctan((eint1*eint1+eint2*eint2)**0.5))'
+    latex: \mathrm{sin}(i)
+  v0:
+    prior:
+      dist: norm
+      loc: 0.0
+      scale: 10.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: v_0
+  vcirc:
+    prior:
+      dist: lognorm
+      loc: 300.0
+      scale: 0.06
+    ref:
+      dist: norm
+      loc: 300.0
+      scale: 1
+      proposal: 1.0e-4
+    latex: v_\mathrm{circ}
+  rscale:
+    prior:
+      min: 0.1
+      max: 5.0
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: R_\mathrm{vscale}
+  hlr:
+    prior:
+      min: 0.1
+      max: 5.0
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: R_h
+  em_Ha_flux:
+    prior:
+      min: 1.0e-21
+      max: 1.0e-11
+    ref:
+      dist: norm
+      loc: 1.2e-16
+      scale: 1.0e-19
+      proposal: 1.0e-4
+    latex: F_\mathrm{H\alpha}
+  em_O2_flux:
+    value: 8.8e-17
+    latex: F_\mathrm{[OII]}
+  em_O3_1_flux:
+    value: 2.4e-17
+    latex: F_\mathrm{[OIII]4960}
+  em_O3_2_flux:
+    value: 2.8e-17
+    latex: F_\mathrm{[OIII]5008}
+  em_Hb_flux:
+    value: 1.2e-17
+    latex: F_\mathrm{H\beta}
+  obs_cont_norm_flam:
+    value: 3.0e-17
+    latex: F_\mathrm{cont}
+  ffnorm_0:
+    prior:
+      min: 1.0e-2
+      max: 1.0e+2
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: ff_\mathrm{norm}^{(0)}
+  ffnorm_1:
+    prior:
+      min: 1.0e-2
+      max: 1.0e+2
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: ff_\mathrm{norm}^{(1)}
+  ffnorm_2:
+    prior:
+      min: 1.0e-2
+      max: 1.0e+2
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: ff_\mathrm{norm}^{(2)}
+  ffnorm_3:
+    prior:
+      min: 1.0e-2
+      max: 1.0e+2
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: ff_\mathrm{norm}^{(3)}
+
+### Meta parameters used in simulation
+meta:
+  g1: param
+  g2: param
+  eint1: param
+  eint2: param
+  ffnorm_0: param
+  ffnorm_1: param
+  ffnorm_2: param
+  ffnorm_3: param
+
+  velocity:
+    model: default
+    v0: param
+    vcirc: param
+    rscale: param
+
+  intensity:
+    type: inclined_exp
+    flux: 1.0
+    hlr: param
+
+  units:
+    v_unit: km/s
+    r_unit: arcsec
+
+  run_options:
+    run_mode: ETC
+    use_numba: False
+    alignment_params: eint
+
+  model_dimension:
+    Nx: 64
+    Ny: 62
+    lblue: 300
+    lred: 1200
+    resolution: 500000
+    scale: 0.11
+    lambda_range: [[851, 855.81]]
+    lambda_res: 0.08
+    super_sampling: 4
+    lambda_unit: nm
+
+  sed:
+    z: 0.3
+    continuum_type: temp
+    restframe_temp: ../data/Simulation/GSB2.spec
+    temp_wave_type: Ang
+    temp_flux_type: flambda
+    cont_norm_method: flux
+    obs_cont_norm_wave: 850
+    obs_cont_norm_flam: param
+    em_Ha_flux: param
+    em_Ha_sigma: 0.065
+    em_O2_flux: param
+    em_O2_sigma: [0.065, 0.065]
+    em_O2_share: [0.45, 0.55]
+    em_O3_1_flux: param
+    em_O3_1_sigma: 0.065
+    em_O3_2_flux: param
+    em_O3_2_sigma: 0.065
+    em_Hb_flux: param
+    em_Hb_sigma: 0.065
+
+  obs_conf:
+    - INSTNAME: DESI
+      OBSTYPE: fiber
+      BANDPASS: ../data/Bandpass/DESI/z.dat
+      SEDBLKID: 0
+      RDNOISE: 2.6
+      FIBERDX: 0.0
+      FIBERDY: 0.0
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      PSFTYPE: airy_fwhm
+      PSFFWHM: 1.0
+      DIAMETER: 332.42
+      EXPTIME: 180
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+      FIBERRAD: 0.75
+      FIBRBLUR: 3.4
+    - INSTNAME: DESI
+      OBSTYPE: fiber
+      BANDPASS: ../data/Bandpass/DESI/z.dat
+      SEDBLKID: 0
+      RDNOISE: 2.6
+      FIBERDX: -1.5
+      FIBERDY: 0.0
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      PSFTYPE: airy_fwhm
+      PSFFWHM: 1.0
+      DIAMETER: 332.42
+      EXPTIME: 600
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+      FIBERRAD: 0.75
+      FIBRBLUR: 3.4
+    - INSTNAME: DESI
+      OBSTYPE: fiber
+      BANDPASS: ../data/Bandpass/DESI/z.dat
+      SEDBLKID: 0
+      RDNOISE: 2.6
+      FIBERDX: 1.5
+      FIBERDY: 0.0
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      PSFTYPE: airy_fwhm
+      PSFFWHM: 1.0
+      DIAMETER: 332.42
+      EXPTIME: 600
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+      FIBERRAD: 0.75
+      FIBRBLUR: 3.4
+    - INSTNAME: DESI
+      OBSTYPE: fiber
+      BANDPASS: ../data/Bandpass/DESI/z.dat
+      SEDBLKID: 0
+      RDNOISE: 2.6
+      FIBERDX: 0.0
+      FIBERDY: -1.5
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      PSFTYPE: airy_fwhm
+      PSFFWHM: 1.0
+      DIAMETER: 332.42
+      EXPTIME: 600
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+      FIBERRAD: 0.75
+      FIBRBLUR: 3.4
+    - INSTNAME: DESI
+      OBSTYPE: fiber
+      BANDPASS: ../data/Bandpass/DESI/z.dat
+      SEDBLKID: 0
+      RDNOISE: 2.6
+      FIBERDX: 1.5
+      FIBERDY: 0.0
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      PSFTYPE: airy_fwhm
+      PSFFWHM: 1.0
+      DIAMETER: 332.42
+      EXPTIME: 600
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+      FIBERRAD: 0.75
+      FIBRBLUR: 3.4
+    - INSTNAME: CTIO/DECam
+      OBSTYPE: image
+      BANDPASS: ../data/Bandpass/CTIO/DECam.r.dat
+      SKYLEVEL: 44.54
+      EXPTIME: 4000
+      NAXIS: 2
+      NAXIS1: 32
+      NAXIS2: 30
+      PIXSCALE: 0.2637
+      PSFTYPE: airy_fwhm
+      PSFFWHM: 1.0
+      DIAMETER: 378.2856
+      GAIN: 4.0
+      NOISETYP: ccd
+      RDNOISE: 7
+      ADDNOISE: False

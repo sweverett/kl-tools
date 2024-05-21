@@ -1450,6 +1450,8 @@ class FiberLikelihood(LogLikelihood):
                 _meta_update['sini'] = np.sin(2.*np.arctan(np.sqrt(eint)))
                 _meta_update['g1'] = g1
                 _meta_update['g2'] = g2
+            elif parametriz=="sini_pa":
+                pass
             else:
                 raise ValueError(f'Unsupported parametrization {parametriz}!')
                 exit(-1)

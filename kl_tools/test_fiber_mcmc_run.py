@@ -144,7 +144,9 @@ spec_mask_str = ("{0:0%db}"%len(emlines)).format(args.SPEC_MASK)
 spec_mask = np.array([int(bit) for bit in spec_mask_str])
 Nspec_used = np.sum(spec_mask)
 blockids = [int(np.sum(spec_mask[:i])*spec_mask[i]) for i in range(len(spec_mask))]
-
+if rank==0:
+    print(f'spec mask = {spec_mask}')
+    print(f'block id = {blockids}')
 ### Choose fiber configurations
 if args.fiberconf==0:
     offsets = [(fiber_offset*np.cos(0),         fiber_offset*np.sin(0)),
@@ -256,13 +258,13 @@ def main(args, pool):
         "g2",
         # 'eint1',
         # 'eint2',
-        # 'theta_int',
-        # 'sini',
-        # 'v0',
-        # 'vcirc',
-        # 'rscale',
-        # 'hlr',
-        # 'em_Ha_flux',
+        'theta_int',
+        'sini',
+        'v0',
+        'vcirc',
+        'rscale',
+        'hlr',
+        'em_Ha_flux',
         #'em_O2_flux',
         #'em_O3_1_flux',
         #'em_O3_2_flux',
@@ -380,12 +382,12 @@ def main(args, pool):
         ### shear and alignment
         'g1': 'sampled',
         'g1': 'sampled',
-        #'eint1': 'sampled',
-        #'eint2': 'sampled',
-        'eint1': sampled_pars_value_dict['eint1'],
-        'eint2': sampled_pars_value_dict['eint2'],
-        # 'theta_int': 'sampled',
-        # 'sini': 'sampled',
+        # 'eint1': 'sampled',
+        # 'eint2': 'sampled',
+        # 'eint1': sampled_pars_value_dict['eint1'],
+        # 'eint2': sampled_pars_value_dict['eint2'],
+        'theta_int': 'sampled',
+        'sini': 'sampled',
         # 'g1+eint1': 'sampled',
         # 'g2+eint2': 'sampled',
         # 'g1-eint1': 'sampled',
@@ -402,12 +404,12 @@ def main(args, pool):
         'priors': {
             'g1': priors.UniformPrior(-0.99, 0.99,),
             'g2': priors.UniformPrior(-0.99, 0.99),
-            #'theta_int': priors.UniformPrior(-np.pi/2., np.pi/2.),
-            #'sini': priors.UniformPrior(-1., 1.),
-            'eint1': priors.UniformPrior(-0.99, 0.99),
-            'eint2': priors.UniformPrior(-0.99, 0.99),
+            'theta_int': priors.UniformPrior(-np.pi/2., np.pi/2.),
+            'sini': priors.UniformPrior(-1., 1.),
+            # 'eint1': priors.UniformPrior(-0.99, 0.99),
+            # 'eint2': priors.UniformPrior(-0.99, 0.99),
             'v0': priors.GaussPrior(0, 10),
-            'vcirc': priors.UniformPrior(10, 800),
+            #'vcirc': priors.UniformPrior(10, 800),
             'vcirc': priors.LognormalPrior(300, 0.06, clip_sigmas=3),
             'rscale': priors.UniformPrior(0.1, 5),
             'hlr': priors.UniformPrior(0.1, 5),
@@ -415,20 +417,20 @@ def main(args, pool):
         ### velocity model
         'velocity': {
             'model': 'default',
-            #'v0': 'sampled',
-            #'vcirc': 'sampled',
-            #'rscale': 'sampled',
-            'v0': 0.0,
-            'vcirc': 300.0,
-            'rscale': 1.0,
+            'v0': 'sampled',
+            'vcirc': 'sampled',
+            'rscale': 'sampled',
+            # 'v0': 0.0,
+            # 'vcirc': 300.0,
+            # 'rscale': 1.0,
         },
         ### intensity model
         'intensity': {
             ### Inclined Exp profile
             'type': 'inclined_exp',
             'flux': 1.0, # counts
-            #'hlr': 'sampled',
-            'hlr': 1.0
+            'hlr': 'sampled',
+            #'hlr': 1.0
             ### Basis function profile
             # 'type': 'basis',
             # 'basis_type':'exp_shapelets',# (shape|sersic|exp_shape)-lets
@@ -451,7 +453,7 @@ def main(args, pool):
             'run_mode': 'ETC',
             #'remove_continuum': True,
             'use_numba': False,
-            'alignment_params': 'eint', # eint | inc_pa | sini_pa | eint_eigen
+            'alignment_params': 'sini_pa', # eint | inc_pa | sini_pa | eint_eigen
         },
         ### 3D underlying model dimension
         'model_dimension':{
@@ -480,8 +482,8 @@ def main(args, pool):
             #'obs_cont_norm_flam': 'sampled',
             'obs_cont_norm_flam': sampled_pars_value_dict['obs_cont_norm_flam'],
             #'em_Ha_flux': 1.2e-16*flux_scaling,
-            #'em_Ha_flux': 'sampled',
-            'em_Ha_flux': sampled_pars_value_dict['em_Ha_flux'],
+            'em_Ha_flux': 'sampled',
+            #'em_Ha_flux': sampled_pars_value_dict['em_Ha_flux'],
             'em_Ha_sigma': sigma_int*(1+redshift),
             'em_O2_flux': 8.8e-17*flux_scaling*1,
             # 'em_O2_flux': 'sampled',
@@ -649,13 +651,15 @@ def main(args, pool):
     ### 6. fiber spectra
     ### ================
     _obs_id_, SNR_best = 0, [-np.inf,]
-    if (len(emlines)>0):
-        fig, axes = plt.subplots(len(offsets),len(emlines), figsize=(2*len(emlines),2*len(offsets)))
-        for j, (emline, bid) in enumerate(zip(emlines, blockids)):
+    if (Nspec_used>0):
+        fig, axes = plt.subplots(len(offsets),Nspec_used, figsize=(2*Nspec_used,2*len(offsets)))
+        for j, eml_id in enumerate(np.where(spec_mask==1)[0]):
+            emline = emlines[eml_id]
+            bid = blockids[eml_id]
             wave = likelihood.get_GlobalLambdas(bid).mean(axis=1)
             emline_cen = np.mean(LINE_LAMBDAS[emline].to('Angstrom').value) * (1+pars.meta['sed']['z'])
             for i, (dx, dy) in enumerate(offsets):
-                if len(emlines)==1:
+                if Nspec_used==1:
                     ax = axes[i]
                 else:
                     ax = axes[i,j]
@@ -671,7 +675,7 @@ def main(args, pool):
                 if (np.abs(dx)<1e-3) & (np.abs(dy)<1e-3):
                     SNR_best.append(snr)
                 _obs_id_+=1
-            if len(emlines)>1:
+            if Nspec_used>1:
                 axes[len(offsets)-1, j].set(xlabel="Wavelength [A]")
                 axes[0, j].set(title=f'{emline}')
             else:

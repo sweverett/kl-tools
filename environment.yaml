@@ -1,4 +1,5 @@
 name: kltools
+prefix: /groups/timeifler/jiachuanxu/conda_envs/kltools
 channels:
   - defaults
   - conda-forge
@@ -21,5 +22,6 @@ dependencies:
   - ipdb
   - scipy
   - h5py
-  - getdist
-  - pocomc
+  - pip
+  - pip:
+    - getdist

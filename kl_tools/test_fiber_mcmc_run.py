@@ -286,11 +286,11 @@ def main(args, pool):
         "vcirc": 300.0,
         "rscale": hlr,
         "hlr": hlr,
-        "em_Ha_flux": 1.2e-16*flux_scaling,
+        "em_Ha_flux": 1.2e-16*flux_scaling, # erg s-1 cm-2 
         "em_O2_flux": 8.8e-17*flux_scaling,
         "em_O3_1_flux": 2.4e-17*flux_scaling,
         "em_O3_2_flux": 2.8e-17*flux_scaling,
-        "obs_cont_norm_flam": 3.0e-17*flux_scaling,
+        "obs_cont_norm_flam": 3.0e-17*flux_scaling, # erg s-1 cm-2 A-1
         "ffnorm_0": 1.0, 
         "ffnorm_1": 1.0, 
         "ffnorm_2": 1.0, 

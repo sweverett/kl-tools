@@ -6,6 +6,7 @@ from scipy.optimize import root_scalar
 from argparse import ArgumentParser
 
 from kl_tools.kross.tfr import estimate_vtf
+import kl_tools.kross.analytic_estimators as estimator
 
 def parse_args():
     parser = ArgumentParser()
@@ -53,80 +54,6 @@ def parse_args():
 #-------------------------------------------------------------------------------
 # helper methods
 
-def mu_sini(v_maj, sin_i, v_tf, sigma_vmaj, sigma_vcirc):
-    '''
-    The mean of the composite v_maj * v_tf gaussians
-    '''
-
-    num = sigma_vcirc**2 * (v_maj * sin_i) + (sigma_vmaj**2 * v_tf)
-    den = sigma_vmaj**2 + (sigma_vcirc**2 * sin_i**2)
-
-    return num / den
-
-def var_sini(sigma_vmaj, sigma_vcirc, sin_i):
-    '''
-    The variance of the composite v_maj * v_tf gaussians
-    '''
-
-    num = sigma_vmaj**2 * sigma_vcirc**2
-    den = sigma_vmaj**2 + (sigma_vcirc**2 * sin_i**2)
-
-    return num / den
-
-def sigma_sini(sigma_vmaj, sigma_vcirc, sin_i):
-    '''
-    The standard deviation of the composite v_maj * v_tf gaussians
-    '''
-
-    return np.sqrt(var_sini(sigma_vmaj, sigma_vcirc, sin_i))
-
-def lognormal_base10(mean_log10, sigma_log10, size=None):
-    '''
-    Generate samples from a base-10 log-normal distribution.
-    '''
-
-    # convert mean and sigma from log10 to natural logarithm space
-    mean_ln = mean_log10 * np.log(10)
-    sigma_ln = sigma_log10 * np.log(10)
-    
-    # Generate samples from the natural log-normal distribution
-    samples_ln = np.random.lognormal(mean=mean_ln, sigma=sigma_ln, size=size)
-
-    return samples_ln
-
-def gaussian_product_sini(v_maj, v_tf, sigma_vmaj, sigma_vcirc, sin_i):
-    '''
-    This method computes the extra term in the gaussian product due to
-    completing the square in the exponent. This is the term that is
-    only dependent on input parameters and not on the variable of
-    integration. We use our own implementation of the gaussian dist
-    here to avoid issues with 1 / sin(i)
-    '''
-
-    # modified as we multiply by sini / sini
-    var = sigma_vmaj**2 + (sigma_vcirc * sin_i)**2
-
-    # modified as we multiply by sini / sini
-    norm = sin_i / np.sqrt(2 * np.pi * var)
-    # norm = 1 / np.sqrt(2 * np.pi * var)
-
-    # modified as we multiply by sini^2 / sini^2
-    exp = np.exp(-0.5 * (v_maj - v_tf*sin_i)**2 / var)
-
-    answer1 = norm * exp
-
-    if sin_i == 0:
-        sin_i = 1e-10
-    var = (sigma_vmaj/sin_i)**2 + sigma_vcirc**2
-    norm = 1 / np.sqrt(2 * np.pi * var)
-    exp = np.exp(-0.5 * (v_maj/sin_i - v_tf)**2 / var)
-    answer_2 = norm * exp
-
-    if not np.isclose(answer1, answer_2):
-        import ipdb; ipdb.set_trace()
-
-    return norm * exp
-
 def estimate_mstar_from_vtf(v_tf, alpha=4.51, log_M100=9.49):
     '''
     Calculate log10(M_star) from the given v_tf using the inverted TF relation.
@@ -144,8 +71,8 @@ def root_equation(sin_i, v_maj, v_tf, sigma_vmaj, sigma_vcirc, no_prior):
     if no_prior is True:
         return None
 
-    mu = mu_sini(v_maj, sin_i, v_tf, sigma_vmaj, sigma_vcirc)
-    var = var_sini(sigma_vmaj, sigma_vcirc, sin_i)
+    mu = estimator.mu_sini(v_maj, sin_i, v_tf, sigma_vmaj, sigma_vcirc)
+    var = estimator.var_sini(sigma_vmaj, sigma_vcirc, sin_i)
 
     bracket_expression = 1 + (v_maj * sin_i * mu / sigma_vmaj**2) -\
           (sin_i**2 / sigma_vmaj**2) * (mu**2 + var)
@@ -173,8 +100,8 @@ def main():
     # derived quantities
     sigma_vcirc = sigma_tf * v_tf * np.log(10) # km/s
     v_maj = (v_tf * true_sini) + (v_maj_offset * sigma_vmaj) # km/s
-    true_mu = mu_sini(v_maj, true_sini, v_tf, sigma_vmaj, sigma_vcirc)
-    true_sigma = sigma_sini(sigma_vmaj, sigma_vcirc, true_sini)
+    true_mu = estimator.mu_sini(v_maj, true_sini, v_tf, sigma_vmaj, sigma_vcirc)
+    true_sigma = estimator.sigma_sini(sigma_vmaj, sigma_vcirc, true_sini)
     true_ratio = true_mu / true_sigma
 
     #--------------------------------------------------------------------------
@@ -213,7 +140,9 @@ def main():
         i = np.arcsin(sin_i)
 
         # sample lots of v_circ's from log-normal distribution
-        v_circ_samples = lognormal_base10(np.log10(v_tf), sigma_tf, n_samples)
+        v_circ_samples = estimator.lognormal_base10(
+            np.log10(v_tf), sigma_tf, n_samples
+            )
 
         # use sampled v_circ's to compute *expected* v_maj's
         v_maj_model = v_circ_samples * sin_i
@@ -223,14 +152,14 @@ def main():
         posterior[k] = np.mean(likelihood)
 
         # now compute the analytic posterior given our log-normal->normal approx
-        mu = mu_sini(v_maj, sin_i, v_tf, sigma_vmaj, sigma_vcirc)
-        sig = sigma_sini(sigma_vmaj, sigma_vcirc, sin_i)
+        mu = estimator.mu_sini(v_maj, sin_i, v_tf, sigma_vmaj, sigma_vcirc)
+        sig = estimator.sigma_sini(sigma_vmaj, sigma_vcirc, sin_i)
 
         # Seemed to ~work, but no longer remember how to derive
         # extra = np.exp(
         #     (1. / (2*sig**2)) * (mu**2 - ((v_maj*sin_i/sigma_vmaj)**2 + (v_tf/sigma_vcirc)**2))
         # )
-        gauss_product = gaussian_product_sini(
+        gauss_product = estimator.gaussian_product_sini(
             v_maj, v_tf, sigma_vmaj, sigma_vcirc, sin_i
             )
         # extra_sig_alt = np.sqrt((sigma_vmaj)**2 + sigma_vcirc**2*sin_i**2)

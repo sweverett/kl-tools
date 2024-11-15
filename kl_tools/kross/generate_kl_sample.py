@@ -7,24 +7,41 @@ archival lensing measurements, e.g. COSMOS.
 from argparse import ArgumentParser
 import numpy as np
 import matplotlib.pyplot as plt
-from astropy.table import Table
+from astropy.table import Table, join
 from astropy.coordinates import SkyCoord
 from astropy.units import Unit, deg
+from astropy.coordinates import SkyCoord, match_coordinates_sky
 
 from kl_tools.utils import get_base_dir, make_dir, plot
 from kl_tools.kross.tfr import estimate_vtf
-from kl_tools.kross.shear import PointShear, MLEShear
+from kl_tools.kross.shear import PointShear, MAPShear
 
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument('-e', '--estimator', type=str, default='point',
-                        choices=['point', 'mle'],
-                        help='Estimator to use for shear calculations')
-    parser.add_argument('-s', '--show', action='store_true', default=False,
-                        help='Show plots')
-    parser.add_argument('-o', '--overwrite', action='store_true', default=False,
-                        help='Overwrite existing files')
-    parser.add_argument('-vb', '--verbose', action='store_true', default=False)
+    parser.add_argument(
+        '-e',
+        '--estimator',
+        type=str,
+        default='both',
+        choices=['point', 'map', 'both'],
+        help='Estimator to use for shear calculations'
+        )
+    parser.add_argument(
+        '-o', '--overwrite', action='store_true', default=False,
+        help='Overwrite existing files'
+        )
+    parser.add_argument(
+        '-c', '--cosmos_only', action='store_true', default=False,
+        help='Save only sources in the COSMOS field'
+    )
+    parser.add_argument(
+        '-v', '--verbose', action='store_true', default=False,
+        help='Print more verbose information'
+        )
+    parser.add_argument(
+        '-s', '--show', action='store_true', default=False,
+        help='Show plots'
+        )
 
     return parser.parse_args()
 
@@ -36,11 +53,21 @@ def main():
     args = parse_args()
     show = args.show
     estimator = args.estimator
+    cosmos_only = args.cosmos_only
     overwrite = args.overwrite
     vb = args.verbose
 
-    plot_dir = get_base_dir() / 'plots/kl_sample'
+    analysis_dir = get_base_dir() / 'kl_tools/kross'
+
+    plot_dir = analysis_dir / 'plots/kl_sample'
     make_dir(plot_dir)
+    out_dir = analysis_dir / 'sample'
+    out_file = out_dir / 'kl_sample.fits'
+
+    if out_file.exists() and not overwrite:
+        raise FileExistsError(
+            f'{out_file} already exists; use -o or --overwrite to replace'
+            )
 
     kross_dir = get_base_dir() / 'data/kross'
     kross_file = kross_dir / 'kross_release_v2.fits'
@@ -54,8 +81,8 @@ def main():
     plt.xlabel('Kinematic Type')
     plt.title('KROSS Distribution of Kinematic Types; All Galaxies')
 
-    outfile = plot_dir / 'kinematic_types_all.png'
-    plot(show, save=True, out_file=outfile)
+    plotfile = plot_dir / 'kinematic_types_all.png'
+    plot(show, save=True, out_file=plotfile)
 
     # ...
 
@@ -98,9 +125,9 @@ def main():
         (irr_flag == 0) &
         (theta_flag == 0) &
         (extrap_flag == 0) &
-        (kin_type == 'RT+')
-    # TODO: decide if we want the less conservative selection:
-    #     ((kin_type == 'RT ') | (kin_type == 'RT+'))
+        # (kin_type == 'RT+')
+        # TODO: decide if we want the less conservative selection:
+        ((kin_type == 'RT ') | (kin_type == 'RT+') | (kin_type == 'DN'))
     )
 
     # NOTE: for *no* selection:
@@ -128,6 +155,7 @@ def main():
     kin_type = kin_type[selection]
 
     # get more useful columns
+    kid = sample['KID']
     ra = sample['RA']
     dec = sample['DEC']
     z = sample['Z']
@@ -147,6 +175,8 @@ def main():
     # "observed" vcirc with beam smearing correction but *NOT* inclination 
     # correction
     vcirc = vc * np.sin(np.deg2rad(theta_im)) 
+    # estimated error on 2D vcirc
+    vcirc_err = (vc_err_h - vc_err_l) * np.sin(np.deg2rad(theta_im))
 
     #---------------------------------------------------------------------------
     # estimate vcirc using logmstar and the Tully-Fisher relation
@@ -159,16 +189,16 @@ def main():
     plt.legend()
     plt.xlabel('v (km/s)')
 
-    out_file = plot_dir / 'vtf_vcirc_compare.png'
-    plot(show, save=True, out_file=out_file)
+    plotfile = plot_dir / 'vtf_vcirc_compare.png'
+    plot(show, save=True, out_file=plotfile)
 
     # plot the distribution of sini = vcirc / vtf
     sini = vcirc / vtf
     plt.hist(sini, ec='k', bins=20)
     plt.xlabel('sini (vcirc / vtf)')
 
-    out_file = plot_dir / 'sini_tfr.png'
-    plot(show, save=True, out_file=out_file)
+    plotfile = plot_dir / 'sini_tfr.png'
+    plot(show, save=True, out_file=plotfile)
 
     # plot the distribution of vcirc / sigma
     bins = np.linspace(0, 4, 40)
@@ -176,88 +206,203 @@ def main():
     plt.axvline(1, c='k', ls='--')
     plt.xlabel('vcirc / sig_v')
 
-    out_file = plot_dir / 'vcirc_sigma.png'
-    plot(show, save=True, out_file=out_file)
+    plotfile = plot_dir / 'vcirc_sigma.png'
+    plot(show, save=True, out_file=plotfile)
 
     # plot the distribution of vc / sigma
     plt.hist(vc / sigma, bins=bins, ec='k')
     plt.axvline(1, c='k', ls='--')
     plt.xlabel('vc / sig_v)')
 
-    out_file = plot_dir / 'vc_sigma.png'
-    plot(show, save=True, out_file=out_file)
+    plotfile = plot_dir / 'vc_sigma.png'
+    plot(show, save=True, out_file=plotfile)
 
     Nsini = len(sini)
     if vb is True:
         print(f'Sample size with valid sini given v_TF: {Nsini}')
 
     #---------------------------------------------------------------------------
-    # estimate shear from the KROSS quantities
+    # estimate shear from the KROSS quantities, using each requested estimator
 
+    table = Table()
+    table['kid'] = kid
+    table['ra'] = ra
+    table['dec'] = dec
+    table['z'] = z
+    table['vcirc'] = vcirc
+    table['vcirc_err'] = vcirc_err
+    table['vc'] = vc
+    table['vc_err_h'] = vc_err_h
+    table['vc_err_l'] = vc_err_l
+    table['kin_type'] = kin_type
+    table['eobs'] = eobs
+    table['pa_im'] = pa_im
+
+    shears = {}
     if estimator == 'point':
-        shear = PointShear()
-    elif estimator == 'mle':
-        shear = MLEShear()
+        shears['point'] = PointShear()
+    elif estimator == 'map':
+        shears['map'] = MAPShear()
+    elif estimator == 'both':
+        shears['point'] = PointShear()
+        shears['map'] = MAPShear()
 
     # plotting options
     Nbins = 30
 
     # estimate sini from vcirc and TF velocity:
-    sini = shear.estimate_sini(vcirc, vtf)
-    plt.hist(sini, bins=Nbins, ec='k')
-    plt.xlabel('sini')
+    for name, shear in shears.items():
+        print(f'Estimating shear using {name} estimator...')
 
-    out_file = plot_dir / 'sini_sample.png'
-    plot(show, save=True, out_file=out_file)
+        if name == 'point':
+            shear_args = (vcirc, vtf)
+        elif name == 'map':
+            shear_args = (vcirc, vtf, vcirc_err)
+        sini = shear.estimate_sini(*shear_args)
 
-    # estimate intrinsic ellipticity from sini and qz (assumed):
-    eint = shear.estimate_eint(sini)
-    plt.hist(eint, bins=Nbins, ec='k')
-    plt.xlabel('eint')
+        plt.hist(sini, bins=Nbins, ec='k')
+        plt.xlabel(f'sini ({name})')
 
-    out_file = plot_dir / 'eint_sample.png'
-    plot(show, save=True, out_file=out_file)
+        plotfile = plot_dir / f'sini_sample_{name}.png'
+        plot(show, save=True, out_file=plotfile)
 
-    # look at difference in eobs vs estimated eint
-    edelt = eobs - eint
-    edelt2 = eobs**2-eint**2
-    plt.hist(edelt, bins=Nbins, ec='k', label='eobs-eint', alpha=0.75)
-    plt.hist(edelt2, bins=Nbins, ec='k', label='eobs^2-eint^2', alpha=0.75)
-    plt.axvline(0, c='k', ls='--', lw=2)
-    plt.xlabel('ellipticity difference')
-    plt.legend()
+        # restrict any unphysical sini values
+        sini[(sini < -1) | (sini > 1)] = np.nan
 
-    out_file = plot_dir / 'obs_eint_diff.png'
-    plot(show, save=True, out_file=out_file)
+        # estimate intrinsic ellipticity from sini and qz (assumed):
+        eint = shear.estimate_eint(sini)
+        plt.hist(eint, bins=Nbins, ec='k')
+        plt.xlabel('eint')
 
-    # show shear response
-    response = (2 * eobs * (1-eint**2))
-    plt.hist(response, bins=Nbins, ec='k')
-    plt.xlabel('response (2 * eobs**2 * (1-eint**2))')
+        plotfile = plot_dir / f'eint_sample_{name}.png'
+        plot(show, save=True, out_file=plotfile)
 
-    out_file = plot_dir / 'shear_response.png'
-    plot(show, save=True, out_file=out_file)
+        # look at difference in eobs vs estimated eint
+        edelt = eobs - eint
+        edelt2 = eobs**2-eint**2
+        plt.hist(edelt, bins=Nbins, ec='k', label='eobs-eint', alpha=0.75)
+        plt.hist(edelt2, bins=Nbins, ec='k', label='eobs^2-eint^2', alpha=0.75)
+        plt.axvline(0, c='k', ls='--', lw=2)
+        plt.xlabel('ellipticity difference')
+        plt.legend()
 
-    # estimate shear values from estimated eint:
-    gplus = shear.estimate_gplus(eobs, eint)
-    plt.hist(gplus, bins=np.linspace(-1, 1, Nbins), ec='k')
-    plt.axvline(0, c='k', ls='--', lw=2)
-    plt.xlabel('g+')
-    # plt.xlim(-1, 1)
-    plt.show()
+        plotfile = plot_dir / f'obs_eint_diff_{name}.png'
+        plot(show, save=True, out_file=plotfile)
 
-    # gcross = estimate_gcross(vcirc, vmin, eobs, eint, sini)
-    # plt.hist(gcross, bins=Nbins, ec='k')
-    # plt.xlabel('gx')
+        # show shear response
+        response = (2 * eobs * (1-eint**2))
+        plt.hist(response, bins=Nbins, ec='k')
+        plt.xlabel('response (2 * eobs**2 * (1-eint**2))')
 
-    # plot s2n
-    verr = vc_err_h - vc_err_l
-    s2n = vcirc / verr
-    plt.hist(s2n, ec='k', bins=50)
-    plt.xlabel('vcirc / verr')
-    # plt.xlim(0, 10)
+        plotfile = plot_dir / f'shear_response_{name}.png'
+        plot(show, save=True, out_file=plotfile)
 
-    # TODO: finish!!
+        # estimate shear values from estimated eint:
+        gplus = shear.estimate_gplus(eobs, eint)
+        plt.hist(gplus, bins=np.linspace(-1, 1, Nbins), ec='k')
+        plt.axvline(0, c='k', ls='--', lw=2)
+        plt.xlabel('g+')
+        # plt.xlim(-1, 1)
+
+        plotfile = plot_dir / f'gplus_{name}.png'
+        plot(show, save=True, out_file=plotfile)
+
+        # TODO: Turn on when able
+        # gcross = estimate_gcross(vcirc, vmin, eobs, eint, sini)
+        # plt.hist(gcross, bins=Nbins, ec='k')
+        # plt.xlabel('gx')
+        gcross = np.empty(Nsample)
+        gcross[:] = np.nan
+
+        # plot s2n
+        verr = vc_err_h - vc_err_l
+        s2n = vcirc / verr
+        plt.hist(s2n, ec='k', bins=50)
+        plt.xlabel('vcirc / verr')
+
+        plotfile= plot_dir / f's2n_{name}.png'
+        plot(show, save=True, out_file=plotfile)
+
+        # now save the estimated quantities to the table
+        table[f'sini_{name}'] = sini
+        table[f'eint_{name}'] = eint
+        table[f'gplus_{name}'] = gplus
+        table[f'gcross_{name}'] = gcross
+
+    #---------------------------------------------------------------------------
+    # split the sample into the 4 corresponding fields
+
+    field1 = np.where(
+        (ra > 32) & (ra < 37)
+    )
+
+    field2 = np.where(
+        (ra > 49) & (ra < 56)
+    )
+
+    # COSMOS
+    field3 = np.where(
+        (ra > 147) & (ra < 153)
+    )
+
+    field4 = np.where(
+        (ra > 332) & (ra < 337)
+    )
+
+    Nfield1 = len(sample[field1])
+    Nfield2 = len(sample[field2])
+    Nfield3 = len(sample[field3])
+    Nfield4 = len(sample[field4])
+
+    Nfields = Nfield1 + Nfield2 + Nfield3 + Nfield4
+
+    print(f'Nsample: {Nsample}')
+    print(f'Nfields: {Nfields}')
+    print(f'Nfield1: {Nfield1}')
+    print(f'Nfield2: {Nfield2}')
+    print(f'Nfield3: {Nfield3}')
+    print(f'Nfield4: {Nfield4}')
+
+    assert Nsample == Nfields
+
+    # fields = Nfield1 * ['UDS'] + Nfield2 * ['ECDFS'] +\
+        # Nfield3 * ['COSMOS'] + Nfield4 * ['SA22']
+    fields = Nsample * ['']
+    for i in field1[0]:
+        fields[i] = 'UDS'
+    for i in field2[0]:
+        fields[i] = 'ECDFS'
+    for i in field3[0]:
+        fields[i] = 'COSMOS'
+    for i in field4[0]:
+        fields[i] = 'SA22'
+    table['field'] = fields
+
+    # restrict to COSMOS-only sources, if requested
+    if cosmos_only is True:
+        table = table[field3]
+
+    #---------------------------------------------------------------------------
+    # match to Eric's selection table
+
+    selection_file = analysis_dir / 'sample/kross_quality_selection.csv'
+
+    try:
+        selection_table = Table.read(selection_file)
+    except FileNotFoundError:
+        print(f'Could not find selection file: {selection_file}')
+        print('Skipping matching to Eric\'s selection table')
+        selection_table = None
+
+    if selection_table is not None:
+        table = join(table, selection_table, keys='kid', join_type='left')
+
+    #---------------------------------------------------------------------------
+    # save the table
+
+    table.write(out_file, overwrite=overwrite)
+
+    print(f'Wrote KL sample data to {out_file}')
 
     return
 

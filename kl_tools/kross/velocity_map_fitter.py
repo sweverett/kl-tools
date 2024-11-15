@@ -1,5 +1,6 @@
 import numpy as np
 import fitsio
+import pickle
 from scipy.optimize import least_squares
 from astropy.table import Table
 from astropy.units import Unit as u
@@ -21,7 +22,9 @@ def parse_args():
                         help='Show plots')
     parser.add_argument('-o', '--overwrite', action='store_true', default=False,
                         help='Overwrite existing files')
-    parser.add_argument('-vb', '--verbose', action='store_true', default=False)
+    parser.add_argument('-v', '--verbose', action='store_true', default=False)
+    parser.add_argument('-m', '--max_nfev', type=int, default=None,
+                        help='Maximum number of function evaluations for the optimizer')
 
     return parser.parse_args()
 
@@ -40,7 +43,7 @@ def residuals(theta, data, weights, mask, X, Y):
     return res
 
 def fit_model(data, weights, mask, initial_guess, bounds=(-np.inf, np.inf),
-              method='lm', loss='linear'):
+              method='lm', loss='linear', max_nfev=1000):
     Nrow, Ncol = data.shape
     Nx, Ny = Ncol, Nrow
     X, Y = build_map_grid(Nx, Ny, indexing='xy')
@@ -51,7 +54,8 @@ def fit_model(data, weights, mask, initial_guess, bounds=(-np.inf, np.inf),
         args=(data, weights, mask, X, Y),
         method=method,
         bounds=bounds,
-        loss=loss
+        loss=loss,
+        max_nfev=max_nfev
         )
 
 def get_sigma_map(vmap_file, sig_files):
@@ -92,14 +96,17 @@ def main():
 
     show = args.show
     overwrite = args.overwrite
+    max_fnev = args.max_nfev
     vb = args.verbose
     save = True
 
     data_dir = get_base_dir() / 'data/kross'
 
     out_dir = get_base_dir() / 'kl_tools/kross/vmap_fits'
+    pkl_dir = out_dir / 'pkl'
     plot_dir = out_dir / 'plots'
     make_dir(out_dir)
+    make_dir(pkl_dir)
     make_dir(plot_dir)
 
     out_file = out_dir / 'vmap_fits.fits'
@@ -234,21 +241,6 @@ def main():
             bounds[0].append(bounds_pair[i][0])
             bounds[1].append(bounds_pair[i][1])
 
-        # initial guess for the optimizer
-        initial_guess = pars2theta({
-            'v0': 0.0,
-            'vcirc': 100.0,
-            'rscale': 1.0,
-            'sini': 0.5,
-            'theta_int': 0.0,
-            'g1': 0.0,
-            'g2': 0.0,
-            'x0': 0.0,
-            'y0': 0.0,
-            'r_unit': u('arcsec'),
-            'v_unit': u('km/s'),
-        })
-
         #-----------------------------------------------------------------------
         # setup and run the fitter
 
@@ -258,10 +250,12 @@ def main():
         try:
             result = fit_model(
                 vmap, weights, mask, initial_guess, bounds=bounds,
-                method=method, loss=loss
+                method=method, loss=loss, max_nfev=max_fnev
                 )
         except Exception as e:
             print(f'Fitting failed for {name}; KID {kid}')
+            print(f'Error: {e}')
+            import ipdb; ipdb.set_trace()
             print('Skipping')
             continue
 
@@ -370,9 +364,17 @@ def main():
         else:
             plt.close()
 
+        # get some extra cols
+        success = result.success
+        status = result.status
+        message = result.message
         fits.append(tuple(
-            list(fit_theta) + [chi2, name]
+            list(fit_theta) + [chi2, name, success, status, message]
             ))
+
+        # pickle the results for later
+        with open(str(pkl_dir / f'{name}.pkl'), 'wb') as f:
+            pickle.dump(result, f)
 
     # setup & write the output table
     out_cols = [
@@ -386,10 +388,17 @@ def main():
         'x0',
         'y0',
         'chi2',
-        'name'
+        'name',
+        'success',
+        'status',
+        'message'
         ]
     out_dtypes = ['f8' for col in out_cols]
-    out_dtypes[-1] = 'S20'
+    out_dtypes[10] = 'S20' # name
+    out_dtypes[11] = 'bool' # success
+    out_dtypes[12] = 'i4' # status
+    out_dtypes[13] = 'S100' # message
+
     out_shape = len(fits)
     dtype = np.dtype({'names': out_cols, 'formats': out_dtypes})
     vmap_fits = np.array(fits, dtype=dtype)

@@ -7,6 +7,7 @@ from astropy.units import deg
 from pathlib import Path
 from glob import glob
 import matplotlib.pyplot as plt
+import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -27,6 +28,11 @@ def main():
 
     # fig size
     Sx, Sy = 45, 5
+
+    # interior plot fontsize
+    fs = 12
+
+    matplotlib.rcParams.update({'font.size': 13})
 
     # whether to subselect the KROSS sample
     subselect = False
@@ -156,7 +162,7 @@ def main():
             print('fNo KROSS object found for {name}; skipping')
             continue
 
-        kid = obj['KID']
+        kid = str(obj['KID'])
         z = obj['Z']
         pa_im = OrientedAngle(
             obj['PA_IM'], unit='deg', orientation='east-of-north'
@@ -223,6 +229,7 @@ def main():
         # plot the Hubble image
 
         # we don't currently have hubble cutouts for all sources
+        cutout = None
         try:
             ax = fig.add_subplot(1, Nsubplots, 1, projection=wcs)
             cutout_file = cosmo_cutouts[name]
@@ -236,25 +243,28 @@ def main():
             #     np.argmax(cutout)[1]-cutout.shape[1]
             #     ]
             plot_line_on_image(cutout, cen, pa_im, ax, 'orange', label='photometric axis')
-            ax.set_title('Hubble Image')
-            ax.text(0.025, 0.9, name, color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.85, f'kid: {kid}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.8, f'z={z:.3f}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.75, f'sini={sini:.2f}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.7, f'pa_diff={pa_im-pa_k:.1f} deg', color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.65, f'KIN_TYPE={ktype}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.6, f'mstar=10^{log_mstar:.2f}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.text(0.025, 0.55, f'vTF={vtf:.1f}', color='k', transform=ax.transAxes, fontsize=12)
-            # ax.text(0.025, 0.7, f'pa_im={pa_im:.1f} deg', color='k', transform=ax.transAxes, fontsize=12)
-            # ax.text(0.025, 0.65, f'pa_k={pa_k:.1f} deg', color='k', transform=ax.transAxes, fontsize=12)
+            ax.set_title(f'Hubble Image (KID {kid})')
+            ax.text(0.025, 0.9, name, color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.85, f'KID: {kid}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.8, f'z={z:.3f}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.75, f'sini={sini:.2f}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.7, f'pa_diff={pa_im-pa_k:.1f} deg', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.65, f'KIN_TYPE={ktype}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.6, f'mstar=10^{log_mstar:.2f}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.text(0.025, 0.55, f'vTF={vtf:.1f}', color='k', transform=ax.transAxes, fontsize=fs)
+            # ax.text(0.025, 0.7, f'pa_im={pa_im:.1f} deg', color='k', transform=ax.transAxes, fontsize=fs)
+            # ax.text(0.025, 0.65, f'pa_k={pa_k:.1f} deg', color='k', transform=ax.transAxes, fontsize=fs)
             if show_sample_info is True:
-                ax.text(0.025, 0.10, f'In sample: {in_sample}', color='k', transform=ax.transAxes, fontsize=12)
+                ax.text(0.025, 0.10, f'In sample: {in_sample}', color='k', transform=ax.transAxes, fontsize=fs)
             if (in_sample is True) and (show_sample_info is True):
-                ax.text(0.025, 0.05, f'3-sig outlier: {outlier}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=10)
-            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=10)
+                ax.text(0.025, 0.05, f'3-sig outlier: {outlier}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontssize=fs-2)
+            ax.coords[1].set_axislabel('Declination (J2000)', fontssize=fs-2)
             plt.legend(loc='upper right')
+        except:
+            print(f'No Hubble cutout for {name}; skipping')
 
+        try:
             #-------------------------------------------------------------------
             # plot the Hubble image, rebinned for higher s2n
 
@@ -270,13 +280,15 @@ def main():
             i, j = np.unravel_index(np.argmax(new_cutout), new_cutout.shape)
             cen = [i - new_cutout.shape[0]//2, j - new_cutout.shape[1]//2]
             plot_line_on_image(new_cutout, cen, pa_im, ax, 'orange', label='photometric axis')
-            ax.set_title('Hubble Image (Rebinned 4x4)')
-            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=10)
-            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=10)
+            ax.set_title(f'Hubble Image (Rebinned 4x4) (KID: {kid})')
+            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=fs)
+            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=fs)
             plt.legend(loc='upper right')
 
         except:
-            print(f'No Hubble cutout for {name}; skipping')
+            if cutout is not None:
+                import ipdb; ipdb.set_trace()
+            # print(f'No Hubble cutout for {name}; skipping')
 
         #-----------------------------------------------------------------------
         # plot the H-alpha image
@@ -291,9 +303,9 @@ def main():
             vmin = np.percentile(imap, 1)
             vmax = np.percentile(imap, 99)
             im = ax.imshow(imap, origin='lower', vmin=vmin, vmax=vmax, cmap='gray_r')
-            ax.set_title('H-alpha Intensity Map')
-            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=10)
-            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=10)
+            ax.set_title(f'H-alpha Intensity Map (KID {kid})')
+            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=fs-2)
+            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=fs-2)
             plt.colorbar(im, fraction=0.046, pad=0.04, label='erg/s/cm^2')
             # ax.coords[0].set_ticklabel_visible(False)
             # ax.coords[1].set_ticklabel_visible(False)
@@ -313,7 +325,7 @@ def main():
             vmax=np.percentile(vmap, 99)
             )
         im = ax.imshow(vmap, origin='lower', norm=norm, cmap='RdBu')
-        ax.set_title('Velocity Map')
+        ax.set_title(f'Velocity Map (KID {kid})')
         cen = [0,0]
         plot_line_on_image(
             vmap, cen, pa_im, ax, 'orange', label='Hubble photometric axis'
@@ -321,9 +333,9 @@ def main():
         plot_line_on_image(
             vmap, cen, pa_k, ax, c='k', label='KROSS kinematic axis'
             )
-        ax.text(0.05, 0.85, f'KIN_TYPE={ktype}', color='k', transform=ax.transAxes, fontsize=12)
-        ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=10)
-        ax.coords[1].set_axislabel('Declination (J2000)', fontsize=10)
+        ax.text(0.05, 0.05, f'KIN_TYPE={ktype}', color='k', transform=ax.transAxes, fontsize=fs)
+        ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=fs-2)
+        ax.coords[1].set_axislabel('Declination (J2000)', fontsize=fs-2)
         # divider = make_axes_locatable(ax)
         # cax = divider.append_axes("right", size="5%", pad=0.05)
         # plt.colorbar(im, cax=cax)
@@ -352,7 +364,7 @@ def main():
                 vmax=np.percentile(model_vmap, 99)
                 )
             im = ax.imshow(model_vmap, origin='lower', norm=norm, cmap='RdBu')
-            ax.set_title('Model Velocity Map')
+            ax.set_title(f'Model Velocity Map (KID {kid})')
             cen = [vmap_pars['x0'], vmap_pars['y0']]
             plot_line_on_image(
                 model_vmap, [0,0], pa_im, ax, 'orange', label='Hubble photometric axis'
@@ -366,9 +378,9 @@ def main():
             plot_line_on_image(
                 model_vmap, cen, pa_k_fitted, ax, 'red', label='Fitted kinematic axis (offset)'
                 )
-            ax.text(0.05, 0.85, f'KIN_TYPE={ktype}', color='k', transform=ax.transAxes, fontsize=12)
-            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=10)
-            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=10)
+            ax.text(0.05, 0.05, f'KIN_TYPE={ktype}', color='k', transform=ax.transAxes, fontsize=fs)
+            ax.coords[0].set_axislabel('Right Ascension (J2000)', fontsize=fs-2)
+            ax.coords[1].set_axislabel('Declination (J2000)', fontsize=fs-2)
             # divider = make_axes_locatable(ax)
             # cax = divider.append_axes("right", size="5%", pad=0.05)
             # plt.colorbar(im, cax=cax)
@@ -381,7 +393,7 @@ def main():
         # plot the measured & fitted rotation curves
 
         try:
-            ax = fig.add_subplot(1, Nsubplots, 6, projection=wcs)
+            ax = fig.add_subplot(1, Nsubplots, 6)
             rc = model_rcs[model_rcs['name'] == name]
             bin_centers = rc['distance'][0]
             obs_rotation_curve = rc['obs_rotation_curve'][0]
@@ -391,12 +403,13 @@ def main():
                 bin_centers, obs_rotation_curve, obs_rotation_curve_err, marker='o', label='observed'
                         )
             ax.plot(
-                bin_centers, model_rotation_curve, ls='--', c='k', label='model'
+                bin_centers, model_rotation_curve, ls='--', c='r', label='model'
                         )
+            ax.axhline(0, ls=':', c='k')
             ax.set_xlabel('Radial Distance (pixels)')
             ax.set_ylabel('3D Rotational Velocity (km/s)')
             plt.legend()
-            ax.set_title(f'{name} Galaxy Rotation Curve')
+            ax.set_title(f'{name} Galaxy Rotation Curve (KID {kid})')
             ax.set_aspect('auto')
         except:
             pass

@@ -309,6 +309,10 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # grab the datacube weights & mask for basis fitting
+        self.dc_weights = datacube.weights
+        self.dc_mask = np.sum(datacube.masks, axis=0)
+
         # TODO: would be nice to generalize for chromatic
         # PSFs in the future!
         if 'psf' in basis_kwargs:
@@ -369,6 +373,8 @@ class BasisIntensityMap(IntensityMap):
             basis_type, nx, ny,
             continuum_template=self.continuum_template,
             psf=self.psf,
+            weights=self.dc_weights,
+            mask=self.dc_mask,
             basis_kwargs=basis_kwargs
             )
 
@@ -451,7 +457,7 @@ class IntensityMapFitter(object):
     by some set of basis functions {phi_i}.
     '''
     def __init__(self, basis_type, nx, ny, continuum_template=None,
-                 psf=None, basis_kwargs=None):
+                 psf=None, weights=None, mask=None, basis_kwargs=None):
         '''
         basis_type: str
             The name of the basis_type type used
@@ -464,6 +470,10 @@ class IntensityMapFitter(object):
         psf: galsim.GSObject
             A galsim object representing a PSF to convolve the
             basis functions by
+        weights: numpy.ndarray
+            A 2D array of floats to apply to the fitted stacked image
+        mask: numpy.ndarray
+            A 2D array of bools to mask the stacked image
         basis_kwargs: dict
             Keyword args needed to build given basis type
         '''
@@ -479,6 +489,8 @@ class IntensityMapFitter(object):
         self.ny = ny
 
         self.continuum_template = continuum_template
+        self.weights = weights
+        self.mask = mask
         self.psf = psf
 
         self.grid = utils.build_map_grid(nx, ny)
@@ -547,23 +559,35 @@ class IntensityMapFitter(object):
         x = X.reshape(Ndata)
         y = Y.reshape(Ndata)
 
+        # apply mask
+        mask = self.mask.reshape(Ndata)
+        select = np.where(mask == 0)
+        x = x[select]
+        y = y[select]
+        Npseudo = len(x)
+        self.selection = select
+
         # the design matrix for a given basis and datacube
         if self.basis.is_complex is True:
-            self.design_mat = np.zeros((Ndata, Nbasis), dtype=np.complex128)
+            self.design_mat = np.zeros((Npseudo, Nbasis), dtype=np.complex128)
         else:
-            self.design_mat = np.zeros((Ndata, Nbasis))
+            self.design_mat = np.zeros((Npseudo, Nbasis))
 
         for n in range(self.basis.N):
             self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
 
         # handle continuum template separately
         if self.continuum_template is not None:
-            template = self.continuum_template.reshape(Ndata)
+            template = self.continuum_template.reshape(Ndata)[select]
 
             # make sure we aren't overriding anything
             assert (self.basis.N + 1) == self.Nbasis
             assert np.sum(self.design_mat[:,-1]) == 0
             self.design_mat[:,-1] = template
+
+        # TODO: Undersand why there are nans!
+        # import pudb; pudb.set_trace()
+        self.design_mat = np.nan_to_num(self.design_mat)
 
         return
 
@@ -739,7 +763,8 @@ class IntensityMapFitter(object):
         if cov is None:
             # The solution is simply the Moore-Penrose pseudo inverse
             # acting on the data vector
-            mle_coeff = self.pseudo_inv.dot(data)
+            mle_coeff = self.pseudo_inv.dot(data[self.selection])
+            # import pudb; pudb.set_trace()
 
         else:
             # If cov is diagonal but not constant sigma, then see

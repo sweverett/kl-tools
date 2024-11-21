@@ -9,13 +9,11 @@ import numpy as np
 import sys
 import pickle
 import schwimmbad
-import mpi4py
 from schwimmbad import MPIPool
 from argparse import ArgumentParser
 from astropy.units import Unit
 import galsim as gs
 import matplotlib.pyplot as plt
-import zeus
 
 import kl_tools.utils as utils
 from kl_tools.mcmc import build_mcmc_runner
@@ -26,9 +24,6 @@ import kl_tools.likelihood as likelihood
 from kl_tools.parameters import Pars
 from kl_tools.likelihood import LogPosterior
 from kl_tools.velocity import VelocityMap
-
-import ipdb
-import pudb
 
 parser = ArgumentParser()
 
@@ -68,8 +63,9 @@ def main(args, pool):
         # makes a new subdir for each repeated run of the same name
         resume = 'subfolder'
 
+    script_out_dir = utils.get_base_dir() / 'scripts/out'
     outdir = os.path.join(
-        utils.TEST_DIR, 'test-mcmc-run', run_name
+        script_out_dir, 'test-mcmc-run', run_name
         )
     utils.make_dir(outdir)
 
@@ -83,7 +79,7 @@ def main(args, pool):
         # 'g1': 0.0,
         # 'g2': 0.0,
         'theta_int': np.pi / 6,
-        # 'theta_int': 0.,
+        # 'theta_int': 0.01,
         'sini': 0.7,
         'v0': 5,
         'vcirc': 200,
@@ -164,26 +160,25 @@ def main(args, pool):
     datacube_pars = {
         # image meta pars
         'Nx': 40, # pixels
-        'Ny': 40, # pixels
-        'pix_scale': 0.5, # arcsec / pixel
+        'Ny': 30, # pixels
+        'pix_scale': 0.25, # arcsec / pixel
         # intensity meta pars
-        'intensity': {
-            'true_flux': true_flux, # counts
-            'true_hlr': true_hlr, # pixels
-            'type': 'inclined_exp',
-            # 'basis': 'exp_shapelets',
-        },
+        'true_flux': true_flux, # counts
+        'true_hlr': true_hlr, # pixels
+        'type': 'inclined_exp',
+        # 'basis': 'exp_shapelets',
         # velocty meta pars
         'v_model': mcmc_pars['velocity']['model'],
         'v_unit': mcmc_pars['units']['v_unit'],
         'r_unit': mcmc_pars['units']['r_unit'],
         # emission line meta pars
         'wavelength': 656.28, # nm; halpha
+        'line_name': 'Ha',
         'lam_unit': 'nm',
         'z': 0.3,
         'R': 5000.,
-        's2n': 1000000,
-        # 's2n': 10000,
+        # 's2n': 1000000,
+        's2n': 10000,
         # # 'sky_sigma': 0.01, # pixel counts for mock data vector
         # 'psf': gs.Gaussian(fwhm=0.8, flux=1.)
     }
@@ -208,7 +203,8 @@ def main(args, pool):
 
     outfile = os.path.join(outdir, 'true-im.png')
     print(f'Saving true intensity profile in obs plane to {outfile}')
-    plt.imshow(true_im, origin='lower')
+    # NOTE: we transpose to account for matrix vs cartesian indexing
+    plt.imshow(true_im.T, origin='lower')
     plt.colorbar()
     plt.title('True Halpha profile in obs plane')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
@@ -219,7 +215,8 @@ def main(args, pool):
 
     outfile = os.path.join(outdir, 'vmap.png')
     print(f'Saving true vamp in obs plane to {outfile}')
-    plt.imshow(vmap, origin='lower')
+    # NOTE: we transpose to account for matrix vs cartesian indexing
+    plt.imshow(vmap.T, origin='lower')
     plt.colorbar(label='v')
     plt.title('True velocity map in obs plane')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
@@ -241,7 +238,8 @@ def main(args, pool):
     k = 1
     for i in slice_indices:
         plt.subplot(sqrt, sqrt, k)
-        plt.imshow(datacube.slices[i]._data, origin='lower')
+        # NOTE: we transpose to account for matrix vs cartesian indexing
+        plt.imshow(datacube.slices[i]._data.T, origin='lower')
         plt.colorbar()
         l, r = lambdas[i]
         plt.title(f'lambda=({l:.1f}, {r:.1f})')

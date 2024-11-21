@@ -463,8 +463,19 @@ class DataCube(DataVector):
     def slice(self, indx):
         return self.slices[indx]
 
-    def stack(self):
-        return np.sum(self._data, axis=0)
+    def stack(self, nan_fill=0):
+        '''
+        Return a stacked image for the imap generation
+
+        NOTE: As the stack() method is mostly to produce an imap for fitting, we fill NaNs with the nan_fill value and rely on the mask to handle any bad pixels
+
+        nan_fill: float
+            The value to fill NaNs with in the stack
+        '''
+        # TODO: Need a better estimate here...
+        data = np.nan_to_num(self._data, nan=nan_fill)
+
+        return np.sum(data, axis=0)
 
     def _set_maps(self, maps, map_type):
         '''
@@ -546,6 +557,19 @@ class DataCube(DataVector):
         self._set_maps(masks, 'masks')
 
         return
+
+    def get_2d_mask(self) -> np.ndarray:
+        '''
+        Generate a 2D mask using the masks across all wavelengths
+        '''
+
+        # for now, just select on the sum of mask entries. Subclasses can overload to handle more complex cases
+
+        mask_sum = np.sum(self.masks, axis=0)
+        mask = np.zeros(mask_sum.shape, dtype=bool)
+        mask[mask_sum > 0] = True
+
+        return mask
 
     def get_continuum(self):
         if self._continuum_template is None:
@@ -682,6 +706,63 @@ class DataCube(DataVector):
         '''
 
         return self._data[:,i,j]
+
+    def cutout(self, shape, center=None, cutout_type='in-place'):
+        '''
+        Cutout a smaller datacube from the current one
+
+        NOTE: This method only works on X,Y, for lambda use truncate()
+        TODO: We need to do more work to update the header & WCS correctly
+
+        shape: tuple
+            The (Nx, Ny) shape of the new datacube (keeps all wavelengths)
+        center: tuple
+            The center of the new datacube. If None, will use the existing center
+        cutout_type: str
+            Select whether to apply the cutout w/ the DataCube constructor (in-place) or to just return the (args, kwargs) needed to produce the cutout (return-args). This is particularly useful for subclasses of DataCube
+        '''
+
+        if center is None:
+            center = (self.Nx//2, self.Ny//2)
+        else:
+            if center[0] < 0 or center[0] > self.Nx:
+                raise ValueError('Center x must be within the datacube!')
+            if center[1] < 0 or center[1] > self.Ny:
+                raise ValueError('Center y must be within the datacube!')
+
+        x_cen = center[0]
+        y_cen = center[1]
+        Nx = shape[0]
+        Ny = shape[1]
+
+        x_cut = np.s_[x_cen-Nx//2:x_cen+Nx//2]
+        y_cut = np.s_[y_cen-Ny//2:y_cen+Ny//2]
+
+        cutout_data = self._data[:, x_cut, y_cut]
+        cutout_weights = self.weights[:, x_cut, y_cut]
+        cutout_masks = self.masks[:, x_cut, y_cut]
+
+        cutout_pars = self.pars.copy() # is a deep copy
+
+        # Reset any attributes set during initialization
+        cutout_pars.reset()
+
+        if cutout_type == 'in-place':
+            self.__init__(
+                cutout_data,
+                pars=cutout_pars,
+                weights=cutout_weights,
+                masks=cutout_masks,
+            )
+
+        elif cutout_type == 'return-args':
+            args = [cutout_data]
+            kwargs = {
+                'pars': cutout_pars,
+                'weights': cutout_weights,
+                'masks': cutout_masks
+            }
+            return (args, kwargs)
 
     def truncate(self, blue_cut, red_cut, lambda_unit=None, cut_type='edge',
                  trunc_type='in-place'):

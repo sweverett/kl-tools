@@ -19,12 +19,6 @@ from kl_tools.parameters import Pars, MetaPars
 from kl_tools.velocity import VelocityMap
 from kl_tools.cube import DataVector, DataCube
 
-import ipdb
-import pudb
-
-# TODO: Make LogLikelihood a base class w/ abstract call,
-# and make current implementation for IFU
-
 parser = ArgumentParser()
 
 parser.add_argument('--show', action='store_true', default=False,

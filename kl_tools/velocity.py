@@ -77,11 +77,16 @@ class VelocityModel(object):
                                      f'to instantiate {mname} velocity model!')
 
         # Make sure units are astropy.unit objects
-        for u in [self.pars['r_unit'], self.pars['v_unit']]:
+        unit_pars = {
+            'r_unit': self.pars['r_unit'],
+            'v_unit': self.pars['v_unit']
+        }
+        for name, u in unit_pars.items():
             if (not isinstance(u, units.Unit)) and \
                (not isinstance(u, units.CompositeUnit)) and \
                (not isinstance(u, units.IrreducibleUnit)):
-                raise TypeError('unit params must be an astropy unit class!')
+               # try to convert to unit object
+               self.pars[name] = units.Unit(u)
 
         return
 
@@ -172,18 +177,49 @@ class VelocityMap(TransformableImage):
         return
 
     def __call__(self, plane, x, y, speed=False, normalized=False,
-                 use_numba=False):
+                 use_numba=False, indexing='ij'):
         '''
         Evaluate the velocity map at position (x,y) in the given plane. Note
         that position must be defined in the same plane
 
+        Parameters
+        ----------
+        plane: str
+            The plane to evaluate the velocity map in
+        x, y: np.ndarray
+            The position coordinates in the given plane. If 2D, see `indexing`
+            arg for more info on allowed indexing conventions for these arrays
         speed: bool
             Set to True to return speed map instead of velocity
         normalized: bool
             Set to True to return velocity / c
         use_numba: bool
             Set to True to use numba versions of transformations
+        # TODO: Clean this up when ready
+        indexing: str
+            If passing 2D numpy arrays for x & y, set the indexing to be either
+            'ij' or 'xy'. Consistent with numpy.meshgrid `indexing` arg:
+              - 'ij' if using matrix indexing; [i,j]=(x,y)
+              - 'xy' if using cartesian indexing; [i,j]=(y,x) 
+            If the equivalent 1D arrays are such that len(x) = M and len(y) = N,
+            then the 2D arrays should be of shape (N,M) if indexing='xy' and
+            (M,N) if indexing='ij'. Default is 'ij'. For more info, see:
+            https://numpy.org/doc/stable/reference/generated/numpy.meshgrid.html
         '''
+
+        if x.shape != y.shape:
+            raise ValueError('x and y must have the same shape!')
+
+        if len(x.shape) > 2:
+            raise ValueError('x and y must be 1D or 2D arrays!')
+
+        # if the arrays are 2D and using cartesian indexing, swap axes
+        # to make them consistent with the transformation matrices defined
+        # in transformation.py
+        # TODO: Clean this up when ready
+        if (len(x.shape) == 2) and (indexing == 'xy'):
+            x = np.swapaxes(x, 0, 1)
+            y = np.swapaxes(y, 0, 1)
 
         super(VelocityMap, self).__call__(
             plane, x, y, use_numba=use_numba
@@ -345,9 +381,9 @@ class VelocityMap(TransformableImage):
             r = np.arange(0, rmax+dr, dr)
 
             dx = (2*rmax) / (2*Nr+1)
-            xarr = np.arange(-rmax, rmax+dx, dx)
+            r = np.arange(-rmax, rmax+dx, dx)
 
-            x, y = np.meshgrid(xarr, xarr)
+            x, y = np.meshgrid(r, r, indexing='ij')
 
         else:
             # parse given positions
@@ -437,7 +473,7 @@ class VelocityMap(TransformableImage):
         dx = (2*rmax) / (2*Nr+1)
         x = np.arange(-rmax, rmax+dx, dx)
 
-        X, Y = np.meshgrid(x,x)
+        X, Y = np.meshgrid(x, x, indexing='ij')
 
         # Figure out subplot grid
         Nplanes = len(self._planes)
@@ -497,10 +533,9 @@ class VelocityMap(TransformableImage):
             y = np.arange(-rmax, rmax+dx, dx)
 
             # uniform grid in disk plane
-            # Xdisk, Ydisk= np.meshgrid(x, y)
-            X, Y = np.meshgrid(x, y)
-
+            X, Y = np.meshgrid(x, y, indexing='ij')
             xlim, ylim = [-rmax, rmax], [-rmax, rmax]
+
         else:
             xlim = [np.min(X), np.max(X)]
             ylim = [np.min(Y), np.max(Y)]

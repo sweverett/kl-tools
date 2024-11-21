@@ -1,3 +1,4 @@
+from kl_tools.velocity import VelocityMap
 # This is to ensure that numpy doesn't have
 # OpenMP optimizations clobber our own multiprocessing
 import os
@@ -17,14 +18,13 @@ import galsim as gs
 import matplotlib.pyplot as plt
 import zeus
 
-import utils
-from mcmc import build_mcmc_runner
-import priors
-from muse import MuseDataCube
-import likelihood
-from parameters import Pars
-from likelihood import LogPosterior
-from velocity import VelocityMap
+import kl_tools.utils as utils
+from kl_tools.mcmc import build_mcmc_runner
+import kl_tools.priors as priors
+from kl_tools.muse import MuseDataCube
+import kl_tools.likelihood as likelihood
+from kl_tools.parameters import Pars
+from kl_tools.velocity import VelocityMap
 
 import ipdb
 
@@ -32,13 +32,20 @@ parser = ArgumentParser()
 
 parser.add_argument('nsteps', type=int,
                     help='Number of mcmc iterations per walker')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco',
+                                                   'ultranest', 'metropolis'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
-parser.add_argument('-run_name', type=str, default='',
+parser.add_argument('-run_name', type=str, default=None,
                     help='Name of mcmc run')
+parser.add_argument('--resume', action='store_true', default=False,
+                    help='Set to resume previous run (if sampler allows)')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
+
+# muse-specific
+parser.add_argument('-obj_id', type=int, default=122003050,
+                    help='MUSE object ID')
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-ncores', default=1, type=int,
@@ -54,12 +61,21 @@ def main(args, pool):
     nsteps = args.nsteps
     sampler = args.sampler
     ncores = args.ncores
+    obj_id = args.obj_id
     mpi = args.mpi
     run_name = args.run_name
+    resume = args.resume
     show = args.show
 
+    if resume is False:
+        # makes a new subdir for each repeated run of the same name
+        resume = 'subfolder'
+
+    if run_name is None:
+        run_name = str(obj_id)
+
     outdir = os.path.join(
-        utils.TEST_DIR, 'muse-mcmc-run', run_name
+        utils.SCRIPT_DIR, 'out', 'muse-mcmc-run', run_name
         )
     utils.make_dir(outdir)
 
@@ -73,10 +89,49 @@ def main(args, pool):
         'rscale',
         'x0',
         'y0',
-        'z',
-        'R'
+        # 'z',
+        # 'R',
+        'flux',
+        'hlr',
         # 'beta'
         ]
+
+    # TODO: generalize this!
+    # keep track of obj_id-specific parameters 
+    if obj_id == 122003050:
+        z_prior = priors.GaussPrior(0.2141, .00001)
+        flux_prior = priors.UniformPrior(5e6, 2e8)
+        hlr_prior = priors.UniformPrior(0, 10)
+
+        basis_imap_kwargs = {
+            'type': 'basis',
+            'basis_type': 'exp_shapelets',
+            'basis_kwargs': {
+                'use_continuum_template': True,
+                'Nmax': 10,
+                'plane': 'obs',
+                'beta': 0.09, # exp_shapelet best fit for 122003050; Nmax=10
+                }
+        }
+
+        exp_imap_kwargs = {
+            'type': 'inclined_exp',
+            'flux': 'sampled', # counts
+            'hlr': 'sampled', # pixels
+        }
+
+    elif obj_id == 102021103:
+        z_prior = priors.GaussPrior(0.2466, .00001)
+        flux_prior = None
+        hlr = None
+        imap_kwargs = {}
+
+    imap_type = 'exp'
+
+    if imap_type == 'basis':
+        imap_kwargs = basis_imap_kwargs
+    elif imap_type == 'exp':
+        imap_kwargs = exp_imap_kwargs
 
     # additional args needed for prior / likelihood evaluation
     mcmc_pars = {
@@ -85,11 +140,8 @@ def main(args, pool):
             'r_unit': Unit('kpc')
             },
         'priors': {
-            'g1': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            'g2': priors.GaussPrior(0., 0.01, clip_sigmas=10),
-            # 'g1': priors.UniformPrior(-.01, 0.01),
-            # 'g2': priors.UniformPrior(-.01, 0.01),
-            # 'theta_int': priors.UniformPrior(0., np.pi),
+            'g1': priors.GaussPrior(0., 0.05, clip_sigmas=10),
+            'g2': priors.GaussPrior(0., 0.05, clip_sigmas=10),
             'theta_int': priors.UniformPrior(0., 2.*np.pi),
             # 'theta_int': priors.UniformPrior(np.pi/3, np.pi),
             'sini': priors.UniformPrior(0, 1.),
@@ -99,39 +151,19 @@ def main(args, pool):
             # 'vcirc': priors.GaussPrior(188, 2.5, zero_boundary='positive', clip_sigmas=2),
             # 'vcirc': priors.UniformPrior(190, 210),
             'rscale': priors.UniformPrior(0, 40),
-            'x0': priors.GaussPrior(0, 2.5),
-            'y0': priors.GaussPrior(0, 2.5),
-            'z': priors.GaussPrior(0.2466, .00001),# clip_sigmas=3),
-            'R': priors.GaussPrior(3200, 20),# clip_sigmas=4),
+            'x0': priors.GaussPrior(0, 5),
+            'y0': priors.GaussPrior(0, 5),
+            # 'z': z_prior,
+            # 'R': priors.GaussPrior(3200, 20),# clip_sigmas=4),
             # 'beta': priors.UniformPrior(0, .2),
-            # 'hlr': priors.UniformPrior(0, 8),
-            # 'flux': priors.UniformPrior(5e3, 7e4),
+            'hlr': hlr_prior,
+            'flux': flux_prior,
             },
         'velocity': {
             'model': 'offset'
         },
         'intensity': {
-            # For this test, use truth info
-            # 'type': 'inclined_exp',
-            # 'flux': 1.8e4, # counts
-            # 'hlr': 3.5,
-            # 'flux': 'sampled', # counts
-            # 'hlr': 'sampled', # pixels
-            'type': 'basis',
-            # 'basis_type': 'shapelets',
-            'basis_type': 'sersiclets',
-            # 'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                'use_continuum_template': True,
-                'Nmax': 12,
-            #     # 'plane': 'disk',
-                'plane': 'obs',
-                # 'beta': 0.17,
-                'beta': 0.61,
-                # 'beta': 'sampled',
-                'index': 1,
-                'b': 1,
-                }
+            **imap_kwargs
             },
         # 'marginalize_intensity': True,
         'psf': gs.Gaussian(fwhm=.8, flux=1.0), # fwhm in arcsec
@@ -142,10 +174,11 @@ def main(args, pool):
             }
     }
 
-    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
+    cube_dir = os.path.join(utils.SCRIPT_DIR, 'test_data/muse')
 
-    cubefile = os.path.join(cube_dir, '102021103_objcube.fits')
-    specfile = os.path.join(cube_dir, 'spectrum_102021103.fits')
+    obj_id = args.obj_id
+    cubefile = os.path.join(cube_dir, f'{obj_id}_objcube.fits')
+    specfile = os.path.join(cube_dir, f'spectrum_{obj_id}.fits')
     catfile = os.path.join(cube_dir, 'MW_1-24_main_table.fits')
     linefile = os.path.join(cube_dir, 'MW_1-24_emline_table.fits')
 
@@ -154,12 +187,17 @@ def main(args, pool):
         cubefile, specfile, catfile, linefile
         )
 
+    # for certain datacubes, get smaller cutout
+    if obj_id == 122003050:
+        shape = (56, 56)
+        datacube.cutout(shape)
+
     # default, but we'll make it explicit:
     datacube.set_line(line_choice='strongest')
     Nspec = datacube.Nspec
     lambdas = datacube.lambdas
 
-    datacube.set_psf(mcmc_pars['psf'])
+    # datacube.set_psf(mcmc_pars['psf'])
 
     print(f'Strongest emission line has {Nspec} slices')
 
@@ -190,26 +228,50 @@ def main(args, pool):
     pars = Pars(sampled_pars, mcmc_pars)
     pars_order = pars.sampled.pars_order
 
-    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
+    log_posterior = likelihood.LogPosterior(
+        pars, datacube, likelihood='datacube'
+        )
 
     #-----------------------------------------------------------------
     # Setup sampler
 
     ndims = log_posterior.ndims
-    nwalkers = 2*ndims
 
     print(f'Setting up {sampler} MCMCRunner')
-    args = [nwalkers, ndims]
-    if sampler in ['zeus', 'emcee']:
-        args += [log_posterior, datacube, pars]
-        kwargs = {}
+    kwargs = {}
+    if sampler in ['zeus', 'emcee', 'metropolis']:
+        if sampler == 'emcee':
+            nwalkers = 10*ndims
+        else:
+            nwalkers = 2*ndims
+        args = [nwalkers, ndims, log_posterior, datacube, pars]
 
     elif sampler == 'poco':
+        nwalkers = 1000
+        args = [
+            nwalkers,
+            ndims,
+            log_posterior.log_likelihood,
+            log_posterior.log_prior,
+            datacube,
+            pars
+            ]
+
+    elif sampler == 'ultranest':
+        # we will equate "walkers" with "live points" for ultranest
+        nwalkers = 400
+        args = [
+            nwalkers,
+            ndims,
+            log_posterior.log_likelihood._call_no_args,
+            log_posterior.log_prior,
+            datacube,
+            pars,
+        ]
+
         kwargs = {
-            'datacube': datacube,
-            'pars': pars,
-            'loglike': log_posterior.log_likelihood,
-            'logprior': log_posterior.log_prior,
+            'out_dir': outdir,
+            'resume': resume
         }
 
     runner = build_mcmc_runner(sampler, args, kwargs)
@@ -248,10 +310,10 @@ def main(args, pool):
         )
 
     runner.compute_MAP()
-    map_medians = runner.MAP_medians
+    map_vals = runner.MAP_true
     print('(median) MAP values:')
     for name, indx in pars_order.items():
-        m = map_medians[indx]
+        m = map_vals[indx]
         print(f'{name}: {m:.4f}')
 
     outfile = os.path.join(outdir, 'compare-data-to-map.png')
@@ -262,7 +324,7 @@ def main(args, pool):
     print(f'Saving corner plot compare to MAP in {outfile}')
     title = 'Reference lines are param MAP values'
     runner.plot_corner(
-        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
+        outfile=outfile, reference=runner.MAP_true, title=title, show=show
         )
 
     if sampler == 'emcee':

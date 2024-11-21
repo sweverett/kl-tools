@@ -652,8 +652,9 @@ class KLensZeusRunner(ZeusRunner):
                 vmax = np.min([ 100., np.max(images[i])])
             else:
                 vmin, vmax = None, None
+            # NOTE: we transpose to account for matrix vs cartesian indexing
             im = ax.imshow(
-                images[i], origin='lower', vmin=vmin, vmax=vmax
+                images[i].T, origin='lower', vmin=vmin, vmax=vmax
                 )
             ax.set_title(titles[i])
             divider = make_axes_locatable(ax)
@@ -718,7 +719,8 @@ class KLensZeusRunner(ZeusRunner):
             # first, data
             ax = axs[0,i]
             data = datacube.data[i]
-            im = ax.imshow(data, origin='lower')
+            # NOTE: we transpose to account for matrix vs cartesian indexing
+            im = ax.imshow(data.T, origin='lower')
             if i == 0:
                 ax.set_ylabel('Data')
             l, r = lambdas[i]
@@ -733,7 +735,8 @@ class KLensZeusRunner(ZeusRunner):
                 lambdas[i], sed_array, zfactor, intensity, continuum,
                 psf=psf, pix_scale=datacube.pix_scale
                 )
-            im = ax.imshow(model, origin='lower')
+            # NOTE: we transpose to account for matrix vs cartesian indexing
+            im = ax.imshow(model.T, origin='lower')
             if i == 0:
                 ax.set_ylabel('Model')
             divider = make_axes_locatable(ax)
@@ -743,7 +746,8 @@ class KLensZeusRunner(ZeusRunner):
             # third, residual
             ax = axs[2,i]
             residual = data - model
-            im = ax.imshow(residual, origin='lower')
+            # NOTE: we transpose to account for matrix vs cartesian indexing
+            im = ax.imshow(residual.T, origin='lower')
             if i == 0:
                 ax.set_ylabel('Residual')
             divider = make_axes_locatable(ax)
@@ -755,7 +759,8 @@ class KLensZeusRunner(ZeusRunner):
             residual = 100. * (data - model) / model
             vmin = np.max([-20, np.min(residual)])
             vmax = np.min([ 20, np.max(residual)])
-            im = ax.imshow(residual, origin='lower', vmin=vmin, vmax=vmax)
+            # NOTE: we transpose to account for matrix vs cartesian indexing
+            im = ax.imshow(residual.T, origin='lower', vmin=vmin, vmax=vmax)
             if i == 0:
                 ax.set_ylabel('% Residual')
             divider = make_axes_locatable(ax)
@@ -905,6 +910,7 @@ class KLensPocoRunner(PocoRunner):
 class UltranestRunner(MCMCRunner):
 
     def __init__(self, *args, **kwargs):
+
         try:
             self.resume = kwargs['resume']
             kwargs.pop('resume')
@@ -913,45 +919,30 @@ class UltranestRunner(MCMCRunner):
 
         try:
             # first, look for explicit setting
-            wrapped_pars = kwargs['wrapped_params']
+            wrapped_pars = kwargs['wrapped_pars']
+            kwargs.pop('wrapped_pars')
         except KeyError:
             try:
                 # next, ask the pars object
                 wrapped_pars = self.pars.sampled.get_wrapped_pars()
             except AttributeError:
                 # finally, don't set
-                self.wrapped_params = None
-
-        if wrapped_pars is not None:
-            self.set_wrapped_params(wrapped_pars)
+                wrapped_pars = None
 
         super(UltranestRunner, self).__init__(*args, **kwargs)
 
         return
 
-    def set_wrapped_params(self, wrapped_params: list) -> None:
-        '''
-        Set which sampled parameters have a wrapped parameter space (e.g. a circle)
-        '''
-
-        len_wrapped = len(wrapped_params)
-        len_sampled = len(self.pars.sampled)
-
-        if len_wrapped != len_sampled:
-            raise ValueError(f'wrapped_params has len {len_wrapped} while pars.sampled has len {len_sampled}')
-
-        self.wrapped_params = wrapped_params
-
-        return
-
     def _initialize_sampler(self, pool=None):
+        import pudb
+        pudb.set_trace()
         sampler = ultranest.ReactiveNestedSampler(
             self.pars.sampled.names,
             self.loglike,
             transform=self.logprior,
             log_dir=self.log_dir,
             resume=self.resume,
-            wrapped_params=self.wrapped_params
+            wrapped_params=self.wrapped_pars
             )
 
         return sampler
@@ -989,7 +980,7 @@ class UltranestRunner(MCMCRunner):
 
 class KLensUltranestRunner(UltranestRunner):
     '''
-    See https://pocomc.readthedocs.io/en/latest/
+    TODO
     '''
 
     def __init__(self, nwalkers, ndims, loglike, logprior,
@@ -1053,6 +1044,25 @@ class KLensUltranestRunner(UltranestRunner):
         self.log_dir = out_dir
 
         #...
+
+        self.set_wrapped_pars()
+
+        return
+
+    def set_wrapped_pars(self) -> None:
+        '''
+        Set which sampled parameters have a wrapped parameter space (e.g. a circle)
+        '''
+
+        wrapped_pars = self.pars.sampled.get_wrapped_pars()
+
+        len_wrapped = len(wrapped_pars)
+        len_sampled = len(self.pars.sampled)
+
+        if len_wrapped != len_sampled:
+            raise ValueError(f'wrapped_pars has len {len_wrapped} while pars.sampled has len {len_sampled}')
+
+        self.wrapped_pars = wrapped_pars
 
         return
 

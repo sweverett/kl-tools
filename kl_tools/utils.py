@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import os, sys
 import yaml
+import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 import pdb, pudb
 
@@ -28,17 +29,24 @@ class MidpointNormalize(colors.Normalize):
 
     e.g. im=ax1.imshow(array, norm=MidpointNormalize(midpoint=0.,vmin=-100, vmax=100))
     '''
-
-    def __init__(self, vmin=None, vmax=None, midpoint=None, clip=False):
+    def __init__(self, vmin, vmax, midpoint=0, clip=False):
         self.midpoint = midpoint
         colors.Normalize.__init__(self, vmin, vmax, clip)
 
-        return
-
     def __call__(self, value, clip=None):
-        # Ignoring masked values and edge cases
-        x, y = [self.vmin, self.midpoint, self.vmax], [0, 0.5, 1]
-        return np.ma.masked_array(np.interp(value, x, y), np.isnan(value))
+        try:
+            normalized_min = max(0, 1 / 2 * (1 - abs((self.midpoint - self.vmin) / (self.midpoint - self.vmax))))
+        except ZeroDivisionError:
+            normalized_min = self.midpoint-1
+
+        try:
+            normalized_max = min(1, 1 / 2 * (1 + abs((self.vmax - self.midpoint) / (self.midpoint - self.vmin))))
+        except ZeroDivisionError:
+            normalized_max = self.midpoint+1
+
+        normalized_mid = 0.5
+        x, y = [self.vmin, self.midpoint, self.vmax], [normalized_min, normalized_mid, normalized_max]
+        return np.ma.masked_array(np.interp(value, x, y))
 
 def read_yaml(yaml_file):
     with open(yaml_file, 'r') as stream:
@@ -50,6 +58,19 @@ def build_map_grid(Nx, Ny, indexing='ij'):
 
     For a given dimension: if # of pixels is even, then
     image center is on pixel corners. Else, a pixel center
+
+    Parameters:
+    Nx, Ny: int
+        Number of pixels in the x and y directions
+    indexing: str
+        If passing 2D numpy arrays for x & y, set the indexing to be either
+        'ij' or 'xy'. Consistent with numpy.meshgrid `indexing` arg:
+            - 'ij' if using matrix indexing; [i,j]=(x,y)
+            - 'xy' if using cartesian indexing; [i,j]=(y,x) 
+        If the equivalent 1D arrays are such that len(x) = M and len(y) = N,
+        then the 2D arrays should be of shape (N,M) if indexing='xy' and
+        (M,N) if indexing='ij'. Default is 'ij'. For more info, see:
+        https://numpy.org/doc/stable/reference/generated/numpy.meshgrid.html
     '''
 
     # max distance in given direction
@@ -65,7 +86,25 @@ def build_map_grid(Nx, Ny, indexing='ij'):
 
     X, Y = np.meshgrid(x, y, indexing=indexing)
 
+    # more for clarity than any intrinsic check
+    if indexing == 'ij':
+        assert X.shape == (Nx, Ny)
+    if indexing == 'xy':
+        assert X.shape == (Ny, Nx)
+
     return X, Y
+
+def get_image_center(Nx, Ny):
+    '''
+    Get the image center in array coordinates. For even pixel counts, the center
+    will be on a pixel corner, not the center of a pixel. Pixel centers are
+    defied as the center of the pixel.
+    '''
+
+    x0 = Nx // 2 + 0.5 * ((Nx+1) % 2)
+    y0 = Ny // 2 + 0.5 * ((Ny+1) % 2)
+
+    return x0, y0
 
 def check_file(filename):
     '''
@@ -174,6 +213,22 @@ def add_colorbar(im, aspect=10, pad_fraction=0.5, **kwargs):
     plt.sca(current_ax)
 
     return im.axes.figure.colorbar(im, cax=cax, **kwargs)
+
+def plot(show, save, out_file=None):
+    '''
+    helper function to streamline plotting options
+    '''
+
+    if save is True:
+        if out_file is None:
+            raise ValueError('Must provide out_file if save is True')
+        plt.savefig(out_file)
+    if show is True:
+        plt.show()
+    else:
+        plt.close()
+
+    return
 
 def get_base_dir() -> Path:
     '''

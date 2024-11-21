@@ -30,7 +30,7 @@ class TransformableImage(object):
     '''
     This base class defines the transformation properties
     and structure for an image (e.g. velocity map, source
-    intensity)that can be rendered in the various planes
+    intensity) that can be rendered in the various planes
     relevant to kinematic lensing: disk, gal, source, and obs
 
     The unifying feature of these images will be that their

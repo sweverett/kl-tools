@@ -12,7 +12,7 @@ class EmissionLine(object):
     Holds relevant information for a specific emission line
     '''
 
-    _req_line_pars = ['value', 'R', 'z', 'unit']
+    _req_line_pars = ['name', 'value', 'R', 'z', 'unit']
     _req_sed_pars = ['lblue', 'lred', 'resolution', 'unit']
 
     def __init__(self, line_pars, sed_pars):
@@ -130,7 +130,7 @@ class SED(object):
 
 
 # NOTE: These are the emission line wavelengths
-# in a vacuum
+# in vacuum
 # NOTE: These use the MUSE convention, but we can map to these
 # for other experiments
 LINE_LAMBDAS = {

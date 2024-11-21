@@ -36,6 +36,7 @@ class TestMockObservation(unittest.TestCase):
             'v_model': 'centered',
             'v_unit': Unit('km/s'),
             # emission line meta pars
+            'line_name': 'Ha',
             'wavelength': 656.28, # nm; halpha
             'lam_unit': 'nm',
             'z': 0.3,

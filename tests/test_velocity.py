@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from astropy import units
+import matplotlib.pyplot as plt
 
 from kl_tools.velocity import VelocityModel, OffsetVelocityModel, VelocityMap, get_model_types, build_model
 from kl_tools.utils import get_test_dir, make_dir, build_map_grid
@@ -228,6 +229,58 @@ class TestVelocityMap(unittest.TestCase):
             )
 
         return
+
+    def test_vmap_angle_orientation(self) -> None:
+        # Test that the theta_int angle is correctly oriented (cartesian)
+
+        model_pars = {
+            'g1': 0.0,
+            'g2': -0.0,
+            'theta_int': 0,
+            'sini': 0.8,
+            'v0': 0.0,
+            'vcirc': 200,
+            'rscale': 5,
+            'r_unit': units.Unit('pixel'),
+            'v_unit': units.km / units.s,
+        }
+
+        vmap = VelocityMap('centered', model_pars)
+
+        # we want the image to be 100 pixels wide and 50 pixels tall
+        Nx, Ny = 100, 50
+        X, Y = build_map_grid(Nx, Ny, indexing='xy')
+
+        vmap_obs = vmap('obs', X, Y)
+
+        plt.subplot(131)
+        plt.imshow(X, origin='lower')
+        plt.colorbar()
+        plt.title('X')
+
+        plt.subplot(132)
+        plt.imshow(Y, origin='lower')
+        plt.colorbar()
+        plt.title('Y')
+
+        plt.subplot(133)
+        plt.imshow(vmap_obs, origin='lower')
+        plt.colorbar()
+        theta_int = np.rad2deg(model_pars['theta_int'])
+        plt.title(f'Vmap Observed; theta_int = {theta_int:.2f} deg')
+
+        plt.gcf().set_size_inches(16, 4)
+
+        outfile = self.plot_dir / 'vmap-angle-orientation.png'
+        plt.savefig(outfile)
+
+        if self.show is True:
+            plt.show()
+        else:
+            plt.close()
+
+        return
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -27,7 +27,7 @@ class MockObservation(object):
     # TODO: This may need to be restructured to allow for more general models
     _req_true_pars = ['g1', 'g2', 'theta_int', 'sini', 'v0', 'vcirc', 'rscale']
     _opt_true_pars = ['flux', 'hlr', 'beta', 'x0', 'y0']
-    _req_datacube_pars = ['Nx', 'Ny', 'pix_scale', 'true_flux', 'true_hlr', 'z', 'R', 'wavelength', 'v_model', 'imap_type']
+    _req_datacube_pars = ['Nx', 'Ny', 'pix_scale', 'true_flux', 'true_hlr', 'z', 'R', 'line_name', 'wavelength', 'v_model', 'imap_type']
     _opt_datacube_pars = ['s2n', 'sky_sigma', 'continuum_template', 'v_unit', 'r_unit', 'lam_unit', 'psf', 'basis_type', 'basis_kwargs', 'use_basis_as_truth']
 
     def __init__(self, true_pars:dict, datacube_pars: dict) -> None:
@@ -124,6 +124,7 @@ class DefaultMockObservation(MockObservation):
         'v_unit': Unit('km/s'),
         'r_unit': Unit('kpc'),
         # emission line meta pars
+        'line_name': 'Ha',
         'wavelength': 656.28, # nm; halpha
         'lam_unit': 'nm',
         'z': 0.3,
@@ -233,8 +234,12 @@ def setup_likelihood_test(true_pars: dict, datacube_pars: dict) -> Union[DataCub
     # setup mock emission line, w/ halpha & CWI defaults
     if 'wavelength' in datacube_pars:
         wavelength = datacube_pars['wavelength']
+        if 'line_name' not in datacube_pars:
+            raise ValueError('Must pass a line_name if passing a wavelength!')
+        line_name = datacube_pars['line_name']
     else:
         wavelength = 656.28 # nm
+        line_name = 'Ha'
     if 'R' in datacube_pars:
         R = datacube_pars['R']
     else:
@@ -245,9 +250,8 @@ def setup_likelihood_test(true_pars: dict, datacube_pars: dict) -> Union[DataCub
         z = 0.3
     width = 1 # nm
     lines = [setup_simple_emission_line(
-        wavelength, Unit('nm'), R, z, width
+        line_name, wavelength, Unit('nm'), R, z, width
         )]
-
 
     if ('sky_sigma' not in datacube_pars) and ('s2n' not in datacube_pars):
         raise KeyError('Must pass one of sky_sigma or s2n!')
@@ -441,9 +445,11 @@ def setup_simple_CWI_datacube(Nx=30, Ny=30):
     # return mock_datacube
     return
 
-def setup_simple_emission_line(wavelength, unit, R, z, width,
+def setup_simple_emission_line(name, wavelength, unit, R, z, width,
                                Nbins=100):
     '''
+    name: str
+        The name of the emission line
     wavelength: float
         Emission line wavelength in a vacuum
     unit: astropy.units.Unit
@@ -469,6 +475,7 @@ def setup_simple_emission_line(wavelength, unit, R, z, width,
     lred  = obs_line + width/2
 
     line_pars = {
+        'name': name,
         'value': wavelength,
         'R': R,
         'z': z,

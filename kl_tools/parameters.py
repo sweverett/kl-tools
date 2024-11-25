@@ -3,6 +3,7 @@ import utils
 import os
 import galsim as gs
 import numpy as np
+import astropy.units as u
 
 import ipdb
 
@@ -305,7 +306,7 @@ class CubePars(MetaPars):
 
         if isinstance(bp, list):
             # we'll be lazy and just check the first entry
-            if not isinstance(bp[0], galsim.Bandpass):
+            if not isinstance(bp[0], gs.Bandpass):
                 raise TypeError('bandpass list must be filled with ' +\
                                 'galsim.Bandpass objects!')
             bandpasses = bp
@@ -518,8 +519,8 @@ def merge_bandpasses(bandpasses):
     wtype, zp = bandpasses[0].wave_type, bandpasses[0].zeropoint
     waves = [(bp.blue_limit+bp.red_limit)/2. for bp in bandpasses]
     trans = [bp(w) for bp,w in zip(bandpasses, waves)]
-    table = galsim.LookupTable(waves, trans)
-    bandpass = galsim.Bandpass(table, wave_type=wtype, zeropoint=zp)
+    table = gs.LookupTable(waves, trans)
+    bandpass = gs.Bandpass(table, wave_type=wtype, zeropoint=zp)
     return bandpass
 
 def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
@@ -551,13 +552,12 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
     bandpasses = []
     if file is None:
         for l1, l2 in lambdas:
-            bandpasses.append(galsim.Bandpass(
-                throughput, unit, blue_limit=l1, red_limit=l2, zeropoint=zp
-                ))
+            bandpasses.append(gs.Bandpass(f'{throughput}', unit, 
+                blue_limit=l1, red_limit=l2, zeropoint=zp))
     else:
         # build bandpass from file
         assert os.path.exists(file), f'Bandpass file {file} does not exist!'
-        _bandpass = galsim.Bandpass(file, wave_type = unit)
+        _bandpass = gs.Bandpass(file, wave_type = unit)
         for l1, l2 in lambdas:
             bandpasses.append(_bandpass.truncate(blue_limit=l1, red_limit=l2))
 

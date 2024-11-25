@@ -126,7 +126,7 @@ class FiberDataVector(DataVector):
         file=None,
         header = None, data_header = None, data = None, noise = None,
         ):
-        ''' Initialize the `GrismDataVector` class object
+        ''' Initialize the `FiberDataVector` class object
         either from a fits file, or from a series of input parameters
 
         '''

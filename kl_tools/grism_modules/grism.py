@@ -109,12 +109,12 @@ class GrismPars(parameters.CubePars):
             print(f'GrismPars: Overwrite the observation configuration')
             utils.check_type(obs_conf, 'obs_conf', dict)
             _pars['obs_conf'] = deepcopy(obs_conf)
-        self.is_dispersed = (_pars['obs_conf']['OBSTYPE'] == 1)
+        self.is_dispersed = (_pars['obs_conf']['OBSTYPE'] == 2)
         # tweak the pars dict such that it fits into `cube.CubePars` required 
         # fields
         # need to check whether the fields of `cube.CubePars` are consistent
         # across branches
-        _lrange = _pars['model_dimension']['lambda_range']
+        _lrange = _pars['model_dimension']['lambda_range'][0]
         _Nlam = (_lrange[1]-_lrange[0])/_pars['model_dimension']['lambda_res']
         _Nlam = np.ceil(_Nlam)
         _pars['shape'] = np.array([_Nlam, 
@@ -153,7 +153,7 @@ class GrismPars(parameters.CubePars):
     @property
     def bp_array(self):
         self._bp_array = np.zeros(self.lambdas.shape)
-        for i,_bp in enumerate(self.bandpasses):
+        for i,_bp in enumerate(self._bandpasses):
             self._bp_array[i][0] = _bp(self.lambdas[i][0])
             self._bp_array[i][1] = _bp(self.lambdas[i][1])
         return self._bp_array
@@ -185,30 +185,72 @@ class GrismModelCube(DataVector):
         return np.sum(self.pars.lambdas[:,0]*self.pars.bp_array[:,0])/\
         np.sum(self.pars.bp_array[:,0])
 
-    def observe(self, theory_cube, force_noise_free=True):
-        ''' Simulate observed image
+    def observe(self, **kwargs):
+        ''' Simulate observed image, can be either photometry or grism image
+        kwargs include:
+            - theory_cube: np.ndarray
+                3D photon distribution for grism observation
+            - force_noise_free: boolean
+                Flag to skip noise evaluation. Set to True to completely ignore
+            - datavector: DataVector derived object
+                DataVector object for PSF from data, 
+            - gal_phot: gs.GSObject derived class
+                GalSim surface brightness object for photometry image
         '''
-        # prepare datacube and output, z-y-x indexing
-        img_array = np.ones([self.conf['NAXIS2'], self.conf['NAXIS1']], 
-            dtype=np.float64, order='C')
-        # get 2D image
         #start_time = time()*1000
-        m.get_image(self.conf['OBSINDEX'], theory_cube, img_array,
-            self.lambdas, self.bp_array)
-        # wrap with noise & psf
-        img = gs.Image(img_array,
-            dtype = np.float64, scale=self.conf['PIXSCALE'], 
-            )
-        # convolve with achromatic psf, if required
-        psf = self._build_PSF_model(self.conf, lam_mean=self.effective_lambda)
-        if psf is not None:
-            _gal = gs.InterpolatedImage(img, scale=self.conf['PIXSCALE'])
-            gal = gs.Convolve([_gal, psf])
-            img = gal.drawImage(nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
-                scale=self.conf['PIXSCALE'])
+
+        ### Prepare PSF
+        psf = self._build_PSF_model(self.conf, lam_mean=self.effective_lambda,
+           datavector=kwargs.get("datavector", None))
+
+        ### Get dispersed grism image
+        if self.pars.is_dispersed:
+            # prepare datacube and output, z-y-x indexing
+            img_array = np.ones([self.conf['NAXIS2'], self.conf['NAXIS1']], 
+                                dtype=np.float64, order='C')
+            m.get_image(self.conf['OBSINDEX'], kwargs["theory_cube"], 
+                img_array, self.lambdas, self.bp_array)
+            img = gs.Image(img_array, dtype = np.float64, 
+                scale=self.conf['PIXSCALE'],)
+            # apply PSF to the dispersed grism image
+            if psf is not None:
+                try:
+                    _gal = gs.InterpolatedImage(img,scale=self.conf['PIXSCALE'])
+                    gal = gs.Convolve([_gal, psf])
+                    img = gal.drawImage(nx=self.conf['NAXIS1'], 
+                        ny=self.conf['NAXIS2'], scale=self.conf['PIXSCALE'])
+                except gs.errors.GalSimValueError:
+                    _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
+                    _ary_[:,:] = np.inf
+                    img = gal.Image(_ary_)
+        ### Get photometry image
+        else:
+            gal = gs.Convolve([kwargs["gal_phot"], psf])
+            img = gal.drawImage(nx=self.conf['NAXIS1'], 
+                ny=self.conf['NAXIS2'], scale=self.conf["PIXSCALE"])
+
+        # fig, axes = plt.subplots(1,3)
+        # axes[0].imshow(img.array)
+        # axes[1].imshow(theory_cube.sum(axis=0))
+        # axes[2].imshow(theory_cube.sum(axis=1))
+        # plt.show()
+        
+        
+        # if psf is not None:
+        #     try:
+        #         _gal = gs.InterpolatedImage(img, scale=self.conf['PIXSCALE'])
+        #         gal = gs.Convolve([_gal, psf])
+        #         img = gal.drawImage(nx=self.conf['NAXIS1'], 
+        #             ny=self.conf['NAXIS2'], scale=self.conf['PIXSCALE'])
+        #     except gs.errors.GalSimValueError:
+        #         _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
+        #         _ary_[:,:] = np.inf
+        #         img = gal.Image(_ary_)
+        
         #print("----- disperse image | %.2f ms -----" % (time()*1000 - start_time))
-        # apply noise
-        if force_noise_free:
+
+        ### apply noise
+        if kwargs.get("force_noise_free", True):
             return img.array, None
         else:
             noise = self._getNoise(self.conf)
@@ -261,6 +303,8 @@ class GrismModelCube(DataVector):
                 beta = config.get('PSFBETA', 2.5)
                 fwhm = config.get('PSFFWHM', 0.5)
                 return gs.Moffat(beta=beta, fwhm=fwhm)
+            elif _type == 'data':
+                return kwargs["datavector"].get_PSF(self.conf["OBSINDEX"])
             else:
                 raise ValueError(f'{psf_type} has not been implemented yet!')
         else:
@@ -314,7 +358,7 @@ class GrismDataVector(DataVector):
     - self.data_header: list of dict; the info about each data observation
         keywords:
             - INSTNAME: instrument name
-            - OBSTYPE : observation type; 0-photometry; 1-grism
+            - OBSTYPE : observation type; 0-photometry; 1-fiber, 2-grism
             - BANDPASS: bandpass filename
             - MDNAXIS1: number of pixels along lambda-axis
             - MDNAXIS2: number of pixels along x
@@ -354,7 +398,7 @@ class GrismDataVector(DataVector):
         "OBSINDEX": 0,
         "INSTNAME": "none",
         "OBSTYPE" : 0,
-        "BANDPASS": "none",
+        "BANDPASS": None,
         #"MDNAXIS1": 0,
         #"MDNAXIS2": 0,
         #"MDNAXIS3": 0,
@@ -363,7 +407,7 @@ class GrismDataVector(DataVector):
         #"MDCD1_2" : 0.0,
         #"MDCD2_1" : 0.0,
         #"MDCD2_2" : 1.0,
-        "CONFFILE": "none",
+        "CONFFILE": None,
         "NAXIS"   : 2,
         "NAXIS1"  : 0,
         "NAXIS2"  : 0,
@@ -378,8 +422,9 @@ class GrismDataVector(DataVector):
         "CD1_2"   : 0.0,
         "CD2_1"   : 0.0,
         "CD2_2"   : 1.0,
-        "DIAMETER": 100.0,
-        "EXPTIME" : 0.0,
+        # default diameter-exptime-gain-bandpass setting -> flux scaling = 1
+        "DIAMETER": np.sqrt(1/np.pi)*2,
+        "EXPTIME" : 1.0,
         "GAIN"    : 1.0,
         "NOISETYP": "none",
         # if NOISETYP is gauss, use NOISESIG to set noise std
@@ -437,19 +482,49 @@ class GrismDataVector(DataVector):
         '''
         return self.noise[idx]
 
+    def get_PSF(self, idx=0):
+        ''' Return the idx PSF model in the data set
+        '''
+        return self.PSF[idx]
+
+    def get_mask(self, idx=0):
+        ''' Return the idx mask in the data set
+        '''
+        return self.mask[idx]
+
     def from_fits(self, file=None):
         ''' Read `GrismDataVector` from a fits file
         '''
+        print(f'Reading dataset from {file}...')
         hdul = fits.open(file)
         self.header = hdul[0].header
         self.Nobs = self.header['OBSNUM']
+        print(f'Find {self.Nobs} observations')
+        # collect image, noise, PSF, and mask (PSF and mask are optional)
         self.data = []
         self.data_header = []
         self.noise = []
+        self.mask = []
+        self.PSF = []
         for i in range(self.Nobs):
-            self.data.append(hdul[1+2*i].data)
-            self.data_header.append(hdul[1+2*i].header)
-            self.noise.append(hdul[2+2*i].data)
+            # compulsory: image, image header, and noise
+            self.data.append(hdul[self.header["IMG%d"%(i+1)]].data)
+            self.data_header.append(hdul[self.header["IMG%d"%(i+1)]].header)
+            self.noise.append(hdul[self.header["NOISE%d"%(i+1)]].data)
+            # optional: PSF, mask
+            if "PSF%d"%(i+1) in self.header:
+                _hdu_ = hdul[self.header["PSF%d"%(i+1)]]
+                _psf_img_ = gs.Image(_hdu_.data, scale=_hdu_.header["PIXELSCL"], copy=True)
+                self.PSF.append(gs.InterpolatedImage(_psf_img_, flux=1))
+            else:
+                self.PSF.append(None)
+            if "MASK%d"%(i+1) in self.header:
+                self.mask.append(hdul[self.header["MASK%d"%(i+1)]].data)
+            else:
+                self.mask.append(None)
+            # self.data.append(hdul[1+2*i].data)
+            # self.data_header.append(hdul[1+2*i].header)
+            # self.noise.append(hdul[2+2*i].data)
             
         hdul.close()
 
@@ -457,19 +532,32 @@ class GrismDataVector(DataVector):
         ''' Write the data vector obj to a fits file
         '''
         hdu_primary = fits.PrimaryHDU(header=fits.Header(self.header))
-        hdu_img1 = fits.ImageHDU(self.data[0], 
-            header=fits.Header(self.data_header[0]))
-        hdu_noise1 = fits.ImageHDU(self.noise[0], 
-            header=fits.Header(self.data_header[0]))
-        hdu_img2 = fits.ImageHDU(self.data[1], 
-            header=fits.Header(self.data_header[1]))
-        hdu_noise2 = fits.ImageHDU(self.noise[1], 
-            header=fits.Header(self.data_header[1]))
-        hdu_img3 = fits.ImageHDU(self.data[2], 
-            header=fits.Header(self.data_header[2]))
-        hdu_noise3 = fits.ImageHDU(self.noise[2], 
-            header=fits.Header(self.data_header[2]))
-        hdul = fits.HDUList([hdu_primary, hdu_img1, hdu_noise1, hdu_img2, hdu_noise2, hdu_img3, hdu_noise3])
+        hdu_list = []
+        for i in range(self.Nobs):
+            # Compulsory: data image and noise
+            hdu_primary.header["IMG%d"%(i+1)] = "IMAGE%d"%(i+1)
+            hdu_list.append(fits.ImageHDU(self.data[i], name="IMAGE%d"%(i+1)),
+                header=fits.Header(self.data_header[i]))
+            hdu_primary.header["NOISE%d"%(i+1)] = "NOISE%d"%(i+1)
+            hdu_list.append(fits.ImageHDU(self.noise[i], name="NOISE%d"%(i+1)), 
+                header=fits.Header(self.data_header[i]))
+            # Optional: PSF and mask
+            if self.PSF[i] is not None:
+                hdu_primary.header["PSF%d"%(i+1)] = "PSF%d"%(i+1)
+                _pixelscl_ = self.data_header[i]["PIXSCALE"]/4.
+                _NAXIS_ = self.data_header[i]["NAXIS1"]*4.
+                _psf_img_ = self.PSF[i].drawImage(nx=_NAXIS_, ny=_NAXIS_, scale=_pixelscl_)
+                _psf_hdu_ = fits.ImageHDU(_psf_img_.array, name="PSF%d"%(i+1),
+                    header=fits.Header(self.data_header[i]))
+                _psf_hdu_.header["PIXELSCL"] = _pixelscl_
+                _psf_hdu_.header["OVERSAMP"] = 4.
+                _psf_hdu_.header["DET_SAMP"] = 4.
+                _psf_hdu_.header["FOV"] = _pixelscl_ * _NAXIS_
+                hdu_list.append(_psf_hdu_)
+            if self.mask[i] is not None:
+                hdu_primary.header["MASK%d"%(i+1)] = "MASK%d"%(i+1)
+                hdu_list.append(fits.ImageHDU(self.mask[i],name="MASK%d"%(i+1)), header=fits.Header(self.data_header[i]))
+        hdul = fits.HDUList(hdu_list)
         hdul.writeto(file, overwrite=overwrite)
 
     def get_config(self, idx=0):

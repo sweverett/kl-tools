@@ -48,6 +48,13 @@ LINE_LAMBDAS = {
     'N2_2': 6585.255 * u.Unit('Angstrom'),
     'S2_1': 6718.271 * u.Unit('Angstrom'),
     'S2_2': 6732.645 * u.Unit('Angstrom'),
+    'PaA': 1.875 * u.um, 
+    'PaB': 1.282 * u.um, 
+    'PaG': 1.094 * u.um, 
+    'BrA': 4.051 * u.um, 
+    'BrB': 2.625 * u.um, 
+    'BrG': 2.166 * u.um, 
+    'BrD': 1.944 * u.um,
 }
 
 ### default sed parameters, as an example
@@ -220,12 +227,13 @@ class ObsFrameSED(SED):
     def __init__(self, sed_meta=None):
         '''
         Initialize SED class object with parameters dictionary
+        TODO: need a flag for direct evaluation
         '''
         self.pars = copy.deepcopy(_default_sed_pars)
-        super(ObsFrameSED, self).__init__(self.pars['lblue'], self.pars['lred'], self.pars['resolution'], 'nm')
-        self.blue_limit, self.red_limit = self.pars['lblue']*u.nm, self.pars['lred']*u.nm
         if sed_meta is not None:
             self.updatePars(self.pars, sed_meta)
+        super(ObsFrameSED, self).__init__(self.pars['lblue'], self.pars['lred'], self.pars['resolution'], 'nm')
+        self.blue_limit, self.red_limit = self.pars['lblue']*u.nm, self.pars['lred']*u.nm
         #print(self.pars)
         self.calculate_obsframe_sed(self.pars)
         self.inventory = {
@@ -248,20 +256,27 @@ class ObsFrameSED(SED):
             raise ValueError(f'`flux_type` only supports ({norm.keys()})!')
         
         # check returned SED components
-        if component not in self.inventory.keys():
-            raise ValueError(f'`component` only supports ({self.inventory.keys()})!')
-        return self.inventory[component](wave)*norm[flux_type]
+        if component=='total' or component=='continuum':
+            return self.inventory[component](wave)*norm[flux_type]
+        elif component in self.emissions:
+            return self.emissions[component](wave)*norm[flux_type]
+        else:
+        #if component not in self.inventory.keys():
+            raise ValueError(f'`component`={component} not supported!')
             
     
     def calculate_obsframe_sed(self, pars):
         meta_obs_wave = np.arange(self.pars['lblue'], self.pars['lred'], 
             1000/self.pars['resolution'])
         self.continuum, _cont_tab = self.addContinuum(pars, meta_obs_wave)
-        self.emissions, _emis_tab = self.addEmissionLines(pars, meta_obs_wave)
+        self.emissions, _emis_tabs = self.addEmissionLines(pars, meta_obs_wave)
         #self.emission = np.sum(self.emissions_list)
-        _total_tab = gs.LookupTable(meta_obs_wave, 
-            _cont_tab(meta_obs_wave) + _emis_tab(meta_obs_wave), 
-            interpolant='linear')
+
+        # get the total flux sed = continuum + emissions
+        _total_flux = _cont_tab(meta_obs_wave)
+        for _eml_, _eml_sed_ in _emis_tabs.items():
+            _total_flux += _eml_sed_(meta_obs_wave)
+        _total_tab = gs.LookupTable(meta_obs_wave, _total_flux, interpolant='linear')
         #self.obs_frame_sed = self.continuum + self.emission
         self.obs_frame_sed = gs.SED(_total_tab, "nm", "flambda", fast=True, interpolant='linear')
         if pars['thin'] > 0:
@@ -276,10 +291,12 @@ class ObsFrameSED(SED):
         for key, val in new_pars.items():
             if type(val) is dict:
                 recompute = recompute | updatePars(old_pars[key], new_pars[key])
-            else:
-                if (old_pars[key] != val):
-                    recompute = True
-                    old_pars[key] = val
+            elif key not in old_pars:
+                recompute = True
+                old_pars[key] = val
+            elif (old_pars[key] != val):
+                recompute = True
+                old_pars[key] = val
         return recompute
     
     @classmethod
@@ -293,7 +310,9 @@ class ObsFrameSED(SED):
     @classmethod
     def addEmissionLines(cls, pars, meta_obs_wave):
         # Gaussian emission line profile (no spectra resolution convolved)
-        meta_obsframe_flux = np.zeros(meta_obs_wave.shape)
+        #meta_obsframe_flux = np.zeros(meta_obs_wave.shape)
+        _seds = {}
+        _tables = {}
         # loop through emission lines in the meta parameters
         for emline,vacwave in LINE_LAMBDAS.items():
             if pars.get(f'em_{emline}_flux', None) is not None:
@@ -307,12 +326,16 @@ class ObsFrameSED(SED):
                 # the redshift argument only changes the wavelength, keeping flux density fixed
                 emlstr = cls.wrap_emline_string(obs_wcen, obs_sigma, share)
                 emlsed = eval('lambda wave:'+emlstr) # erg/s/cm2/nm
-                meta_obsframe_flux += emlsed(meta_obs_wave)*obs_flux
+                #meta_obsframe_flux += emlsed(meta_obs_wave)*obs_flux
+                meta_obsframe_flux = emlsed(meta_obs_wave)*obs_flux
+                _tables[f'em_{emline}'] = gs.LookupTable(meta_obs_wave, 
+                    meta_obsframe_flux, interpolant='linear', )
+                _seds[f'em_{emline}'] = gs.SED(_tables[f'em_{emline}'], "nm", 
+                    "flambda", fast=True, interpolant='linear')
                 #emline_list.append(gs.SED(emlstr, wave_type='nm', flux_type='flambda', redshift=z)*obs_flux)
-        _table = gs.LookupTable(meta_obs_wave, meta_obsframe_flux, 
-            interpolant='linear', )
-        _sed = gs.SED(_table, "nm", "flambda", fast=True, interpolant='linear')
-        return _sed, _table
+        #_table = gs.LookupTable(meta_obs_wave, meta_obsframe_flux, interpolant='linear', )
+        #_sed = gs.SED(_table, "nm", "flambda", fast=True, interpolant='linear')
+        return _seds, _tables
     
     @classmethod
     def addContinuum(cls, pars, meta_obs_wave):
@@ -338,8 +361,7 @@ class ObsFrameSED(SED):
             #cont = gs.LookupTable(
             #    _temp[:,0]/wave_factor*(1.+pars['z']), _temp[:,1]*flux_factor, 
             #    interpolant='linear')
-            cont = gs.SED(template, pars['temp_wave_type'], 
-                pars['temp_flux_type'], redshift=pars['z'])
+            cont = gs.SED(template, pars['temp_wave_type'], pars['temp_flux_type'], redshift=pars['z'])
         else:
             raise ValueError(f'Continuum type {pars["continuum_type"]} is not yet supported. '+\
                              f'Only (func, temp) are supported now.')

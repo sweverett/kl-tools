@@ -203,7 +203,7 @@ namespace interface_mpp_aux {
         diameter = py::float_(config["DIAMETER"]);
         exp_time = py::float_(config["EXPTIME"]);
         gain = py::float_(config["GAIN"]);
-        if(obstype==1) {
+        if(obstype==2) {
             R_spec = py::float_(config["RSPEC"]);
             disp_ang = py::float_(config["DISPANG"]);
             offset = py::float_(config["OFFSET"]);
@@ -324,7 +324,7 @@ namespace interface_mpp_aux {
             // take the linear average of the bandpass.
             // Note that this only works when the lambda grid is fine enough.
             double mean_bp = 1.0; // the bandpass is counted seperately
-            if(obstype==1) mean_bp = (ptr_bp[2*i] + ptr_bp[2*i+1])/2.0;
+            if(obstype==2) mean_bp = (ptr_bp[2*i] + ptr_bp[2*i+1])/2.0;
             // for each slice, disperse & interpolate
             get_dispersion(mean_wave, shift);
             if (_DEBUG_PRINTS_) {
@@ -683,7 +683,7 @@ void cpp_get_image(int index,
     //cout << "cpp_get_image "<< index+1 << " out of " << _Nobs << endl;
     assert(index < _Nobs);
     const ima::disperse_helper& item = instance.get_helper(index);
-    if(item.getObsType() == 1) {
+    if(item.getObsType() == 2) {
         //cout << "Calling get_dispersed_image" << endl;
         item.get_dispersed_image(theory_data, image);
     }

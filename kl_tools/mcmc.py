@@ -267,7 +267,7 @@ class MCMCRunner(object):
         if pool is not None:
             with pool:
                 pt = type(pool)
-                print(f'Pool: {pool}')
+                #print(f'Pool: {pool}')
 
                 if isinstance(pool, schwimmbad.MPIPool):
                     if not pool.is_master():

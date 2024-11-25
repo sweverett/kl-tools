@@ -12,6 +12,7 @@ import utils
 import basis
 import likelihood
 import parameters
+from emission import LINE_LAMBDAS
 from transformation import transform_coords, TransformableImage
 
 import ipdb
@@ -230,8 +231,7 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datavector, flux, hlr,
-        theory_Nx = None, theory_Ny = None, scale = None):
+    def __init__(self, datavector, kwargs):
         ''' Initialize geometry spec and flux of InclinedExponentioal profile
         Note that the `datavector` argument is only used to extract image di-
         mension (Nx, Ny, and pixel scale), which can be replaced by kwargs.
@@ -245,26 +245,36 @@ class InclinedExponential(IntensityMap):
             For `InclinedExponential`, you can pass `datavector = None` then 
             pass the shape information by kwargs:
                 theory_Nx = blahblah, theory_Ny = blahblah, scale = blahblah
-        flux: float
-            Object flux
-        hlr: float
-            Object half-light radius (in pixels)
+        kwargs: dict
+            optional keyword arguments, including
+            flux, hlr, theory_Nx, theory_Ny, scale, em_PaA_hlr, etc
+            - flux: float
+                Object flux
+            - hlr: float
+                Object half-light radius (in pixels)
+
         '''
         ### Setting the intensity profile shape specification
-        if theory_Nx is not None and theory_Ny is not None:
-            nx, ny = theory_Nx, theory_Ny
+        if kwargs.get("theory_Nx", None) is not None and kwargs.get("theory_Ny", None) is not None:
+            nx, ny = kwargs["theory_Nx"], kwargs["theory_Ny"]
         else:
             nx, ny = datavector.Nx, datavector.Ny
         super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
-        self.pix_scale = scale if scale is not None else datavector.pix_scale
+        self.pix_scale = kwargs.get("scale", None)
+        if (self.pix_scale is None) and (datavector is not None):
+            self.pix_scale = datavector.pix_scale
 
         ### Setting the intensity profile astrophysical info
-        pars = {'flux': flux, 'hlr': hlr}
-        for name, val in pars.items():
+        self.pars = {'flux': kwargs.get("flux", 1), 'hlr': kwargs.get("hlr", None), 'imap_return_gal': kwargs.get("imap_return_gal", False)}
+        ### Setting the intensity profile of emission lines
+        for emline,vacwave in LINE_LAMBDAS.items():
+            if kwargs.get(f'em_{emline}_hlr', None) is not None:
+                self.pars[f'em_{emline}_hlr'] = kwargs[f'em_{emline}_hlr']
+        for name, val in self.pars.items():
             if not isinstance(val, (float, int)):
                 raise TypeError(f'{name} must be a float or int!')
-        self.flux = flux
-        self.hlr = hlr
+        #self.flux = flux
+        #self.hlr = hlr
         # same as default, but to make it explicit
         self.is_static = False
 
@@ -293,10 +303,39 @@ class InclinedExponential(IntensityMap):
         theta_int = pars.get('theta_int', theta_pars['theta_int'])
 
         inc = Angle(np.arcsin(sini), radians)
+        rot_angle = Angle(theta_int, radians)
 
-        gal = gs.InclinedExponential(
-            inc, flux=self.flux, half_light_radius=self.hlr
-        )
+        self.gal = {}
+        self.image = {}
+        # photometry image intensity profile
+        self.gal["phot"] = gs.InclinedExponential(
+            inc, flux=self.pars["flux"], half_light_radius=self.pars["hlr"]
+        ).rotate(rot_angle).shear(g1=g1, g2=g2)
+        #print(self.gal)
+        try:
+            self.image["phot"] = self.gal["phot"].drawImage(nx=self.nx, ny=self.ny, 
+                scale=self.pix_scale).array
+        except gs.GalSimFFTSizeError:
+            self.image["phot"] = np.zeros([self.ny, self.nx])
+        # emission lines + continuum intensity profile
+        for emline,vacwave in LINE_LAMBDAS.items():
+            if f'em_{emline}_hlr' in pars['intensity']:
+                self.gal[f'em_{emline}'] = gs.InclinedExponential(
+                    inc, flux=1, half_light_radius=pars['intensity'][f'em_{emline}_hlr']
+                    ).rotate(rot_angle).shear(g1=g1, g2=g2)
+                try:
+                    self.image[f'em_{emline}'] = self.gal[f'em_{emline}'].drawImage(
+                        nx=self.nx, ny=self.ny, scale=self.pix_scale).array
+                except gs.GalSimFFTSizeError:
+                    self.image[f'em_{emline}'] = np.zeros([self.ny, self.nx])
+                #print(self.gal)
+            if f'cont_{emline}_hlr' in pars['intensity']:
+                self.gal[f'cont_{emline}'] = gs.InclinedSersic(4, inc, half_light_radius=pars['intensity'][f'cont_{emline}_hlr'], flux=1.0, trunc=5*pars['intensity'][f'cont_{emline}_hlr'], flux_untruncated=True)#.rotate(rot_angle).shear(g1=g1, g2=g2)
+                try:
+                    self.image[f'cont_{emline}'] = self.gal[f'cont_{emline}'].drawImage(
+                        nx=self.nx, ny=self.ny, scale=self.pix_scale).array
+                except gs.GalSimFFTSizeError:
+                    self.image[f'cont_{emline}'] = np.zeros([self.ny, self.nx])
 
         # Only add knots if a psf is provided
         # NOTE: no longer workds due to psf conovlution
@@ -307,25 +346,13 @@ class InclinedExponential(IntensityMap):
         #         knots = gs.RandomKnots(**knot_pars)
         #         gal = gal + knots
 
-        rot_angle = Angle(theta_int, radians)
-        gal = gal.rotate(rot_angle)
-
-        # TODO: still don't understand why this sometimes randomly fails
-        try:
-            gal = gal.shear(g1=g1, g2=g2)
-        except Exception as e:
-            print('imap generation failed!')
-            print(f'Shear values used: g=({g1}, {g2})')
-            raise e
-        self.gal = gal
-
-        try:
-            self.image = gal.drawImage(nx=self.nx, ny=self.ny, 
-                scale=self.pix_scale).array
-        except gs.GalSimFFTSizeError:
-            #print(f'WARNING: FFT size too large, return -np.inf')
-            self.image = np.zeros([self.ny, self.nx])
-        if pars.get('run_options', {}).get('imap_return_gal', False):
+        # try:
+        #     self.image = gal.drawImage(nx=self.nx, ny=self.ny, 
+        #         scale=self.pix_scale).array
+        # except gs.GalSimFFTSizeError:
+        #     #print(f'WARNING: FFT size too large, return -np.inf')
+        #     self.image = np.zeros([self.ny, self.nx])
+        if pars['run_options']['imap_return_gal']:
             return self.image, self.gal
         else:
             return self.image
@@ -533,7 +560,7 @@ def build_intensity_map(name, datavector, kwargs):
 
     if name in INTENSITY_TYPES.keys():
         # User-defined input construction
-        intensity = INTENSITY_TYPES[name](datavector, **kwargs)
+        intensity = INTENSITY_TYPES[name](datavector, kwargs)
     else:
         raise ValueError(f'{name} is not a registered intensity!')
 

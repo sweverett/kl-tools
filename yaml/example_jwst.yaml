@@ -1,0 +1,242 @@
+# Configuration YAML file for JWST KL measurement
+
+# parameters control the MCMC simulation settings
+mcmc:
+  nsteps: 10000
+  monitor_autocorr: True
+  objid: 181661
+
+
+# (Might be) sampled parameters in simulation
+params:
+  g1: 
+    prior: 
+      min: -1.0 
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: g_1
+  g2:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: g_2
+  eint1:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: e^\mathrm{int}_1
+  eint2:
+    prior:
+      min: -1.0
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: e^\mathrm{int}_2
+  theta_int:
+    derived: 'lambda eint1, eint2: np.angle(eint1+1j*eint2)/2.'
+    latex: \theta_\mathrm{int}
+  sini:
+    derived: 'lambda eint1, eint2: np.sin(2*np.arctan((eint1*eint1+eint2*eint2)**0.5))'
+    latex: \mathrm{sin}(i)
+  v0:
+    prior:
+      dist: norm
+      loc: 0.0
+      scale: 10.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: v_0
+  vcirc:
+    prior:
+      # dist: lognorm
+      # loc: 300.0
+      # scale: 0.06
+      min: 50
+      max: 500
+    ref:
+      dist: norm
+      loc: 300.0
+      scale: 1
+      proposal: 1.0e-4
+    latex: v_\mathrm{circ}
+  rscale:
+    prior:
+      min: 0.01
+      max: 5.0
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: R_\mathrm{vscale}
+  hlr:
+    prior:
+      min: 0.01
+      max: 5.0
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: R_h
+  em_PaA_flux:
+    prior:
+      min: 1.0e-21
+      max: 1.0e-11
+    ref:
+      dist: norm
+      loc: 1.2e-16
+      scale: 1.0e-19
+      proposal: 1.0e-4
+    latex: F_\mathrm{H\alpha}
+  em_PaA_hlr:
+    prior:
+      min: 0.01
+      max: 5.0
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: R_h^{Pa\alpha}
+  cont_PaA_hlr:
+    prior:
+      min: 0.01
+      max: 5.0
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: R_h^{Pa\alpha-cont}
+  flux:
+    prior:
+      min: 1.0e-14
+      max: 1.0e+14
+    ref:
+      dist: norm
+      loc: 1.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: F_\mathrm{phot}
+  obs_cont_norm_flam:
+    #value: 3.0e-17
+    value: 0.0
+    # prior:
+    #   min: 1.0e-14
+    #   max: 1.0e+14
+    # ref:
+    #   dist: norm
+    #   loc: 1.0
+    #   scale: 0.1
+    #   proposal: 1.0e-4
+    latex: F_\mathrm{cont}
+
+### Meta parameters used in simulation
+meta:
+  g1: param
+  g2: param
+  eint1: param
+  eint2: param
+
+  velocity:
+    model: default
+    v0: param
+    vcirc: param
+    rscale: param
+
+  intensity:
+    type: inclined_exp
+    flux: param
+    hlr: param
+    em_PaA_hlr: param
+    cont_PaA_hlr: param
+
+  psf: from_data
+
+  units:
+    v_unit: km/s
+    r_unit: arcsec
+
+  run_options:
+    run_mode: FLUX # ETC or FLUX
+    imap_return_gal: True
+    use_numba: False
+    alignment_params: eint
+
+  model_dimension:
+    Nx: 256
+    Ny: 256
+    scale: 0.01
+    lblue: 3800
+    lred: 5200
+    resolution: 5000
+    lambda_range: [[4886.499999999879, 4917.499999999875]]
+    lambda_res: 0.25
+    super_sampling: 4
+    lambda_unit: nm
+
+  sed:
+    z: 0.3
+    continuum_type: func # temp
+    continuum_func: "1.0 + wave * 0.0"
+    #restframe_temp: ../data/Simulation/GSB2.spec
+    temp_wave_type: Ang
+    temp_flux_type: flambda
+    cont_norm_method: flux
+    obs_cont_norm_wave: 4440
+    obs_cont_norm_flam: param
+    em_PaA_flux: param
+    em_PaA_sigma: 0.65
+
+  obs_conf:
+    - INSTNAME: JWST
+      OBSTYPE: grism
+      BANDPASS: ../data/Bandpass/DESI/z.dat?
+      SEDBLKID: 0
+      PSFTYPE: data
+      # if in ETC mode
+      RDNOISE: 2.6
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      DIAMETER: 332.42
+      EXPTIME: 180
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+    - INSTNAME: JWST
+      OBSTYPE: image
+      BANDPASS: ../data/Bandpass/CTIO/DECam.r.dat
+      PSFTYPE: data
+      # if in ETC mode
+      SKYLEVEL: 44.54
+      EXPTIME: 4000
+      NAXIS: 2
+      NAXIS1: 32
+      NAXIS2: 30
+      PIXSCALE: 0.003
+      PSFFWHM: 1.0
+      DIAMETER: 378.2856
+      GAIN: 4.0
+      NOISETYP: ccd
+      RDNOISE: 7
+      ADDNOISE: False

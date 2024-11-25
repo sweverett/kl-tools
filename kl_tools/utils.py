@@ -211,6 +211,29 @@ def parse_propose(config):
     return mean, std, proposal
 
 def parse_yaml(filename):
+    ''' Parse the YAML configuration file for a KL fitting
+    Input:
+        filename: YAML file name
+    Output:
+        sampled_pars: list of string
+            which parameters to sample
+        fidvals: dict
+            fiducial values of those sampled parameters
+        latex_labels: dict
+            the LaTeX labels of those parameters
+        derived: dict
+            derived parameters
+        meta: dict
+            meta parameter dict
+        mcmc: dict
+            MCMC settings
+        sample_ball_mean: dict
+            mean values of the sampled parameters, used in MCMC initialization
+        sample_ball_std: dict
+            std values of the sampled parameters, used in MCMC initialization
+        sample_ball_proposal: dict
+            proposal of MCMC
+    '''
     config = read_yaml(filename)
     sampled_pars = []
     sample_ball_mean, sample_ball_std, sample_ball_proposal = {}, {}, {}
@@ -244,6 +267,8 @@ def parse_yaml(filename):
         config['meta']['obs_conf'][i]['OBSINDEX'] = i
         if config['meta']['obs_conf'][i]['OBSTYPE'] == 'fiber':
             config['meta']['obs_conf'][i]['OBSTYPE'] = 1
+        elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'grism':
+            config['meta']['obs_conf'][i]['OBSTYPE'] = 2
         elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'image':
             config['meta']['obs_conf'][i]['OBSTYPE'] = 0
         else:

@@ -27,6 +27,17 @@ import emission
 import kltools_grism_module_2 as m
 from datavector import DataVector
 
+try:
+    import mpi4py
+    from mpi4py import MPI
+    comm = MPI.COMM_WORLD
+    size = comm.Get_size()
+    rank = comm.Get_rank()
+except:
+    rank = 0
+    size = 1
+m.set_mpi_info(size, rank)
+
 import ipdb
 
 parser = ArgumentParser()
@@ -222,12 +233,17 @@ class GrismModelCube(DataVector):
                 except gs.errors.GalSimValueError:
                     _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
                     _ary_[:,:] = np.inf
-                    img = gal.Image(_ary_)
+                    img = gs.Image(_ary_)
         ### Get photometry image
         else:
             gal = gs.Convolve([kwargs["gal_phot"], psf])
-            img = gal.drawImage(nx=self.conf['NAXIS1'], 
-                ny=self.conf['NAXIS2'], scale=self.conf["PIXSCALE"])
+            try:
+                img = gal.drawImage(nx=self.conf['NAXIS1'], 
+                    ny=self.conf['NAXIS2'], scale=self.conf["PIXSCALE"])
+            except gs.errors.GalSimFFTSizeError:
+                _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
+                _ary_[:,:] = np.inf
+                img = gs.Image(_ary_)
 
         # fig, axes = plt.subplots(1,3)
         # axes[0].imshow(img.array)

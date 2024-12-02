@@ -222,7 +222,7 @@ class GrismModelCube(DataVector):
                 except gs.errors.GalSimValueError:
                     _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
                     _ary_[:,:] = np.inf
-                    img = gal.Image(_ary_)
+                    img = gs.Image(_ary_)
         ### Get photometry image
         else:
             gal = gs.Convolve([kwargs["gal_phot"], psf])

@@ -106,7 +106,8 @@ def main(args, pool):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector 
-    datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/data_compile_short_withmask_GDS_ID%d.fits"%(objID)
+    datafile = "/home/u17/jiachuanxu/kl-tools/data/jwst/data_compile_short_withmask_GDS_ID%d.fits"%(objID)
+    #datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/data_compile_short_withmask_GDS_ID%d.fits"%(objID)
     datavector = GrismDataVector(file=datafile)
 
     #-----------------------------------------------------------------

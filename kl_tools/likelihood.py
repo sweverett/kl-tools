@@ -84,12 +84,14 @@ def init_GlobalLambdas_hires(lambdas_hires):
     Global_lambdas_hires = lambdas_hires
 def get_GlobalLambdas_hires(i):
     global Global_lambdas_hires
+    assert i<len(Global_lambdas_hires), f'Index {i} out of range of {len(Global_lambdas)}!'
     return Global_lambdas_hires[i]
 def init_GlobalLambdas(lambdas):
     global Global_lambdas
     Global_lambdas = lambdas
 def get_GlobalLambdas(i):
     global Global_lambdas
+    assert i<len(Global_lambdas), f'Index {i} out of range of {len(Global_lambdas)}!'
     return Global_lambdas[i]
 
 class LogBase(object):
@@ -1236,6 +1238,9 @@ class GrismLikelihood(LogLikelihood):
         theta_pars = self.theta2pars(theta)
         dv = get_GlobalDataVector(0)
         start_time = time()*1000
+
+        #fig, axes = plt.subplots(1,self.Nobs)
+
         for i in range(self.Nobs):
             fc = get_Cube(i)
             if fc.pars.is_dispersed: 
@@ -1245,14 +1250,18 @@ class GrismLikelihood(LogLikelihood):
             else:
                 #img, _ = fc.observe(None, gal, sed)
                 img, _ = fc.observe(gal_phot=gal_phot, datavector=dv)
+            mask = dv.get_mask(i)
+            if mask == None:
+                mask = np.ones_like(img)
+            #axes[i].imshow(img, origin='lower')
 
             data = dv.get_data(i)
             noise = np.std(dv.get_noise(i))
-            chi2 = np.sum(((data-img)/noise)**2)
+            chi2 = np.sum(((data-img)*mask/noise)**2)
             loglike += -0.5*chi2
             if timing:
                 print("---- calculate dchi2 %d/%d | %.2f ms -----" % (i+1,self.Nobs,time()*1000 - start_time))
-
+        #plt.show()
         # loglike = 0
 
         # # can figure out how to remove this for loop later
@@ -1276,7 +1285,7 @@ class GrismLikelihood(LogLikelihood):
         theta_pars: dict
             Dictionary of sampled pars
         '''
-
+        start_time = time()*1000
         _meta_update = self.meta.copy_with_sampled_pars(theta_pars)
         _meta_update['run_options']['imap_return_gal'] = True
         parametriz =  _meta_update['run_options'].get('alignment_params', 'sini_pa')
@@ -1320,12 +1329,13 @@ class GrismLikelihood(LogLikelihood):
         vmap = self.setup_vmap(theta_pars, _meta_update)
         # evaluate maps at pixel centers in obs plane
         v_array = vmap('obs', X, Y, normalized=True, use_numba=use_numba)
-        start_time = time()*1000
+        if timing:
+            print("\t---- render v map | %.2f ms -----" % (time()*1000 - start_time))
         imap = self.setup_imap(theta_pars, _meta_update)
         # get both the emission line and continuum image
         i_arrays, gals = imap.render(theta_pars, None, _meta_update)
         if timing:
-            print("---- render i/v map | %.2f ms -----" % (time()*1000 - start_time))
+            print("\t---- render i map | %.2f ms -----" % (time()*1000 - start_time))
         # debug purpose
         # fig,axes = plt.subplots(1,2)
         # axes[0].imshow(i_array)
@@ -1338,7 +1348,7 @@ class GrismLikelihood(LogLikelihood):
         # create observer-frame SED and the 3D model cubes, block-by-block
         sed = self.setup_sed(_meta_update)
         if timing:
-            print("---- render SED | %.2f ms -----" % (time()*1000 - start_time))
+            print("\t---- render SED | %.2f ms -----" % (time()*1000 - start_time))
         dc_array = []
         for iblock in range(self.N_SED_block):
             # high resolution wavelength grid
@@ -1355,11 +1365,13 @@ class GrismLikelihood(LogLikelihood):
             for key in gals.keys():
                 if key.startswith('em_'):
                     # evaluate SED (phot/s/cm2) at observer frame (w/ LoS velocity)
-                    #substart_time = time()*1000
+                    substart_time = time()*1000
                     sed_mesh = (sed(w_mesh, component=key)*self.dwave[iblock]/self.Nsub[iblock]).reshape(mshape)
-                    #print("---- SED on grid [%s] | %.2f ms -----" % (key, time()*1000 - substart_time))
+                    if timing:
+                        print(f'\t---- SED on grid [{key}] ({mshape}) | {time()*1000 - substart_time:.2f} ms -----')
                     dc += sed_mesh*i_arrays[key][np.newaxis,:,:]/(1+v_array[np.newaxis,:, :])
-                    # print("---- SED on grid [%s] | %.2f ms -----" % (key, time()*1000 - substart_time))
+                    if timing:
+                        print(f'\t---- SED on grid [{key}] ({mshape}) | {time()*1000 - substart_time:.2f} ms -----')
                 if key.startswith('cont_'):
                     sed_mesh = sed(lambda_cen_hires, component='continuum')*self.dwave[iblock]/self.Nsub[iblock]
                     dc += np.outer(sed_mesh, i_arrays[key][np.newaxis,:,:]).reshape(mshape)

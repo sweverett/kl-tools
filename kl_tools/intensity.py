@@ -1,6 +1,6 @@
 import numpy as np
 import os
-import time
+from time import time
 from abc import abstractmethod
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -308,6 +308,7 @@ class InclinedExponential(IntensityMap):
         self.gal = {}
         self.image = {}
         # photometry image intensity profile
+        start = time()*1000
         self.gal["phot"] = gs.InclinedExponential(
             inc, flux=self.pars["flux"], half_light_radius=self.pars["hlr"]
         ).rotate(rot_angle).shear(g1=g1, g2=g2)
@@ -317,6 +318,7 @@ class InclinedExponential(IntensityMap):
                 scale=self.pix_scale).array
         except gs.GalSimFFTSizeError:
             self.image["phot"] = np.zeros([self.ny, self.nx])
+        # print('\t\t--- photometry profile | %.2f seconds'%(time()*1000-start))
         # emission lines + continuum intensity profile
         for emline,vacwave in LINE_LAMBDAS.items():
             if f'em_{emline}_hlr' in pars['intensity']:
@@ -329,6 +331,7 @@ class InclinedExponential(IntensityMap):
                 except gs.GalSimFFTSizeError:
                     self.image[f'em_{emline}'] = np.zeros([self.ny, self.nx])
                 #print(self.gal)
+                # print('\t\t--- emission profile | %.2f seconds'%(time()*1000-start))
             if f'cont_{emline}_hlr' in pars['intensity']:
                 self.gal[f'cont_{emline}'] = gs.InclinedSersic(4, inc, half_light_radius=pars['intensity'][f'cont_{emline}_hlr'], flux=1.0, trunc=5*pars['intensity'][f'cont_{emline}_hlr'], flux_untruncated=True)#.rotate(rot_angle).shear(g1=g1, g2=g2)
                 try:

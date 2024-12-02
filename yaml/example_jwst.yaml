@@ -119,16 +119,16 @@ params:
       scale: 0.1
       proposal: 1.0e-4
     latex: R_h^{Pa\alpha}
-  cont_PaA_hlr:
-    prior:
-      min: 0.01
-      max: 5.0
-    ref:
-      dist: norm
-      loc: 1.0
-      scale: 0.1
-      proposal: 1.0e-4
-    latex: R_h^{Pa\alpha-cont}
+  # cont_PaA_hlr:
+  #   prior:
+  #     min: 0.01
+  #     max: 5.0
+  #   ref:
+  #     dist: norm
+  #     loc: 1.0
+  #     scale: 0.1
+  #     proposal: 1.0e-4
+  #   latex: R_h^{Pa\alpha-cont}
   flux:
     prior:
       min: 1.0e-14
@@ -170,7 +170,7 @@ meta:
     flux: param
     hlr: param
     em_PaA_hlr: param
-    cont_PaA_hlr: param
+    #cont_PaA_hlr: param
 
   psf: from_data
 
@@ -185,15 +185,16 @@ meta:
     alignment_params: eint
 
   model_dimension:
-    Nx: 256
-    Ny: 256
-    scale: 0.01
+    Nx: 100
+    Ny: 100
+    scale: 0.02
     lblue: 3800
     lred: 5200
     resolution: 5000
-    lambda_range: [[4886.499999999879, 4917.499999999875]]
+    #lambda_range: [[4886.499999999879, 4917.499999999875]]
+    lambda_range: [[4871.0, 4933.0]]
     lambda_res: 0.25
-    super_sampling: 4
+    super_sampling: 2
     lambda_unit: nm
 
   sed:

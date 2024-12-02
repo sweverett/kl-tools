@@ -61,7 +61,7 @@ group.add_argument('-ncores', default=1, type=int,
 group.add_argument('--mpi', dest='mpi', default=False, action='store_true',
                    help='Run with MPI.')
 
-def main(args, pool):
+def main(args):
     ''' Fit KL model for JWST objects
     # TODO: Try making datacube a global variable, as it may significantly
     # decrease execution time due to pickling only once vs. every model eval
@@ -84,7 +84,7 @@ def main(args, pool):
 
     ### Step 1: load JWST data and figure out source information
     data_root = "../data/jwst"
-    data_file = os.path.join(data_root, "data_compile_short_withmask_GDS_ID%d.fits"%objID)
+    data_file = os.path.join(data_root, "data_compile_short_withmask_GDS_ID%d_emlonly.fits"%objID)
     print("Reading JWST observation ID-%d"%(objID))
     data_hdul = fits.open(data_file)
     
@@ -106,8 +106,9 @@ def main(args, pool):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector 
-    datafile = "/home/u17/jiachuanxu/kl-tools/data/jwst/data_compile_short_withmask_GDS_ID%d.fits"%(objID)
-    #datafile = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/data_compile_short_withmask_GDS_ID%d.fits"%(objID)
+    data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
+    # data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
+    datafile = data_root + "data_compile_short_withmask_GDS_ID%d_emlonly.fits"%(objID)
     datavector = GrismDataVector(file=datafile)
 
     #-----------------------------------------------------------------
@@ -117,6 +118,9 @@ def main(args, pool):
     print(pars_order)
 
     log_posterior = LogPosterior(pars, datavector, likelihood='grism')
+    # test pickle dump to see the size of the posterior function
+    with open("test_JWST_post_func.pkl", 'wb') as f:
+            pickle.dump(log_posterior, f)
 
     #-----------------------------------------------------------------
     # Setup sampler
@@ -128,16 +132,26 @@ def main(args, pool):
         print('Setting up KLensZeusRunner')
 
         runner = KLensZeusRunner(
-            nwalkers, ndims, log_posterior, datavector, pars
+            nwalkers, ndims, log_posterior, None, pars
             )
 
     elif args.sampler == 'emcee':
         print('Setting up KLensEmceeRunner')
 
         runner = KLensEmceeRunner(
-            nwalkers, ndims, log_posterior, datavector, pars
+            nwalkers, ndims, log_posterior, None, pars
             )
 
+    pool = schwimmbad.choose_pool(
+        mpi=args.mpi, processes=args.ncores
+        )
+
+    # if isinstance(pool, MPIPool):
+    #     if not pool.is_master():
+    #         pool.wait(callback=_callback_)
+    #         sys.exit(0)
+    # with open("test_JWST_runner_class.pkl", 'wb') as f:
+    #         pickle.dump(runner, f)
     print('>>>>>>>>>> Starting mcmc run <<<<<<<<<<')
     runner.run(pool, nsteps, vb=True)
 
@@ -242,15 +256,16 @@ def _callback_():
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    pool = schwimmbad.choose_pool(
-        mpi=args.mpi, processes=args.ncores
-        )
+    # pool = schwimmbad.choose_pool(
+    #     mpi=args.mpi, processes=args.ncores
+    #     )
 
-    if isinstance(pool, MPIPool):
-        if not pool.is_master():
-            pool.wait(callback=_callback_)
-            sys.exit(0)
-    rc = main(args, pool)
+    # if isinstance(pool, MPIPool):
+    #     if not pool.is_master():
+    #         pool.wait(callback=_callback_)
+    #         sys.exit(0)
+    # rc = main(args, pool)
+    rc = main(args)
 
     if rc == 0:
         print('All tests ran succesfully')

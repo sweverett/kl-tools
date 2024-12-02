@@ -9,7 +9,7 @@ from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 #from corner import corner
-
+import pickle
 import zeus
 import emcee
 #import pocomc as pc
@@ -751,7 +751,9 @@ class KLensEmceeRunner(KLensZeusRunner):
             self.nwalkers, self.ndim, self.pfunc,
             args=self.args, kwargs=self.kwargs, pool=pool
             )
-
+        # test pickle dump to see the size of the posterior function
+        # with open("test_JWST_post_func.pkl", 'wb') as f:
+        #         pickle.dump(self.pfunc, f)
         return sampler
 
 #class PocoRunner(MCMCRunner):

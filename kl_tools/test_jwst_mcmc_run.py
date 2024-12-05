@@ -106,8 +106,8 @@ def main(args):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector 
-    data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
-    # data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
+    #data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
+    data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
     datafile = data_root + "data_compile_short_withmask_GDS_ID%d_emlonly.fits"%(objID)
     datavector = GrismDataVector(file=datafile)
 
@@ -175,79 +175,6 @@ def main(args):
         print(f'Pickling runner to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
-    
-    exit(0)
-    outfile = os.path.join(outdir, 'chains.png')
-    print(f'Saving chain plots to {outfile}')
-    runner.plot_chains(
-        outfile=outfile, show=show
-        )
-
-    runner.compute_MAP()
-    map_medians = runner.MAP_medians
-    print('(median) MAP values:')
-    for name, indx in pars_order.items():
-        m = map_medians[indx]
-        print(f'{name}: {m:.4f}')
-
-    outfile = os.path.join(outdir, 'compare-data-to-map.png')
-    print(f'Plotting MAP comparison to data in {outfile}')
-    runner.compare_MAP_to_data(outfile=outfile, show=show)
-
-    outfile = os.path.join(outdir, 'corner-map.png')
-    print(f'Saving corner plot compare to MAP in {outfile}')
-    title = 'Reference lines are param MAP values'
-    runner.plot_corner(
-        outfile=outfile, reference=runner.MAP_medians, title=title, show=show
-        )
-
-    if args.sampler == 'emcee':
-        blobs = runner.sampler.blobs
-    elif args.sampler == 'zeus':
-        blobs = runner.sampler.get_blobs()
-
-    outfile = os.path.join(outdir, 'chain-blob.pkl')
-    print(f'Saving prior & likelihood values to {outfile}')
-    data = {
-        'prior': blobs[:,:,0],
-        'likelihood': blobs[:,:,1],
-        # TODO: generalize or remove after debugging!
-        # 'image': blobs[:,:,2],
-        # 'cont_template': blobs[:,:,3],
-        # 'mle_coeff': blobs[:,:,4],
-    }
-    with open(outfile, 'wb') as f:
-        pickle.dump(data, f)
-
-    outfile = os.path.join(outdir, 'chain-probabilities.png')
-    print(f'Saving prior & likelihood value plot to {outfile}')
-    prior = blobs[:,indx,0]
-    like = blobs[:,indx,1]
-    indx = np.random.randint(0, high=nwalkers)
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 4))
-    plt.subplot(131)
-    plt.plot(prior, label='prior', c='tab:blue')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-    plt.subplot(132)
-    plt.plot(like, label='likelihood', c='tab:orange')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-    plt.subplot(133)
-    plt.plot(prior, label='prior', c='tab:blue')
-    plt.plot(like, label='likelihood', c='tab:orange')
-    plt.xlabel('Sample')
-    plt.ylabel('Log probability')
-    plt.legend()
-
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
-
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
 
     return 0
 

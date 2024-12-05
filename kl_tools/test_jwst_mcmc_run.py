@@ -133,16 +133,26 @@ def main(args):
 
     if args.sampler == 'zeus':
         print('Setting up KLensZeusRunner')
-
-        runner = KLensZeusRunner(
-            nwalkers, ndims, log_posterior, None, pars
+        outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+        if os.path.exists(outfile):
+            print(f'Continue from {outfile}')
+            with open(outfile, mode='rb') as fp:
+                runner = pickle.load(fp)
+        else:
+            runner = KLensZeusRunner(
+                nwalkers, ndims, log_posterior, None, pars
             )
 
     elif args.sampler == 'emcee':
         print('Setting up KLensEmceeRunner')
-
-        runner = KLensEmceeRunner(
-            nwalkers, ndims, log_posterior, None, pars
+        outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+        if os.path.exists(outfile):
+            print(f'Continue from {outfile}')
+            with open(outfile, mode='rb') as fp:
+                runner = pickle.load(fp)
+        else:
+            runner = KLensEmceeRunner(
+                nwalkers, ndims, log_posterior, None, pars
             )
 
     pool = schwimmbad.choose_pool(

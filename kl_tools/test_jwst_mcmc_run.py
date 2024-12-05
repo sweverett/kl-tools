@@ -9,9 +9,12 @@ import numpy as np
 import sys, copy, os
 sys.path.insert(0, './grism_modules')
 import pickle
-import schwimmbad
-import mpi4py
-from mpi4py import MPI
+try:
+    import schwimmbad
+    import mpi4py
+    from mpi4py import MPI
+except:
+    print("Can not import MPI, use single process")
 try:
     comm = MPI.COMM_WORLD
     size = comm.Get_size()

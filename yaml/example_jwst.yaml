@@ -2,7 +2,7 @@
 
 # parameters control the MCMC simulation settings
 mcmc:
-  nsteps: 10000
+  nsteps: 40000
   monitor_autocorr: True
   objid: 181661
 

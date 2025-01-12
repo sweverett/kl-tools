@@ -1,4 +1,4 @@
-name: kltools
+name: kl-tools
 channels:
   - conda-forge
 dependencies:
@@ -14,11 +14,8 @@ dependencies:
   - numba
   - numpy==1.26.4
   - openmpi
-  - pudb
   - schwimmbad
   - scipy
   - snakeviz
   - zeus-mcmc
-  - pip:
-    - pocomc
-    - ultranest
+  - cython

@@ -79,7 +79,8 @@ def gaussian_product_sini(v_maj, v_tf, sigma_vmaj, sigma_vcirc, sin_i):
     answer_2 = norm * exp
 
     if not np.isclose(answer1, answer_2):
-        import ipdb; ipdb.set_trace()
+        if (not np.isnan(answer1)) and (not np.isnan(answer_2)):
+            import ipdb; ipdb.set_trace()
 
     return norm * exp
 

@@ -45,6 +45,50 @@ def parse_args():
 
     return parser.parse_args()
 
+def _setup_kl_tools_v2d(kids, name_map):
+    '''
+    Set up the 2D velocity data from KL tools, if already pre-computed
+
+    Parameters
+    ----------
+    kids : list
+        List of KIDs for the KROSS sources
+    name_map : dict
+        Mapping between KROSS source names and KIDs
+    '''
+
+    kross_dir = get_base_dir() / 'kl_tools/kross'
+    vmap_fit_dir = kross_dir / 'vmap_fits'
+    vmap_fit_file = vmap_fit_dir / 'vmap_fits.fits'
+
+    try:
+        t = Table.read(vmap_fit_file)
+    except FileNotFoundError:
+        print(f'Could not find vmap fits file: {vmap_fit_file}')
+        print('Skipping KL tools 2D velocity data')
+        return None
+    
+    t_kids = -1 * np.ones(len(t), dtype=int)
+    for i, name in enumerate(t['name']):
+        name = name.strip()
+        if name not in name_map:
+            print(f'Could not find kid for name: {name}')
+            continue
+        t_kids[i] = name_map[name]
+    t['kid'] = t_kids
+
+    v2d = np.empty(len(kids))
+    for indx, kid in enumerate(kids):
+        if kid in t['kid']:
+            i = np.where(t['kid'] == kid)[0]
+            assert len(i) == 1
+            i = i[0]
+            v2d[indx] = t['vcirc'][i]
+        else:
+            v2d[indx] = np.nan
+
+    return v2d
+
 def main():
 
     #---------------------------------------------------------------------------
@@ -72,6 +116,12 @@ def main():
     kross_dir = get_base_dir() / 'data/kross'
     kross_file = kross_dir / 'kross_release_v2.fits'
     kross = Table.read(kross_file)
+
+    # compute the map between the KROSS source names and kids for matching
+    # to the kl-tools measurements
+    name_map = {}
+    for i, n in enumerate(kross['NAME']):
+        name_map[n.strip()] = kross['KID'][i]
 
     #---------------------------------------------------------------------------
     # make initial sample plots
@@ -119,11 +169,10 @@ def main():
     kin_type = kross['KIN_TYPE']
 
     selection = np.where(
-        ((vc / sigma) > 1) &
-        (quality == 1) &
+        # (quality == 1) &
         (agn_flag == 0) &
         (irr_flag == 0) &
-        (theta_flag == 0) &
+        # (theta_flag == 0) &
         (extrap_flag == 0) &
         # (kin_type == 'RT+')
         # TODO: decide if we want the less conservative selection:
@@ -223,20 +272,32 @@ def main():
 
     #---------------------------------------------------------------------------
     # estimate shear from the KROSS quantities, using each requested estimator
+    # NOTE: The estimators attempt to compute the sini estimate using two 
+    # different sources for the 2D velocity::
+    # 1. The inclination-corrected circular velocity from KROSS, vcirc
+    # 2. Our own estimate of the 2D velocity from our own fits
+    # If the script cannot find the latter, it will compute only the former
 
     table = Table()
     table['kid'] = kid
     table['ra'] = ra
     table['dec'] = dec
     table['z'] = z
-    table['vcirc'] = vcirc
-    table['vcirc_err'] = vcirc_err
+    table['kross_v2d'] = vcirc
+    table['kross_v2d_err'] = vcirc_err
     table['vc'] = vc
     table['vc_err_h'] = vc_err_h
     table['vc_err_l'] = vc_err_l
     table['kin_type'] = kin_type
     table['eobs'] = eobs
     table['pa_im'] = pa_im
+    table['vtf'] = vtf
+    table['log_mstar'] = log_mstar
+
+    # grab our 2D velocity estimates, if available
+    our_vcirc = _setup_kl_tools_v2d(kid, name_map)
+    if our_vcirc is not None:
+        table['our_v2d'] = our_vcirc
 
     shears = {}
     if estimator == 'point':
@@ -246,88 +307,114 @@ def main():
     elif estimator == 'both':
         shears['point'] = PointShear()
         shears['map'] = MAPShear()
+    vel_2d = {}
+    vel_2d['kross'] = vcirc
+    vel_2d['our'] = our_vcirc 
+
+    xmax = np.nanmax(vel_2d['kross'])
+    ymax = np.nanmax(vel_2d['our'])
+    vmax = np.nanmax([xmax, ymax])
+
+    if show is True:
+        plt.scatter(vel_2d['kross'], vel_2d['our'], s=5)
+        plt.plot([0, vmax], [0, vmax], c='k', lw=2)
+        plt.xlabel('KROSS 2D Velocity (vcirc)')
+        plt.ylabel('KL Tools 2D Velocity')
+        plt.title('Comparison of 2D Velocity Estimates')
+        plt.savefig(f'{plot_dir}/2d_velocity_comparison.png')
+        plt.show()
 
     # plotting options
     Nbins = 30
 
-    # estimate sini from vcirc and TF velocity:
-    for name, shear in shears.items():
-        print(f'Estimating shear using {name} estimator...')
+    # estimate sini from 2D velocity and TF velocity:
+    for vel_type, v2d in vel_2d.items():
+        print(f'Estimating shear using {vel_type} 2D velocity...')
+        for shear_name, shear in shears.items():
+            print(f'Estimating shear using {shear_name} estimator...')
 
-        if name == 'point':
-            shear_args = (vcirc, vtf)
-        elif name == 'map':
-            shear_args = (vcirc, vtf, vcirc_err)
-        sini = shear.estimate_sini(*shear_args)
+            combo = f'({shear_name}, {vel_type})'
 
-        plt.hist(sini, bins=Nbins, ec='k')
-        plt.xlabel(f'sini ({name})')
+            if shear_name == 'point':
+                shear_args = (v2d, vtf)
+            elif shear_name == 'map':
+                shear_args = (v2d, vtf, vcirc_err)
+            sini = shear.estimate_sini(*shear_args)
 
-        plotfile = plot_dir / f'sini_sample_{name}.png'
-        plot(show, save=True, out_file=plotfile)
+            plt.hist(sini, bins=Nbins, ec='k')
+            plt.xlabel(f'sini ({shear_name}, {vel_type})')
+            plt.title(combo)
 
-        # restrict any unphysical sini values
-        sini[(sini < -1) | (sini > 1)] = np.nan
+            plotfile = plot_dir / f'sini_sample_{shear_name}_{vel_type}.png'
+            plot(show, save=True, out_file=plotfile)
 
-        # estimate intrinsic ellipticity from sini and qz (assumed):
-        eint = shear.estimate_eint(sini)
-        plt.hist(eint, bins=Nbins, ec='k')
-        plt.xlabel('eint')
+            # restrict any unphysical sini values
+            sini[(sini < -1) | (sini > 1)] = np.nan
 
-        plotfile = plot_dir / f'eint_sample_{name}.png'
-        plot(show, save=True, out_file=plotfile)
+            # estimate intrinsic ellipticity from sini and qz (assumed):
+            eint = shear.estimate_eint(sini)
+            plt.hist(eint, bins=Nbins, ec='k')
+            plt.xlabel('eint')
+            plt.title(combo)
 
-        # look at difference in eobs vs estimated eint
-        edelt = eobs - eint
-        edelt2 = eobs**2-eint**2
-        plt.hist(edelt, bins=Nbins, ec='k', label='eobs-eint', alpha=0.75)
-        plt.hist(edelt2, bins=Nbins, ec='k', label='eobs^2-eint^2', alpha=0.75)
-        plt.axvline(0, c='k', ls='--', lw=2)
-        plt.xlabel('ellipticity difference')
-        plt.legend()
+            plotfile = plot_dir / f'eint_sample_{shear_name}_{vel_type}.png'
+            plot(show, save=True, out_file=plotfile)
 
-        plotfile = plot_dir / f'obs_eint_diff_{name}.png'
-        plot(show, save=True, out_file=plotfile)
+            # look at difference in eobs vs estimated eint
+            edelt = eobs - eint
+            edelt2 = eobs**2-eint**2
+            plt.hist(edelt, bins=Nbins, ec='k', label='eobs-eint', alpha=0.75)
+            plt.hist(edelt2, bins=Nbins, ec='k', label='eobs^2-eint^2', alpha=0.75)
+            plt.axvline(0, c='k', ls='--', lw=2)
+            plt.xlabel('ellipticity difference')
+            plt.legend()
+            plt.title(combo)
 
-        # show shear response
-        response = (2 * eobs * (1-eint**2))
-        plt.hist(response, bins=Nbins, ec='k')
-        plt.xlabel('response (2 * eobs**2 * (1-eint**2))')
+            plotfile = plot_dir / f'obs_eint_diff_{shear_name}_{vel_type}.png'
+            plot(show, save=True, out_file=plotfile)
 
-        plotfile = plot_dir / f'shear_response_{name}.png'
-        plot(show, save=True, out_file=plotfile)
+            # show shear response
+            response = (2 * eobs * (1-eint**2))
+            plt.hist(response, bins=Nbins, ec='k')
+            plt.xlabel('response (2 * eobs**2 * (1-eint**2))')
+            plt.title(combo)
 
-        # estimate shear values from estimated eint:
-        gplus = shear.estimate_gplus(eobs, eint)
-        plt.hist(gplus, bins=np.linspace(-1, 1, Nbins), ec='k')
-        plt.axvline(0, c='k', ls='--', lw=2)
-        plt.xlabel('g+')
-        # plt.xlim(-1, 1)
+            plotfile = plot_dir / f'shear_response_{shear_name}_{vel_type}.png'
+            plot(show, save=True, out_file=plotfile)
 
-        plotfile = plot_dir / f'gplus_{name}.png'
-        plot(show, save=True, out_file=plotfile)
+            # estimate shear values from estimated eint:
+            gplus = shear.estimate_gplus(eobs, eint)
+            plt.hist(gplus, bins=np.linspace(-1, 1, Nbins), ec='k')
+            plt.axvline(0, c='k', ls='--', lw=2)
+            plt.xlabel('g+')
+            plt.title(combo)
+            # plt.xlim(-1, 1)
 
-        # TODO: Turn on when able
-        # gcross = estimate_gcross(vcirc, vmin, eobs, eint, sini)
-        # plt.hist(gcross, bins=Nbins, ec='k')
-        # plt.xlabel('gx')
-        gcross = np.empty(Nsample)
-        gcross[:] = np.nan
+            plotfile = plot_dir / f'gplus_{shear_name}_{vel_type}.png'
+            plot(show, save=True, out_file=plotfile)
 
-        # plot s2n
-        verr = vc_err_h - vc_err_l
-        s2n = vcirc / verr
-        plt.hist(s2n, ec='k', bins=50)
-        plt.xlabel('vcirc / verr')
+            # TODO: Turn on when able
+            # gcross = estimate_gcross(vcirc, vmin, eobs, eint, sini)
+            # plt.hist(gcross, bins=Nbins, ec='k')
+            # plt.xlabel('gx')
+            gcross = np.empty(Nsample)
+            gcross[:] = np.nan
 
-        plotfile= plot_dir / f's2n_{name}.png'
-        plot(show, save=True, out_file=plotfile)
+            # plot s2n
+            verr = vc_err_h - vc_err_l
+            s2n = v2d / verr
+            plt.hist(s2n, ec='k', bins=50)
+            plt.xlabel('vcirc / verr')
+            plt.title(combo)
 
-        # now save the estimated quantities to the table
-        table[f'sini_{name}'] = sini
-        table[f'eint_{name}'] = eint
-        table[f'gplus_{name}'] = gplus
-        table[f'gcross_{name}'] = gcross
+            plotfile= plot_dir / f's2n_{shear_name}_{vel_type}.png'
+            plot(show, save=True, out_file=plotfile)
+
+            # now save the estimated quantities to the table
+            table[f'sini_{shear_name}_{vel_type}'] = sini
+            table[f'eint_{shear_name}_{vel_type}'] = eint
+            table[f'gplus_{shear_name}_{vel_type}'] = gplus
+            table[f'gcross_{shear_name}_{vel_type}'] = gcross
 
     #---------------------------------------------------------------------------
     # split the sample into the 4 corresponding fields

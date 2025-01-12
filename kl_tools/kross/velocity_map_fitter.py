@@ -23,8 +23,11 @@ def parse_args():
     parser.add_argument('-o', '--overwrite', action='store_true', default=False,
                         help='Overwrite existing files')
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
-    parser.add_argument('-m', '--max_nfev', type=int, default=None,
-                        help='Maximum number of function evaluations for the optimizer')
+    parser.add_argument(
+        '-m', '--max_nfev', type=int, default=None,
+        help='Maximum number of function evaluations for the optimizer'
+        )
+
 
     return parser.parse_args()
 
@@ -98,6 +101,7 @@ def main():
     overwrite = args.overwrite
     max_fnev = args.max_nfev
     vb = args.verbose
+    show = args.show
     save = True
 
     data_dir = get_base_dir() / 'data/kross'
@@ -165,8 +169,15 @@ def main():
         mstar = obj['MASS'][0]
         log_mstar = np.log10(mstar)
 
+        # derived from KROSS
+        sini_kross = np.sin(np.deg2rad(theta_im))
+
         # we'll use the KROSS PA to set the initial guess for theta_int
         vel_pa = OrientedAngle(vel_pa, unit='deg', orientation='east-of-north')
+
+        # if kid != 171:
+            # import ipdb; ipdb.set_trace()
+            # continue
 
         #-----------------------------------------------------------------------
         # load vmap and setup weights/mask
@@ -208,24 +219,30 @@ def main():
         #-----------------------------------------------------------------------
         # setup fitter bounds and initial guess
 
+        sig_vtf = 2
+        vtf_scatter_dex = sig_vtf * 0.05
+        vtf_fator = 10**vtf_scatter_dex
+        vcirc_base = vtf * sini_kross
+        vcirc_low = vcirc_base / vtf_fator
+        vcirc_high = vcirc_base * vtf_fator
         bounds_pair = [
-            (-20, 20), # v0
-            (vtf-50, vtf+50), # vcirc
-            (0, 10), # rscale
+            (-50, 50), # v0
+            (vcirc_low, vcirc_high), # vcirc
+            (0, 20), # rscale
             (0, 1), # sini
             (0, 2*np.pi), # theta_int
-            (-0.0001, 0.0001), # g1
-            (-0.0001, 0.0001), # g2
-            (-20, 20), # x0
-            (-20, 20) # y0
+            (-0.000001, 0.000001), # g1
+            (-0.000001, 0.000001), # g2
+            (-25, 25), # x0
+            (-25, 25) # y0
         ]
 
         # initial guess for the optimizer
         initial_guess = pars2theta({
             'v0': 0.0,
-            'vcirc': vtf,
-            'rscale': 2.0,
-            'sini': 0.5,
+            'vcirc': vtf * sini_kross,
+            'rscale': 5.0,
+            'sini': sini_kross,
             'theta_int': vel_pa.cartesian.rad,
             'g1': 0.0,
             'g2': 0.0,
@@ -258,6 +275,8 @@ def main():
             import ipdb; ipdb.set_trace()
             print('Skipping')
             continue
+
+        # import ipdb; ipdb.set_trace()
 
         fit_theta = result.x
         fit_pars = theta2pars(fit_theta)
@@ -302,6 +321,37 @@ def main():
                     transform=plt.gca().transAxes
                     )
             ipar += 1
+
+        plt.text(
+            0.025,
+            0.16,
+            f'vTF: {vtf:.2f} km/s',
+            color='k',
+            transform=plt.gca().transAxes
+        )
+        vcirc = fit_pars['vcirc']
+        plt.text(
+            0.025,
+            0.11,
+            f'vcirc: {vcirc:.2f} km/s',
+            color='k',
+            transform=plt.gca().transAxes
+        )
+        vcirc = fit_pars['vcirc']
+        plt.text(
+            0.025,
+            0.06,
+            f'vcirc/vTF: {vcirc/vtf:.2f}',
+            color='k',
+            transform=plt.gca().transAxes
+        )
+        plt.text(
+            0.025,
+            0.01,
+            f'kross sini: {sini_kross:.2f}',
+            color='k',
+            transform=plt.gca().transAxes
+        )
 
         plt.subplot(132)
         norm = MidpointNormalize(
@@ -369,7 +419,7 @@ def main():
         status = result.status
         message = result.message
         fits.append(tuple(
-            list(fit_theta) + [chi2, name, success, status, message]
+            [kid] + list(fit_theta) + [chi2, name, success, status, message]
             ))
 
         # pickle the results for later
@@ -378,6 +428,7 @@ def main():
 
     # setup & write the output table
     out_cols = [
+        'kid',
         'v0',
         'vcirc',
         'rscale',
@@ -394,10 +445,11 @@ def main():
         'message'
         ]
     out_dtypes = ['f8' for col in out_cols]
-    out_dtypes[10] = 'S20' # name
-    out_dtypes[11] = 'bool' # success
-    out_dtypes[12] = 'i4' # status
-    out_dtypes[13] = 'S100' # message
+    out_dtypes[0] = 'i4' # kid
+    out_dtypes[11] = 'S20' # name
+    out_dtypes[12] = 'bool' # success
+    out_dtypes[13] = 'i4' # status
+    out_dtypes[14] = 'S100' # message
 
     out_shape = len(fits)
     dtype = np.dtype({'names': out_cols, 'formats': out_dtypes})

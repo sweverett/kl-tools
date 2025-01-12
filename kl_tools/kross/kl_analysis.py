@@ -16,6 +16,10 @@ def parse_args():
         help='Maximum sin(i) value to consider'
         )
     parser.add_argument(
+        '-u', '--unblind', action='store_true',
+        help='Unblind the KID of each source considered in the analysis'
+    )
+    parser.add_argument(
         '-s', '--show', action='store_true',
         help='Show the plots'
         )
@@ -54,6 +58,7 @@ def plot_shear_comparison(
     # kl_gplus_err, TODO
     cosmos_gplus_err,
     plot_outfile,
+    kid=None,
     xlim=None,
     ylim=None,
     title=None,
@@ -102,8 +107,17 @@ def plot_shear_comparison(
         ls='--',
         lw=2
         )
-    plt.xlim(*xlim)
-    plt.ylim(*ylim)
+
+    # Add the KID labels
+    if kid is not None:
+        offset = 0.01
+        for i, (x, y) in enumerate(zip(kl_gplus, cosmos_gplus)):
+            plt.text(
+                x, y+offset, str(kid[i]), fontsize=8, ha='right', va='bottom', alpha=0.75
+                )
+
+    # plt.xlim(*xlim)
+    # plt.ylim(*ylim)
     plt.xlabel('KL g+')
     plt.ylabel('COSMOS g+ (projected)')
     if title is not None:
@@ -119,6 +133,7 @@ def main():
     args = parse_args()
     kl_sample_file = args.kl_sample_file
     sini_max = args.sini_max
+    unblind = args.unblind
     show = args.show
     zoom = args.zoom
 
@@ -130,9 +145,12 @@ def main():
     # define all selections
 
     estimator_sel = ['point', 'map']
-    sini_sel = [1.0, sini_max]
+    vmap_sel = ['kross', 'our']
+    # vmap_sel = ['our']
+    # sini_sel = [1.0, sini_max]
+    sini_sel = [1.0]
     quality_sel = [3, 4]
-    allowed_kin_types = ['RT+']
+    # allowed_kin_types = ['RT+']
 
     #---------------------------------------------------------------------------
     # load the KL sample
@@ -144,86 +162,100 @@ def main():
     #---------------------------------------------------------------------------
     # loop over all selections
 
-    for est in estimator_sel:
-        for max_sini in sini_sel:
-            for quality in quality_sel:
+    for vmap_type in vmap_sel:
+        for est in estimator_sel:
+            for max_sini in sini_sel:
+                for quality in quality_sel:
 
-                # select the sample
-                selection = np.where(
-                    (kl[f'sini_{est}'] <= max_sini) &
-                    (kl['vmap_quality'] >= quality) &
-                    # TODO: figure out
-                    # (kl['kin_type'] in allowed_kin_types) &
-                    (kl['kin_type'] == 'RT+') &
-                    (kl['field'] == 'COSMOS')
-                )
-                sample = kl[selection]
-                Nsample = len(sample)
-
-                # grab some useful cols
-                sini = sample[f'sini_{est}']
-                eint = sample[f'eint_{est}']
-                gplus = sample[f'gplus_{est}']
-                gcross = sample[f'gcross_{est}']
-                cosmos_gplus = sample['cosmos_gplus']
-                cosmos_gplus_err = sample['cosmos_gplus_err']
-
-                # print some info
-                sample_info = f'Estimator: {est}; sin(i) < {max_sini}; quality >= {quality}; {Nsample} galaxies'
-                print(sample_info)
-
-                # plot the sin(i) distribution
-                hist_kwargs = {'bins': 20, 'histtype': 'step'}
-                plot_dist(
-                    sini,
-                    'sini',
-                    title=sample_info,
-                    hist_kwargs=hist_kwargs,
-                    plot_outfile = plot_dir / f'dist_sini_{est}_{max_sini}_{quality}.png',
+                    # select the sample
+                    selection = np.where(
+                        (kl[f'sini_{est}_{vmap_type}'] <= max_sini) &
+                        (kl['vmap_quality'] >= quality) &
+                        # TODO: figure out
+                        # (kl['kin_type'] in allowed_kin_types) &
+                        # (kl['kin_type'] == 'RT+') &
+                        (kl['field'] == 'COSMOS')
                     )
+                    sample = kl[selection]
+                    Nsample = len(sample)
 
-                # plot the intrinsic ellipticity distribution
-                hist_kwargs = {'bins': 20, 'histtype': 'step'}
-                plot_dist(
-                    eint,
-                    'eint',
-                    title=sample_info,
-                    hist_kwargs=hist_kwargs,
-                    plot_outfile = plot_dir / f'dist_eint_{est}_{max_sini}_{quality}.png',
-                    )
+                    # only print the KIDs if we're unblinding
+                    if unblind:
+                        kids = sample['kid']
+                    else:
+                        kids = None
 
-                # plot the gplus distribution
-                hist_kwargs = {'bins': 20, 'histtype': 'step'}
-                plot_dist(
-                    gplus,
-                    'gplus',
-                    title=sample_info,
-                    hist_kwargs=hist_kwargs,
-                    plot_outfile = plot_dir / f'dist_gplus_{est}_{max_sini}_{quality}.png',
-                    )
+                    # grab some useful cols
+                    sini = sample[f'sini_{est}_{vmap_type}']
+                    eint = sample[f'eint_{est}_{vmap_type}']
+                    gplus = sample[f'gplus_{est}_{vmap_type}']
+                    gcross = sample[f'gcross_{est}_{vmap_type}']
+                    cosmos_gplus = sample['cosmos_gplus']
+                    cosmos_gplus_err = sample['cosmos_gplus_err']
 
-                # plot the full gplus comparison
-                plot_shear_comparison(
-                    gplus,
-                    cosmos_gplus,
-                    cosmos_gplus_err,
-                    plot_outfile = plot_dir / f'gplus_comparison_{est}_{max_sini}_{quality}.png',
-                    title=sample_info,
-                    show=show
-                    )
+                    # print some info
+                    sample_info = f'Estimator: {est}; Vmap: {vmap_type}; sin(i) < {max_sini}; quality >= {quality}; {Nsample} galaxies'
+                    print(sample_info)
 
-                if zoom is True:
-                    # plot the zoomed-in gplus comparison
+                    combo = f'{est}_{vmap_type}'
+
+                    # plot the sin(i) distribution
+                    hist_kwargs = {'bins': 20, 'histtype': 'step'}
+                    plot_dist(
+                        sini,
+                        'sini',
+                        title=sample_info,
+                        hist_kwargs=hist_kwargs,
+                        plot_outfile = plot_dir / f'dist_sini_{combo}_{max_sini}_{quality}.png',
+                        )
+
+                    # plot the intrinsic ellipticity distribution
+                    hist_kwargs = {'bins': 20, 'histtype': 'step'}
+                    plot_dist(
+                        eint,
+                        'eint',
+                        title=sample_info,
+                        hist_kwargs=hist_kwargs,
+                        plot_outfile = plot_dir / f'dist_eint_{combo}_{max_sini}_{quality}.png',
+                        )
+
+                    # plot the gplus distribution
+                    hist_kwargs = {'bins': 20, 'histtype': 'step'}
+                    plot_dist(
+                        gplus,
+                        'gplus',
+                        title=sample_info,
+                        hist_kwargs=hist_kwargs,
+                        plot_outfile = plot_dir / f'dist_gplus_{combo}_{max_sini}_{quality}.png',
+                        )
+
+                    # plot the full gplus comparison
+                    # if (vmap_type == 'our') & (est == 'point'):
+                    #     import ipdb; ipdb.set_trace()
                     plot_shear_comparison(
                         gplus,
                         cosmos_gplus,
                         cosmos_gplus_err,
-                        plot_outfile = plot_dir / f'gplus_comparison_{est}_{max_sini}_{quality}_zoomed.png',
-                        title=f'{sample_info}; zoomed',
-                        xlim=(-0.25, 0.25),
-                        ylim=(-0.25, 0.25),
+                        plot_outfile = plot_dir / f'gplus_comparison_{combo}_{max_sini}_{quality}.png',
+                        title=sample_info,
+                        kid=kids,
                         show=show
                         )
+
+                    if zoom is True:
+                        # plot the zoomed-in gplus comparison
+                        plot_shear_comparison(
+                            gplus,
+                            cosmos_gplus,
+                            cosmos_gplus_err,
+                            plot_outfile = plot_dir / f'gplus_comparison_{combo}_{max_sini}_{quality}_zoomed.png',
+                            title=f'{sample_info}; zoomed',
+                            xlim=(-0.25, 0.25),
+                            ylim=(-0.25, 0.25),
+                            unblind=unblind,
+                            kid=kids,
+                            show=show
+                            )
 
     return
 

@@ -138,8 +138,17 @@ scripts/out/
 runs/
 jobs/
 
+# KROSS specific dirs
+kl_tools/kross/*.png
+kl_tools/kross/*.fits
+kl_tools/kross/plots
+kl_tools/kross/sample
+
 # IDEs
 .vscode/
+
+# notebook related files
+notebooks/*.ipynb
 
 # paper, for now
 paper/

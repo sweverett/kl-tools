@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.sparse import identity, dia_matrix
 import fitsio
-from astropy.io import fits
 import astropy.units as u
 import galsim
 import os
@@ -14,9 +13,6 @@ from argparse import ArgumentParser
 import kl_tools.utils as utils
 import kl_tools.parameters as parameters
 from kl_tools.datavector import DataVector
-
-import ipdb
-import pudb
 
 parser = ArgumentParser()
 

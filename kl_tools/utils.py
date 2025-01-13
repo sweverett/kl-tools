@@ -6,7 +6,7 @@ import os, sys
 import yaml
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
-import pdb, pudb
+import pdb
 
 class ForkedPdb(pdb.Pdb):
     """A Pdb subclass that may be used

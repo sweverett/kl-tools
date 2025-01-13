@@ -7,8 +7,9 @@ CWD=$(pwd)
 SYS_DIR="$(realpath "$(dirname "$0")")"
 REPO_DIR="$(realpath "$SYS_DIR"/../)"
 
-ENV_FILE="$(REPO_DIR)/environment.yaml"
+ENV_FILE="$REPO_DIR/environment.yaml"
 ENV_NAME="$(grep '^name:' "$ENVFILE" | cut -d' ' -f2)"
+echo "Environment name: $ENV_NAME"
 
 # always execute this script with bash, so that conda shell.hook works.
 # relevant conda bug: https://github.com/conda/conda/issues/7980

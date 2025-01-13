@@ -15,6 +15,7 @@ UNIT_TEST_FILES =
 .PHONY: install
 install:
 	@echo "Installing kl-tools repository..."
+	@bash scripts/install.sh
 	@echo "kl-tools environment installed."
 
 

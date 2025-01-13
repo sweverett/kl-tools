@@ -8,6 +8,7 @@ dependencies:
   - fitsio
   - galsim
   - ipdb
+  - pudb
   - jupyter
   - jupyterlab
   - mpi4py

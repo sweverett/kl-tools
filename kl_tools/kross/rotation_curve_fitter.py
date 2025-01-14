@@ -9,10 +9,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from kl_tools.velocity import VelocityMap
+from kl_tools.velocity import VelocityMap, dist_to_major_axis
 from kl_tools.coordinates import OrientedAngle
 from kl_tools.utils import build_map_grid, get_base_dir, make_dir, MidpointNormalize, plot
-from kl_tools.kross.kross_utils import plot_line_on_image, theta2pars
+from kl_tools.kross.kross_utils import theta2pars
+from kl_tools.plotting import plot_line_on_image
 
 def parse_args():
     parser = ArgumentParser()
@@ -23,49 +24,6 @@ def parse_args():
     parser.add_argument('-v', '--verbose', action='store_true', default=False)
 
     return parser.parse_args()
-
-def dist_to_major_axis(X, Y, x0, y0, position_angle):
-    '''
-    Calculate the distance from each pixel to the major axis
-
-    Parameters
-    ----------
-    X : np.ndarray
-        2D array of x-coordinates
-    Y : np.ndarray
-        2D array of y-coordinates
-    x/y0 : float
-        x/y-coordinate of the galaxy center
-    position_angle : OrientedAngle
-        Position angle of the galaxy major axis
-    '''
-
-    # get distance from each pixel to the galaxy center
-    Xcen, Ycen = X - x0, Y - y0
-    R = np.sqrt(Xcen**2 + Ycen**2)
-
-    # angle from each pixel to the galaxy center
-    Theta = np.arctan2(Ycen, Xcen) # returns (-pi, pi)
-
-    # match the [0, 360] wrapping of the position angle
-    Theta[Theta < 0] += 2 * np.pi 
-
-    # difference in angle between the pixel and the major axis
-    dTheta = position_angle.cartesian.rad - Theta
-
-    # calculate distance from each pixel to the major axis
-    dist = abs(R * np.sin(dTheta))
-
-    # import matplotlib.colors as mcolors
-    # norm = mcolors.TwoSlopeNorm(
-    #     vmin=-np.max(np.abs(dist)), vcenter=0, vmax=np.max(np.abs(dist))
-    #    )
-    # plt.imshow(dist.T, origin='lower', cmap='RdBu', norm=norm)
-    # plt.text(0.1, 0.1, f'PA: {np.rad2deg(position_angle):.2f} deg')
-    # plt.colorbar()
-    # plt.show()
-
-    return dist
 
 def rotate_coordinates(X, Y, x0, y0, theta):
     '''

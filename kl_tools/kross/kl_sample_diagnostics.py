@@ -15,7 +15,7 @@ from kl_tools.velocity import VelocityMap
 from kl_tools.coordinates import OrientedAngle
 from kl_tools.utils import make_dir, get_base_dir, MidpointNormalize, build_map_grid
 from kl_tools.kross.tfr  import estimate_vtf
-from kl_tools.kross.kross_utils import plot_line_on_image
+from kl_tools.plotting import plot_line_on_image
 
 def main():
 
@@ -46,6 +46,9 @@ def main():
 
     # KL shape noise
     kl_g_err = 0.03
+
+    # KROSS pixel scale
+    pix_scale = 0.2 # arcsec/pixel
 
     #---------------------------------------------------------------------------
     # General IO
@@ -124,12 +127,12 @@ def main():
     # Shear estimates
 
     sample_dir = get_base_dir() / 'kl_tools/kross/sample'
-    estimates = Table.read(sample_dir / 'shear_estimates.fits')
-    estimates_names = estimates['name']
+    # estimates = Table.read(sample_dir / 'shear_estimates.fits')
+    # estimates_names = estimates['name']
 
-    for i, name in enumerate(estimates_names):
-        new = name.strip()
-        estimates_names[i] = new
+    # for i, name in enumerate(estimates_names):
+    #     new = name.strip()
+    #     estimates_names[i] = new
 
     #---------------------------------------------------------------------------
 
@@ -187,40 +190,43 @@ def main():
         wcs = WCS(cube_file).dropaxis(2)
         stack = np.sum(cube, axis=0)
 
-        if name in estimates_names:
-            shear = estimates[estimates['name'] == name]
-            g1_kross = shear['gplus']
-            g1_cosmos = shear['cosmos_gplus']
-            g1_cosmos_err = shear['cosmos_gplus_err']
-            in_sample = True
+        # if name in estimates_names:
+        #     shear = estimates[estimates['name'] == name]
+        #     g1_kross = shear['gplus']
+        #     g1_cosmos = shear['cosmos_gplus']
+        #     g1_cosmos_err = shear['cosmos_gplus_err']
+        #     in_sample = True
 
-            # if name == 'C-zcos_z1_925':
-            #     x = estimates['gplus']
-            #     y = estimates['cosmos_gplus']
-            #     yerr = estimates['cosmos_gplus_err']
-            #     plt.errorbar(x, y, yerr, ls='none')
-            #     plt.plot([-0.1, 0.1], [-0.1, 0.1], color='k', ls='--')
-            #     plt.fill_between(
-            #         [-0.1, 0.1],
-            #         [-0.1-0.03, 0.1-0.03],
-            #         [-0.1+0.03, 0.1+0.03],
-            #         color='gray',
-            #     )
-            #     plt.xlim(-0.1, 0.1)
-            #     plt.ylim(-0.1, 0.1)
-            #     plt.xlabel('KROSS g+')
-            #     plt.ylabel('COSMOS g+')
-            #     plt.scatter(g1_kross, g1_cosmos, color='red')
-            #     plt.show()
+        #     # if name == 'C-zcos_z1_925':
+        #     #     x = estimates['gplus']
+        #     #     y = estimates['cosmos_gplus']
+        #     #     yerr = estimates['cosmos_gplus_err']
+        #     #     plt.errorbar(x, y, yerr, ls='none')
+        #     #     plt.plot([-0.1, 0.1], [-0.1, 0.1], color='k', ls='--')
+        #     #     plt.fill_between(
+        #     #         [-0.1, 0.1],
+        #     #         [-0.1-0.03, 0.1-0.03],
+        #     #         [-0.1+0.03, 0.1+0.03],
+        #     #         color='gray',
+        #     #     )
+        #     #     plt.xlim(-0.1, 0.1)
+        #     #     plt.ylim(-0.1, 0.1)
+        #     #     plt.xlabel('KROSS g+')
+        #     #     plt.ylabel('COSMOS g+')
+        #     #     plt.scatter(g1_kross, g1_cosmos, color='red')
+        #     #     plt.show()
 
-            # g1_resid = (g1_kross - g1_cosmos) / g1_cosmos_err
-            g1_resid = (g1_kross - g1_cosmos) / kl_g_err
-            if np.abs(g1_resid) > 3:
-                outlier = True
-            else:
-                outlier = False
-        else:
-            in_sample = False
+        #     # g1_resid = (g1_kross - g1_cosmos) / g1_cosmos_err
+        #     g1_resid = (g1_kross - g1_cosmos) / kl_g_err
+        #     if np.abs(g1_resid) > 3:
+        #         outlier = True
+        #     else:
+        #         outlier = False
+        # else:
+        #     in_sample = False
+        # TODO: cleanup
+        in_sample = True
+        outlier = False
 
         fig = plt.figure(figsize=(Sx, Sy))
         Nsubplots = 6
@@ -356,7 +362,7 @@ def main():
             vmap_pars = dict(vmap_pars[0])
             vmap_pars['r_unit'] = 'arcsec'
             vmap_pars['v_unit'] = 'km/s'
-            model_vmap = VelocityMap('offset', vmap_pars)('obs', X, Y)
+            model_vmap = VelocityMap('offset', vmap_pars)('obs', X, Y,pix_scale=pix_scale)
             model_vmap[mask] = 0
             norm = MidpointNormalize(
                 midpoint=0,
@@ -406,8 +412,10 @@ def main():
                 bin_centers, model_rotation_curve, ls='--', c='r', label='model'
                         )
             ax.axhline(0, ls=':', c='k')
+            ax.axhline(vmap_pars['vcirc'], ls='--', c='k', label='vcirc')
+            ax.axhline(-vmap_pars['vcirc'], ls='--', c='k')
             ax.set_xlabel('Radial Distance (pixels)')
-            ax.set_ylabel('3D Rotational Velocity (km/s)')
+            ax.set_ylabel('2D Rotational Velocity (km/s)')
             plt.legend()
             ax.set_title(f'{name} Galaxy Rotation Curve (KID {kid})')
             ax.set_aspect('auto')

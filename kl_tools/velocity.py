@@ -6,13 +6,13 @@ from argparse import ArgumentParser
 import astropy.constants as const
 import astropy.units as units
 
-import kl_tools.utils as utils
 import kl_tools.transformation as transform
 import kl_tools.numba_transformation as numba_transform
+from kl_tools.utils import MidpointNormalize, plot
+from kl_tools.plotting import plot_line_on_image
 from kl_tools.transformation import TransformableImage
 from kl_tools.parameters import SampledPars
-
-import ipdb
+from kl_tools.coordinates import OrientedAngle
 
 parser = ArgumentParser()
 
@@ -28,8 +28,17 @@ class VelocityModel(object):
     '''
 
     name = 'centered'
-    _model_params = ['v0', 'vcirc', 'rscale', 'sini',
-                     'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
+    _model_params = [
+        'v0',
+        'vcirc',
+        'rscale',
+        'sini',
+        'theta_int',
+        'g1',
+        'g2',
+        'r_unit',
+        'v_unit'
+        ]
 
     _ignore_params = ['beta', 'flux']
 
@@ -118,8 +127,19 @@ class OffsetVelocityModel(VelocityModel):
     '''
 
     name = 'offset'
-    _model_params = ['v0', 'vcirc', 'rscale', 'sini', 'x0', 'y0',
-                     'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
+    _model_params = [
+        'v0',
+        'vcirc',
+        'rscale',
+        'sini',
+        'x0',
+        'y0',
+        'theta_int',
+        'g1',
+        'g2',
+        'r_unit',
+        'v_unit'
+        ]
 
     _ignore_params = ['beta', 'flux']
 
@@ -177,7 +197,7 @@ class VelocityMap(TransformableImage):
         return
 
     def __call__(self, plane, x, y, speed=False, normalized=False,
-                 use_numba=False, indexing='ij'):
+                 use_numba=False, indexing='ij', pix_scale=None):
         '''
         Evaluate the velocity map at position (x,y) in the given plane. Note
         that position must be defined in the same plane
@@ -205,6 +225,8 @@ class VelocityMap(TransformableImage):
             then the 2D arrays should be of shape (N,M) if indexing='xy' and
             (M,N) if indexing='ij'. Default is 'ij'. For more info, see:
             https://numpy.org/doc/stable/reference/generated/numpy.meshgrid.html
+        pix_scale: float; optional
+            The pixel scale of the grid. Required if r_unit is 'arcsec'
         '''
 
         if x.shape != y.shape:
@@ -221,6 +243,17 @@ class VelocityMap(TransformableImage):
             x = np.swapaxes(x, 0, 1)
             y = np.swapaxes(y, 0, 1)
 
+        if self.model.pars['r_unit'] == units.arcsec:
+            if pix_scale is None:
+                import ipdb; ipdb.set_trace()
+                raise ValueError('Must pass pix_scale if r_unit is arcsec!')
+            self._tmp_pix_scale = pix_scale
+        elif self.model.pars['r_unit'] == units.pixel:
+            # ok to assume 1 if in pixel units
+            self._tmp_pix_scale = 1
+        else:
+            raise ValueError('r_unit must be either arcsec or pixels!')
+
         super(VelocityMap, self).__call__(
             plane, x, y, use_numba=use_numba
             )
@@ -235,9 +268,14 @@ class VelocityMap(TransformableImage):
         else:
             offset = False
 
-        return norm * self._eval_map_in_plane(
+        rendered_vmap = norm * self._eval_map_in_plane(
             plane, offset, x, y, speed=speed, use_numba=use_numba
             )
+
+        # reset the pixel scale for the next call
+        self._tmp_pix_scale = None
+
+        return rendered_vmap
 
     def _eval_map_in_plane(self, plane, offset, x, y, speed=False,
                            use_numba=False):
@@ -264,6 +302,9 @@ class VelocityMap(TransformableImage):
             pars = self.model.pars_arr
         else:
             pars = self.model.pars
+
+        # needed for disk plane evaluation
+        pars['pix_scale'] = self._tmp_pix_scale
 
         func = self._get_plane_eval_func(plane, use_numba=use_numba)
 
@@ -346,7 +387,16 @@ class VelocityMap(TransformableImage):
 
         r = np.sqrt(x**2 + y**2)
 
-        atan_r = np.arctan(r  / pars['rscale'])
+        # NOTE / TODO: we should make the grid be more general and allow
+        # it to be either in pixels or physical units. For now, we assume
+        # that the grid is in pixel units
+        r_unit = pars['r_unit']
+        rscale = pars['rscale']
+        if r_unit == 'arcsec':
+            pix_scale = pars['pix_scale']
+            rscale = (rscale /  pix_scale).value
+
+        atan_r = np.arctan(r  / rscale)
 
         v_r = (2./ np.pi) * pars['vcirc'] * atan_r
 
@@ -354,7 +404,7 @@ class VelocityMap(TransformableImage):
 
     def plot(self, plane, x=None, y=None, rmax=None, show=True, close=True,
              title=None, size=(9,8), center=True, outfile=None, speed=False,
-             normalized=False):
+             normalized=False, pix_scale=None):
         '''
         Plot speed or velocity map in given plane. Will create a (x,y)
         grid based off of rmax centered at 0 in the chosen plane unless
@@ -365,6 +415,9 @@ class VelocityMap(TransformableImage):
 
         if plane not in self._planes:
             raise ValueError(f'{plane} not a valid image plane to plot!')
+
+        if (pix_scale is None) and (self.model.pars['r_unit'] == 'arcsec'):
+            raise ValueError('Must pass pix_scale if r_unit is arcsec!')
 
         pars = self.model.pars
 
@@ -395,7 +448,9 @@ class VelocityMap(TransformableImage):
             if x.shape != y.shape:
                 raise ValueError('x and y must have the same shape!')
 
-        V = self(plane, x, y, speed=speed, normalized=normalized)
+        V = self(
+            plane, x, y, speed=speed, normalized=normalized, pix_scale=pix_scale
+            )
 
         runit = pars['r_unit']
         vunit = pars['v_unit']
@@ -441,8 +496,10 @@ class VelocityMap(TransformableImage):
 
         return
 
-    def plot_all_planes(self, plot_kwargs={}, show=True, close=True, outfile=None,
-                        size=(13, 8), speed=False, normalized=False, center=True):
+    def plot_all_planes(
+            self, plot_kwargs={}, show=True, close=True, outfile=None,
+            size=(13, 8), speed=False, normalized=False, center=True
+            ):
         if size not in plot_kwargs:
             plot_kwargs['size'] = size
 
@@ -507,7 +564,10 @@ class VelocityMap(TransformableImage):
 
         return
 
-    def plot_map_transforms(self, size=None, outfile=None, show=True, close=True, speed=False, center=True, rmax=None, X=None, Y=None):
+    def plot_map_transforms(
+            self, size=None, outfile=None, show=True, close=True, speed=False, 
+            center=True, rmax=None, X=None, Y=None, pix_scale=None
+            ):
         '''
         X, Y: np.ndarray (2d)
             Original grid positions to evaluate the velocity map on, in the disk plane. Defaults to (-rmax, rmax) in 100 steps
@@ -520,6 +580,9 @@ class VelocityMap(TransformableImage):
         runit = pars['r_unit']
         vunit = pars['v_unit']
         rscale = pars['rscale']
+
+        if (runit == 'arcsec') and (pix_scale is None):
+            raise ValueError('Must pass pix_scale if r_unit is arcsec!')
 
         if rmax is None:
             rmax = 5. * rscale
@@ -587,6 +650,148 @@ class VelocityMap(TransformableImage):
             plt.close()
 
         return
+    
+    def plot_rotation_curve(
+            self,
+            X,
+            Y,
+            plane='obs',
+            mask=None,
+            pix_scale=None,
+            threshold_dist=5,
+            Nrbins=20,
+            s=(12,5),
+            print_model=True,
+            show=True,
+            out_file=None
+            ):
+        '''
+        Plot the rotation curve of the velocity map for a given X, Y grid
+
+        Parameters
+        ----------
+        TODO
+        '''
+
+        if mask is None:
+            mask = np.ones_like(X, dtype=bool)
+
+        model_pars = self.model.pars
+        r_unit = model_pars['r_unit']
+
+        if (r_unit == 'arcsec') and (pix_scale is None):
+            raise ValueError('Must pass pix_scale if r_unit is arcsec!')
+
+        vmap_plane = self(plane, X, Y, pix_scale=pix_scale)
+
+        # determine the distance from the major axis for all pixels
+        if self.model_name == 'offset':
+            x0, y0 = model_pars['x0'], model_pars['y0']
+        else:
+            x0, y0 = 0., 0.
+
+        pa = OrientedAngle(
+            model_pars['theta_int'], unit='rad', orientation='cartesian'
+        )
+        vcirc = model_pars['vcirc']
+
+        dist_major = dist_to_major_axis(X, Y, x0, y0, pa)
+
+        # bin the velocity map by radius from the galaxy center
+        dx = np.cos(pa)
+        dy = np.sin(pa)
+        R_signed = (X - x0) * dx + (Y - y0) * dy
+
+        # now find the pixels within the threshold distance of the major axis
+        # dist_major = np.abs(Y_rot)
+        R_in_major = R_signed[(dist_major <= threshold_dist) & mask]
+
+        if len(R_in_major) == 0:
+            raise ValueError(
+                f'No pixels within {threshold_dist} of the major axis; '
+                )
+        Rmin = R_in_major.min()
+        Rmax = R_in_major.max()
+        rbins = np.linspace(Rmin, Rmax, Nrbins+1)
+
+        bin_centers = (rbins[:-1] + rbins[1:]) / 2
+        rotation_curve = []
+        rotation_curve_err = []
+
+        # Calculate average velocity for each bin
+        for n in range(Nrbins):
+            radial_mask = (R_signed >= rbins[n]) & (R_signed < rbins[n+1])
+
+            # now apply the other mask
+            dist_major_mask = dist_major <= threshold_dist
+
+            # combine the masks
+            combined_mask = radial_mask & dist_major_mask
+
+            if np.any(combined_mask):
+                sini = model_pars['sini']
+                avg_obs_vel = np.mean(vmap_plane[combined_mask] / sini)
+                std_obs_vel = np.std(vmap_plane[combined_mask] / sini)
+                rotation_curve.append(avg_obs_vel)
+                rotation_curve_err.append(std_obs_vel)
+            else:
+                # handle empty bins
+                rotation_curve.append(np.nan)
+                rotation_curve_err.append(np.nan)
+
+        plt.subplot(121)
+        vmin, vmax = np.percentile(vmap_plane, 1), np.percentile(vmap_plane, 99)
+        plt.imshow(
+            vmap_plane, origin='lower', cmap='RdBu',
+            norm=MidpointNormalize(vmin, vmax)
+            )
+        plot_line_on_image(
+            vmap_plane, (x0, y0), pa, plt.gca(), c='k', label='model major axis'
+        )
+        # plot the threshold region
+        plot_line_on_image(
+            vmap_plane, (x0, y0+threshold_dist/2.), pa, plt.gca(), c='k', 
+            ls=':', label='model major axis'
+        )
+        plot_line_on_image(
+            vmap_plane, (x0, y0-threshold_dist/2.), pa, plt.gca(), c='k', 
+            ls=':', label='model major axis'
+        )
+        plt.xlim(0, len(X))
+        plt.ylim(0, len(Y))
+        plt.title(f'Model Velocity Map ({plane} plane)')
+
+        if print_model is True:
+            i = 0
+            for name, val in model_pars.items():
+                if isinstance(val, float):
+                    val = f'{val:.3f}'
+                plt.text(
+                    0.1,
+                    0.9-i,
+                    f'{name}: {val}', transform=plt.gca().transAxes
+                    )
+                i += 0.05
+
+        plt.subplot(122)
+        plt.errorbar(
+            bin_centers, rotation_curve, rotation_curve_err, marker='o', label='model'
+                    )
+        plt.axhline(vcirc, c='k', ls='--', label='vcirc')
+        plt.axhline(-vcirc, c='k', ls='--')
+        plt.xlabel('Radial Distance (pixels)')
+        plt.ylabel('2D Rotational Velocity (km/s)')
+        plt.legend()
+        plt.title(f'Model Rotation Curve')
+        plt.grid(True)
+
+        plt.gcf().set_size_inches(s)
+
+        if out_file is not None:
+            save = True
+        plot(show, save, out_file=out_file)
+
+        return
 
 def get_model_types():
     return MODEL_TYPES
@@ -608,3 +813,49 @@ def build_model(name, pars, logger=None):
         raise ValueError(f'{name} is not a registered velocity model!')
 
     return model
+
+#-------------------------------------------------------------------------------
+# some utility methods
+
+def dist_to_major_axis(X, Y, x0, y0, position_angle):
+    '''
+    Calculate the distance from each pixel to the major axis
+
+    Parameters
+    ----------
+    X : np.ndarray
+        2D array of x-coordinates
+    Y : np.ndarray
+        2D array of y-coordinates
+    x/y0 : float
+        x/y-coordinate of the galaxy center
+    position_angle : OrientedAngle
+        Position angle of the galaxy major axis
+    '''
+
+    # get distance from each pixel to the galaxy center
+    Xcen, Ycen = X - x0, Y - y0
+    R = np.sqrt(Xcen**2 + Ycen**2)
+
+    # angle from each pixel to the galaxy center
+    Theta = np.arctan2(Ycen, Xcen) # returns (-pi, pi)
+
+    # match the [0, 360] wrapping of the position angle
+    Theta[Theta < 0] += 2 * np.pi 
+
+    # difference in angle between the pixel and the major axis
+    dTheta = position_angle.cartesian.rad - Theta
+
+    # calculate distance from each pixel to the major axis
+    dist = abs(R * np.sin(dTheta))
+
+    # import matplotlib.colors as mcolors
+    # norm = mcolors.TwoSlopeNorm(
+    #     vmin=-np.max(np.abs(dist)), vcenter=0, vmax=np.max(np.abs(dist))
+    #    )
+    # plt.imshow(dist.T, origin='lower', cmap='RdBu', norm=norm)
+    # plt.text(0.1, 0.1, f'PA: {np.rad2deg(position_angle):.2f} deg')
+    # plt.colorbar()
+    # plt.show()
+
+    return dist

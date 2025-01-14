@@ -1,9 +1,7 @@
 import numpy as np
 from astropy.units import Unit
 import galsim as gs
-from abc import abstractmethod
 from typing import Union
-import os
 
 from kl_tools.parameters import Pars
 from kl_tools.emission import EmissionLine
@@ -13,8 +11,6 @@ from kl_tools.velocity import VelocityMap
 from kl_tools.likelihood import DataCubeLikelihood
 import kl_tools.intensity as intensity
 import kl_tools.utils as utils
-
-import ipdb
 
 class MockObservation(object):
     '''

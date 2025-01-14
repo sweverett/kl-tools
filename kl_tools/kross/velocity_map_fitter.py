@@ -228,7 +228,7 @@ def main():
         bounds_pair = [
             (-50, 50), # v0
             (vcirc_low, vcirc_high), # vcirc
-            (0, 20), # rscale
+            (2, 20), # rscale; pixels
             (0, 1), # sini
             (0, 2*np.pi), # theta_int
             (-0.000001, 0.000001), # g1
@@ -241,14 +241,14 @@ def main():
         initial_guess = pars2theta({
             'v0': 0.0,
             'vcirc': vtf * sini_kross,
-            'rscale': 5.0,
+            'rscale': 1.0, # pixels
             'sini': sini_kross,
             'theta_int': vel_pa.cartesian.rad,
             'g1': 0.0,
             'g2': 0.0,
             'x0': 0.0,
             'y0': 0.0,
-            'r_unit': u('arcsec'),
+            'r_unit': u('pixels'),
             'v_unit': u('km/s'),
         })
 
@@ -316,7 +316,7 @@ def main():
             if isinstance(val, float):
                 plt.text(
                     0.025, 0.9-ipar*0.05,
-                    f'{key}: {val:.2f}',
+                    f'{key}: {val:.3f}',
                     color='k',
                     transform=plt.gca().transAxes
                     )

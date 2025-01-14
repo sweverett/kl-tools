@@ -3,8 +3,10 @@ import numpy as np
 from astropy import units
 import matplotlib.pyplot as plt
 
-from kl_tools.velocity import VelocityModel, OffsetVelocityModel, VelocityMap, get_model_types, build_model
+from kl_tools.velocity import VelocityModel, OffsetVelocityModel, VelocityMap
+from kl_tools.coordinates import OrientedAngle
 from kl_tools.utils import get_test_dir, make_dir, build_map_grid
+from kl_tools.kross.rotation_curve_fitter import dist_to_major_axis
 
 class TestVelocityModel(unittest.TestCase):
     def setUp(self) -> None:
@@ -281,6 +283,96 @@ class TestVelocityMap(unittest.TestCase):
 
         return
 
+    def test_rscale_pixel(self) -> None:
+        # test if the rscale parameter is correctly applied, in pixels
+
+        pa = OrientedAngle(30, unit=units.deg, orientation='cartesian')
+
+        model_pars = {
+            'g1': 0.0,
+            'g2': 0.0,
+            'theta_int': pa.cartesian.rad,
+            'sini': 0.8,
+            'v0': 0.0,
+            'vcirc': 200,
+            'rscale': 5,
+            'r_unit': units.Unit('pixel'),
+            'v_unit': units.km / units.s,
+        }
+
+        vmap = VelocityMap('centered', model_pars)
+
+        Nx, Ny = 100, 100
+        X, Y = build_map_grid(Nx, Ny, indexing='xy')
+
+        vmap_obs = vmap('obs', X, Y)
+
+        # plot the velocity field & PA
+        plt.imshow(vmap_obs, origin='lower')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        plt.title(
+            'Vmap Observed; rscale = 5 pixels; theta_int = 30 deg'
+            )
+        plt.tight_layout()
+        plt.gcf().set_size_inches(8, 6)
+
+        outfile = self.plot_dir / 'vmap-rscale-pixel.png'
+        plt.savefig(outfile)
+        plt.close()
+
+        outfile = self.plot_dir / 'vmap-rscale-pixel_rotation_curve.png'
+        vmap.plot_rotation_curve(X, Y, out_file=outfile, show=True)
+
+        return
+
+    def test_rscale_arcsec(self) -> None:
+        # test if the rscale parameter is correctly applied, in arcsec
+
+        pa = OrientedAngle(30, unit=units.deg, orientation='cartesian')
+
+        model_pars = {
+            'g1': 0.0,
+            'g2': 0.0,
+            'theta_int': pa.cartesian.rad,
+            'sini': 0.8,
+            'v0': 0.0,
+            'vcirc': 200,
+            'rscale': 5,
+            'r_unit': units.arcsec,
+            'v_unit': units.km / units.s,
+        }
+
+        vmap = VelocityMap('centered', model_pars)
+
+        Nx, Ny = 100, 100
+        X, Y = build_map_grid(Nx, Ny, indexing='xy')
+
+        pix_scale = 0.2 * units.arcsec
+        vmap_obs = vmap('obs', X, Y, pix_scale=pix_scale)
+
+        # plot the velocity field & PA
+        plt.imshow(vmap_obs, origin='lower')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.colorbar()
+        plt.title(
+            'Vmap Observed; rscale = 5 arcsec; theta_int = 30 deg'
+            )
+        plt.tight_layout()
+        plt.gcf().set_size_inches(8, 6)
+
+        outfile = self.plot_dir / 'vmap-rscale-arcsec.png'
+        plt.savefig(outfile)
+        plt.close()
+
+        outfile = self.plot_dir / 'vmap-rscale-arcsec_rotation_curve.png'
+        vmap.plot_rotation_curve(
+            X, Y, pix_scale=pix_scale, out_file=outfile, show=True
+            )
+
+        return
 
 if __name__ == '__main__':
     unittest.main()

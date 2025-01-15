@@ -832,6 +832,11 @@ class VelocityMap(TransformableImage):
         x = scale_radius_pix * np.cos(theta_int)
         y = scale_radius_pix * np.sin(theta_int)
 
+        if self.model_name == 'offset':
+            x0, y0 = self.model.pars['x0'], self.model.pars['y0']
+            x += x0
+            y += y0
+
         # for annoying reasons, this must be done
         x = np.array([x])
         y = np.array([y])

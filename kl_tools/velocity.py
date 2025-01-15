@@ -1,8 +1,5 @@
 import numpy as np
-import os
-from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
-from argparse import ArgumentParser
 import astropy.constants as const
 import astropy.units as units
 
@@ -13,13 +10,6 @@ from kl_tools.plotting import plot_line_on_image
 from kl_tools.transformation import TransformableImage
 from kl_tools.parameters import SampledPars
 from kl_tools.coordinates import OrientedAngle
-
-parser = ArgumentParser()
-
-parser.add_argument('--show', action='store_true', default=False,
-                    help='Set to show test plots')
-parser.add_argument('--test', action='store_true', default=False,
-                    help='Set to run tests')
 
 class VelocityModel(object):
     '''
@@ -394,7 +384,9 @@ class VelocityMap(TransformableImage):
         rscale = pars['rscale']
         if r_unit == 'arcsec':
             pix_scale = pars['pix_scale']
-            rscale = (rscale /  pix_scale).value
+            rscale = (rscale /  pix_scale)
+            if isinstance(rscale, units.Quantity):
+                rscale = rscale.value
 
         atan_r = np.arctan(r  / rscale)
 
@@ -653,11 +645,12 @@ class VelocityMap(TransformableImage):
     
     def plot_rotation_curve(
             self,
-            X,
-            Y,
+            X, # 2D grid of x-coordinates; pixels
+            Y, # 2D grid of y-coordinates; pixels
             plane='obs',
             mask=None,
-            pix_scale=None,
+            pix_scale=None, # arcsec/pixel
+            scale_radius=None, # arcsec
             threshold_dist=5,
             Nrbins=20,
             s=(12,5),
@@ -678,9 +671,17 @@ class VelocityMap(TransformableImage):
 
         model_pars = self.model.pars
         r_unit = model_pars['r_unit']
+        rscale = model_pars['rscale']
 
         if (r_unit == 'arcsec') and (pix_scale is None):
             raise ValueError('Must pass pix_scale if r_unit is arcsec!')
+
+        if isinstance(pix_scale, units.Quantity):
+            pix_scale = pix_scale.value
+        if r_unit == 'arcsec':
+            rscale_pix = rscale / pix_scale
+        else:
+            rscale_pix = rscale
 
         vmap_plane = self(plane, X, Y, pix_scale=pix_scale)
 
@@ -779,6 +780,20 @@ class VelocityMap(TransformableImage):
                     )
         plt.axhline(vcirc, c='k', ls='--', label='vcirc')
         plt.axhline(-vcirc, c='k', ls='--')
+        plt.axvline(rscale_pix, c='g', ls=':', label='rscale')
+        plt.axvline(-rscale_pix, c='g', ls=':')
+        if scale_radius is not None:
+            import ipdb; ipdb.set_trace()
+            if pix_scale is None:
+                v22 = self.compute_v22(scale_radius, 1)
+                scale_radius_pix = scale_radius
+            else:
+                v22 = self.compute_v22(scale_radius, pix_scale)
+                scale_radius_pix = scale_radius / pix_scale
+            plt.axvline(
+                scale_radius_pix, c='orange', ls='--', label='scale_radius'
+                )
+            plt.axhline(v22, c='purple', ls=':', label='v22')
         plt.xlabel('Radial Distance (pixels)')
         plt.ylabel('2D Rotational Velocity (km/s)')
         plt.legend()
@@ -792,6 +807,44 @@ class VelocityMap(TransformableImage):
         plot(show, save, out_file=out_file)
 
         return
+
+    def compute_v22(self, scale_radius, pix_scale):
+        '''
+        Compute the V_22 parameter for the velocity model given the scale radius
+        in arcsec and pixel scale in arcsec/pixel. V_22 is defined as the velocity
+        at 2.2 * scale_radius.
+
+        Parameters
+        ----------
+        scale_radius: float
+            The scale radius of the model in arcsec
+        pix_scale: float
+            The pixel scale of the model grid in arcsec/pixel
+        '''
+
+        if isinstance(scale_radius, units.Quantity):
+            scale_radius = scale_radius.value
+        if isinstance(pix_scale, units.Quantity):
+            pix_scale = pix_scale.value
+
+        # find the position of the velocity map that we need to sample at
+        theta_int = self.model.pars['theta_int']
+        scale_radius_pix = scale_radius / pix_scale
+        x = scale_radius_pix * np.cos(theta_int)
+        y = scale_radius_pix * np.sin(theta_int)
+
+        # for annoying reasons, this must be done
+        x = np.array([x])
+        y = np.array([y])
+
+        # evaluate the velocity map at this position
+        r_unit = self.model.pars['r_unit']
+        if r_unit == 'arcsec':
+            v22 = self('obs', x, y, pix_scale=pix_scale)
+        else:
+            v22 = self('obs', x, y)
+
+        return v22
 
 def get_model_types():
     return MODEL_TYPES

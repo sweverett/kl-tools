@@ -323,7 +323,10 @@ class TestVelocityMap(unittest.TestCase):
         plt.close()
 
         outfile = self.plot_dir / 'vmap-rscale-pixel_rotation_curve.png'
-        vmap.plot_rotation_curve(X, Y, out_file=outfile, show=True)
+        scale_radius=10 # arcsec
+        vmap.plot_rotation_curve(
+            X, Y, out_file=outfile, show=True, scale_radius=scale_radius
+            )
 
         return
 
@@ -368,8 +371,10 @@ class TestVelocityMap(unittest.TestCase):
         plt.close()
 
         outfile = self.plot_dir / 'vmap-rscale-arcsec_rotation_curve.png'
+        scale_radius = 7 # arcsec
         vmap.plot_rotation_curve(
-            X, Y, pix_scale=pix_scale, out_file=outfile, show=True
+            X, Y, pix_scale=pix_scale, out_file=outfile, show=True, 
+            scale_radius=scale_radius
             )
 
         return

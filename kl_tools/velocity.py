@@ -783,7 +783,6 @@ class VelocityMap(TransformableImage):
         plt.axvline(rscale_pix, c='g', ls=':', label='rscale')
         plt.axvline(-rscale_pix, c='g', ls=':')
         if scale_radius is not None:
-            import ipdb; ipdb.set_trace()
             if pix_scale is None:
                 v22 = self.compute_v22(scale_radius, 1)
                 scale_radius_pix = scale_radius

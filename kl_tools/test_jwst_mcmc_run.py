@@ -109,8 +109,8 @@ def main(args):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector 
-    #data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
-    data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
+    data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
+    #data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
     datafile = data_root + "data_compile_short_withmask_GDS_ID%d_emlonly.fits"%(objID)
     datavector = GrismDataVector(file=datafile)
 
@@ -133,7 +133,7 @@ def main(args):
 
     if args.sampler == 'zeus':
         print('Setting up KLensZeusRunner')
-        outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
         if os.path.exists(outfile):
             print(f'Continue from {outfile}')
             with open(outfile, mode='rb') as fp:
@@ -145,7 +145,7 @@ def main(args):
 
     elif args.sampler == 'emcee':
         print('Setting up KLensEmceeRunner')
-        outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
         if os.path.exists(outfile):
             print(f'Continue from {outfile}')
             with open(outfile, mode='rb') as fp:
@@ -173,13 +173,13 @@ def main(args):
     if (args.sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
         # The sampler isn't pickleable for some reason in this scenario
         # Save whole chain
-        outfile = os.path.join(outdir, 'test-mcmc-chain.pkl')
+        outfile = os.path.join(outdir, f'test-mcmc-chain_{objID}.pkl')
         chain = runner.sampler.get_chain(flat=True)
         print(f'pickling chain to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(chain, f)
     else:
-        outfile = os.path.join(outdir, 'test-mcmc-sampler.pkl')
+        outfile = os.path.join(outdir, f'test-mcmc-sampler_{objID}.pkl')
         print(f'Pickling sampler to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner.sampler, f)

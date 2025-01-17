@@ -55,6 +55,26 @@ params:
   sini:
     derived: 'lambda eint1, eint2: np.sin(2*np.arctan((eint1*eint1+eint2*eint2)**0.5))'
     latex: \mathrm{sin}(i)
+  dx_disk:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.05
+      proposal: 0.05
+    latex: \Deltax_\mathrm{disk}
+  dy_disk:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.05
+      proposal: 0.05
+    latex: \Deltay_\mathrm{disk}
   v0:
     prior:
       dist: norm
@@ -89,14 +109,34 @@ params:
       scale: 0.1
       proposal: 1.0e-4
     latex: R_\mathrm{vscale}
+  dx_kin:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.05
+      proposal: 0.05
+    latex: \Deltax_\mathrm{kin}
+  dy_kin:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.05
+      proposal: 0.05
+    latex: \Deltay_\mathrm{kin}
   hlr:
     prior:
       min: 0.01
       max: 5.0
     ref:
       dist: norm
-      loc: 1.0
-      scale: 0.1
+      loc: 0.232 # measurement from JADES catalog
+      scale: 0.01
       proposal: 1.0e-4
     latex: R_h
   em_PaA_flux:
@@ -160,7 +200,7 @@ meta:
   eint2: param
 
   velocity:
-    model: default
+    model: offset # default
     v0: param
     vcirc: param
     rscale: param

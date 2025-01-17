@@ -301,6 +301,8 @@ class InclinedExponential(IntensityMap):
         g1 = pars.get('g1', theta_pars['g1'])
         g2 = pars.get('g2', theta_pars['g2'])
         theta_int = pars.get('theta_int', theta_pars['theta_int'])
+        dx_disk = pars.get("dx_disk", theta_pars['dx_disk']) * self.pars["hlr"]
+        dy_disk = pars.get("dy_disk", theta_pars['dy_disk']) * self.pars["hlr"] 
 
         inc = Angle(np.arcsin(sini), radians)
         rot_angle = Angle(theta_int, radians)
@@ -311,7 +313,7 @@ class InclinedExponential(IntensityMap):
         start = time()*1000
         self.gal["phot"] = gs.InclinedExponential(
             inc, flux=self.pars["flux"], half_light_radius=self.pars["hlr"]
-        ).rotate(rot_angle).shear(g1=g1, g2=g2)
+        ).rotate(rot_angle).shear(g1=g1, g2=g2).shift(dx_disk, dy_disk)
         #print(self.gal)
         try:
             self.image["phot"] = self.gal["phot"].drawImage(nx=self.nx, ny=self.ny, 

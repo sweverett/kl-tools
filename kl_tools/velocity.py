@@ -113,6 +113,13 @@ class OffsetVelocityModel(VelocityModel):
     '''
 
     name = 'offset'
+    '''
+    The `x0` and `y0` parameters are the position of the vmap center
+    during evaluation. The X and Y grid will be transformed to centered coord.
+    by Xp = X - x0 and Yp = Y - y0.
+    The relation between x0/y0 and dx_kin/dy_kin (in Pranjal's paper) is
+    x0 = dx_kin, y0 = dy_kin 
+    '''
     _model_params = ['v0', 'vcirc', 'rscale', 'sini', 'x0', 'y0',
                      'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']
 

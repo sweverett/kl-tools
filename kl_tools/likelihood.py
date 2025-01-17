@@ -368,6 +368,16 @@ class LogLikelihood(LogBase):
         for key in ['theta_int', 'sini']:
             if theta_pars.get(key, None) is None:
                 theta_pars[key] = meta[key]
+        # setup vmap offset parameters
+        # Note: the sampled parameters are fractional offset dx/y_kin
+        # while the parameters used in vmap model are absolute x0/y0 center pos
+        if model_name == 'offset':
+            for key, _key in zip(['dx_kin', 'dy_kin'], ['x0', 'y0']):
+                # if not sampled, filled with the fiducial or default 
+                if theta_pars.get(key, None) is None:
+                    theta_pars[key] = meta['velocity'].get(key, 0.0)
+                # transform from fractional difference to absolute offset
+                theta_pars[_key] = theta_pars[key] * theta_pars['rscale']
 
         # no extras for this func
         #return self._setup_vmap(theta_pars, self.meta, model_name)

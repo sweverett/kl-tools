@@ -64,7 +64,7 @@ def get_Cube(i):
 
 def get_CubePars(i):
     global CubeParsLists
-    assert i<len(CubeParsLists), print(f'Requesting cubepar {i} out of {len(CubeLists)}!')
+    assert i<len(CubeParsLists), print(f'Requesting cubepar {i} out of {len(CubeParsLists)}!')
     return CubeParsLists[i]
 
 GlobalDataVector = []
@@ -1093,6 +1093,7 @@ class GrismLikelihood(LogLikelihood):
                 GrismPars_list[0].bp_array.shape[0]))
             grism.initialize_observations(self.Nobs, GrismPars_list)
             init_Cube_lists(GrismModelCube_list)
+            init_CubePars_lists(GrismPars_list)
             # generate fiducial images and DataVector object
             theta_pars_fid = self.theta2pars(kwargs['sampled_theta_fid'])
             dc_array, gal, sed = self._setup_model(theta_pars_fid)
@@ -1132,6 +1133,7 @@ class GrismLikelihood(LogLikelihood):
             # self.GrismModelCube_list = [grism.GrismModelCube(p) for p in self.GrismPars_list]
             # initialize C++ routine with setting data vector
             init_Cube_lists(GrismModelCube_list)
+            init_CubePars_lists(GrismPars_list)
             grism.initialize_observations(self.Nobs, GrismPars_list, datavector)
             #input_from_fid_theta = False
         return

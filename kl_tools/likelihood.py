@@ -1189,7 +1189,7 @@ class GrismLikelihood(LogLikelihood):
         image_list = []
         dv = get_GlobalDataVector(0)
         theta_pars = self.theta2pars(theta)
-        dc_array, gal, sed = self._setup_model(theta_pars, None)
+        dc_array, gal_phot, sed = self._setup_model(theta_pars, None)
         for i in range(self.Nobs):
             fc = get_Cube(i)
             if fc.pars.is_dispersed: 

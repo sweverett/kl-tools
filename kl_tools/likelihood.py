@@ -1187,13 +1187,17 @@ class GrismLikelihood(LogLikelihood):
         ''' Get simulated images given parameter values
         '''
         image_list = []
-        # unpack sampled params
+        dv = get_GlobalDataVector(0)
         theta_pars = self.theta2pars(theta)
-        # setup model corresponding to cube.DataCube type
-        dc_array, gal, sed = self._setup_model(theta_pars)
+        dc_array, gal, sed = self._setup_model(theta_pars, None)
         for i in range(self.Nobs):
-            _img, _noise = self.GrismModelCube_list[i].observe(dc_array)
-            image_list.append(_img)
+            fc = get_Cube(i)
+            if fc.pars.is_dispersed: 
+                iblock, obsid = fc.conf['SEDBLKID'], fc.conf['OBSINDEX']
+                img, _ = fc.observe(theory_cube=dc_array[iblock], datavector=dv)
+            else:
+                img, _ = fc.observe(gal_phot=gal_phot, datavector=dv)
+            image_list.append(img)
         return image_list
         
     # def __call__(self, theta, datavector, model):

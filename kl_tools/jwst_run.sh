@@ -3,7 +3,7 @@
 #SBATCH --job-name=JWSTKL
 #SBATCH --output=/xdisk/timeifler/jiachuanxu/job_logs/JWSTKL-%A_%a.out
 #SBATCH --nodes=1
-#SBATCH --ntasks=12
+#SBATCH --ntasks=30
 #SBATCH --cpus-per-task=1
 
 ### >>> High priority purchase-in time

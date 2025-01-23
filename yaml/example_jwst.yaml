@@ -194,18 +194,18 @@ params:
       scale: 0.1
       proposal: 1.0e-4
     latex: F_\mathrm{phot}
-  obs_cont_norm_flam:
-    #value: 3.0e-17
-    value: 0.0
-    # prior:
-    #   min: 1.0e-14
-    #   max: 1.0e+14
-    # ref:
-    #   dist: norm
-    #   loc: 1.0
-    #   scale: 0.1
-    #   proposal: 1.0e-4
-    latex: F_\mathrm{cont}
+  # obs_cont_norm_flam:
+  #   #value: 3.0e-17
+  #   value: 0.0
+  #   # prior:
+  #   #   min: 1.0e-14
+  #   #   max: 1.0e+14
+  #   # ref:
+  #   #   dist: norm
+  #   #   loc: 1.0
+  #   #   scale: 0.1
+  #   #   proposal: 1.0e-4
+  #   latex: F_\mathrm{cont}
 
 ### Meta parameters used in simulation
 meta:
@@ -213,12 +213,16 @@ meta:
   g2: param
 #  eint1: param
 #  eint2: param
+  theta_int: param
+  sini: param
 
   velocity:
     model: offset # default
     v0: param
     vcirc: param
     rscale: param
+    dx_kin: param
+    dy_kin: param
 
   intensity:
     type: inclined_exp
@@ -226,6 +230,8 @@ meta:
     hlr: param
     em_PaA_hlr: param
     #cont_PaA_hlr: param
+    dx_disk: param
+    dy_disk: param
 
   psf: from_data
 
@@ -261,7 +267,8 @@ meta:
     temp_flux_type: flambda
     cont_norm_method: flux
     obs_cont_norm_wave: 4440
-    obs_cont_norm_flam: param
+    #obs_cont_norm_flam: param
+    obs_cont_norm_flam: 0.0
     em_PaA_flux: param
     em_PaA_sigma: 0.65
 

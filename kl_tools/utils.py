@@ -6,6 +6,19 @@ import matplotlib.colors as colors
 import pdb
 import copy
 import priors
+try:
+    import schwimmbad
+    import mpi4py
+    from mpi4py import MPI
+except:
+    print("Can not import MPI, use single process")
+try:
+    comm = MPI.COMM_WORLD
+    size = comm.Get_size()
+    rank = comm.Get_rank()
+except:
+    rank = 0
+    size = 1
 
 class ForkedPdb(pdb.Pdb):
     """A Pdb subclass that may be used
@@ -250,7 +263,8 @@ def parse_yaml(filename):
         latex_labels[key] = config['params'][key].get("latex", key)
     # start from the `meta` field and fill parameters that are set to `param`
     Nsampled = parse_param(config['meta'], config['params'])
-    print(f'{Nsampled} parameters are being sampled: {sampled_pars}')
+    if rank==0:
+        print(f'{Nsampled} parameters are being sampled: {sampled_pars}')
     # set the priors in meta
     config['meta']['priors'] = {}
     for key in sampled_pars:

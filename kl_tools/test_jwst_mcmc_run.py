@@ -55,6 +55,8 @@ parser.add_argument('-run_name', type=str, default='',
                     help='Name of mcmc run')
 parser.add_argument('--show', action='store_true', default=False,
                     help='Set to show test plots')
+parser.add_argument('--not_overwrite', action='store_true', default=False,
+                    help='Not Overwrite existing outputs')
 parser.add_argument('-nsteps', type=int, default=-1,
                     help='Number of mcmc iterations per walker')
 
@@ -76,6 +78,8 @@ def main(args):
     sampled_pars, fidvals, latex_labels, derived, meta_dict, mcmc_dict, ball_mean, ball_std, ball_proposal = utils.parse_yaml(args.yaml)
     if rank==0:
         print(f'Sampled parameters: {sampled_pars}')
+        for i in range(len(sampled_pars)):
+            print(f'- {sampled_pars[i]}: fiducial = {fidvals[i]:.2e}; init = {ball_mean[i]:.2e} +- {ball_std[i]:.2e}')
     nsteps = mcmc_dict["nsteps"] if args.nsteps==-1 else args.nsteps
     objID = mcmc_dict["objid"] if args.ID == -1 else args.ID
     ncores = args.ncores
@@ -88,7 +92,8 @@ def main(args):
     ### Step 1: load JWST data and figure out source information
     data_root = "../data/jwst"
     data_file = os.path.join(data_root, "data_compile_short_withmask_GDS_ID%d_emlonly.fits"%objID)
-    print("Reading JWST observation ID-%d"%(objID))
+    if rank==0:
+        print("Reading JWST observation ID-%d"%(objID))
     data_hdul = fits.open(data_file)
     
     ''' read important information from fits file and overwrite YAML file
@@ -118,7 +123,8 @@ def main(args):
     # Setup sampled posterior
 
     pars_order = pars.sampled.pars_order
-    print(pars_order)
+    if rank==0:
+        print(pars_order)
 
     log_posterior = LogPosterior(pars, datavector, likelihood='grism')
     # test pickle dump to see the size of the posterior function
@@ -132,9 +138,10 @@ def main(args):
     nwalkers = 2*ndims
 
     if args.sampler == 'zeus':
-        print('Setting up KLensZeusRunner')
+        if rank==0:
+            print('Setting up KLensZeusRunner')
         outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
-        if os.path.exists(outfile):
+        if os.path.exists(outfile) and args.not_overwrite:
             print(f'Continue from {outfile}')
             with open(outfile, mode='rb') as fp:
                 runner = pickle.load(fp)
@@ -144,9 +151,10 @@ def main(args):
             )
 
     elif args.sampler == 'emcee':
-        print('Setting up KLensEmceeRunner')
+        if rank==0:
+            print('Setting up KLensEmceeRunner')
         outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
-        if os.path.exists(outfile):
+        if os.path.exists(outfile) and args.not_overwrite:
             print(f'Continue from {outfile}')
             with open(outfile, mode='rb') as fp:
                 runner = pickle.load(fp)
@@ -184,7 +192,7 @@ def main(args):
         with open(outfile, 'wb') as f:
             pickle.dump(runner.sampler, f)
 
-        outfile = os.path.join(outdir, 'test-mcmc-runner.pkl')
+        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
         print(f'Pickling runner to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)

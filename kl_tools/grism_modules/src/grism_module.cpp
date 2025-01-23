@@ -313,6 +313,8 @@ namespace interface_mpp_aux {
         cout << "\tscale = " << pix_scale;
         cout << "\tdimension = (Ny=" << Ny << ", Nx=" << Nx << ")" << endl;
         if (pixel_response_table.size() > 0) { pixel_response_table.clear(); }
+
+        // loop through the model wavelength dimension
         for (i = 0; i < model_Nlam; i++) {
             // break the loop if it is photometry obs
             if((obstype==0) and (i>0)) break;
@@ -329,8 +331,8 @@ namespace interface_mpp_aux {
             get_dispersion(mean_wave, shift);
             if (_DEBUG_PRINTS_) {
                 cout << "slice " << i << " shift = (" << shift[0] << \
-            ", " << shift[1] << ")" << "mean wavelength = " \
- << mean_wave << endl;
+                ", " << shift[1] << ")" << "mean wavelength = " \
+                << mean_wave << endl;
             }
 
             // loop through the dispersed image

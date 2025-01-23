@@ -1272,7 +1272,8 @@ class GrismLikelihood(LogLikelihood):
             #axes[i].imshow(img, origin='lower')
 
             data = dv.get_data(i)
-            noise = np.std(dv.get_noise(i))
+            #noise = np.std(dv.get_noise(i))
+            noise = dv.get_noise(i)
             chi2 = np.sum(((data-img)*mask/noise)**2)
             loglike += -0.5*chi2
             if timing:
@@ -1380,7 +1381,7 @@ class GrismLikelihood(LogLikelihood):
             dc = np.zeros(mshape)
             for key in gals.keys():
                 if key.startswith('em_'):
-                    # evaluate SED (phot/s/cm2) at observer frame (w/ LoS velocity)
+                    # evaluate SED (phot/s/cm2) at observer frame (w/ LoS velocity), note that sed itself is phot/s/cm2/nm by default
                     substart_time = time()*1000
                     sed_mesh = (sed(w_mesh, component=key)*self.dwave[iblock]/self.Nsub[iblock]).reshape(mshape)
                     if timing:

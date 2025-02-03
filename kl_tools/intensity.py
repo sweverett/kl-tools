@@ -302,7 +302,9 @@ class InclinedExponential(IntensityMap):
         g2 = pars.get('g2', theta_pars['g2'])
         theta_int = pars.get('theta_int', theta_pars['theta_int'])
         dx_disk = pars.get("dx_disk", theta_pars['dx_disk']) * self.pars["hlr"]
-        dy_disk = pars.get("dy_disk", theta_pars['dy_disk']) * self.pars["hlr"] 
+        dy_disk = pars.get("dy_disk", theta_pars['dy_disk']) * self.pars["hlr"]
+        dx_spec = pars.get("dx_spec", theta_pars['dx_spec']) * self.pars["hlr"]
+        dy_spec = pars.get("dy_spec", theta_pars['dy_spec']) * self.pars["hlr"]
 
         inc = Angle(np.arcsin(sini), radians)
         rot_angle = Angle(theta_int, radians)
@@ -324,9 +326,9 @@ class InclinedExponential(IntensityMap):
         # emission lines + continuum intensity profile
         for emline,vacwave in LINE_LAMBDAS.items():
             if f'em_{emline}_hlr' in pars['intensity']:
+                eml_hlr = pars['intensity'][f'em_{emline}_hlr']
                 self.gal[f'em_{emline}'] = gs.InclinedExponential(
-                    inc, flux=1, half_light_radius=pars['intensity'][f'em_{emline}_hlr']
-                    ).rotate(rot_angle).shear(g1=g1, g2=g2)
+                    inc, flux=1, half_light_radius=eml_hlr).rotate(rot_angle).shear(g1=g1, g2=g2).shift(dx_spec,dy_spec)
                 try:
                     self.image[f'em_{emline}'] = self.gal[f'em_{emline}'].drawImage(
                         nx=self.nx, ny=self.ny, scale=self.pix_scale).array

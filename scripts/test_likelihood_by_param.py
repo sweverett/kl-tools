@@ -7,15 +7,16 @@ import astropy.constants as const
 from argparse import ArgumentParser
 import matplotlib.pyplot as plt
 from copy import deepcopy
+import pickle
 
-import velocity
-from likelihood import LogPosterior
-import velocity
-from parameters import Pars
-import mocks
-import utils
+import kl_tools.velocity as velocity
+from kl_tools.likelihood import LogPosterior
+from kl_tools.parameters import Pars
+import kl_tools.mocks as mocks
+import kl_tools.utils as utils
 
 import ipdb
+import pudb
 
 def parse_args():
     parser = ArgumentParser()
@@ -24,8 +25,8 @@ def parse_args():
                         help='Number of grid points')
     parser.add_argument('-run_name', type=str, default=None,
                         help='Name of likelihood slice run')
-    parser.add_argument('-imap', type=str, default='exp',
-                        choices=['exp', 'basis'],
+    parser.add_argument('-imap', type=str, default='inclined_exp',
+                        choices=['inclined_exp', 'basis'],
                         help='Name of likelihood slice run')
     parser.add_argument('--psf', action='store_true',
                         help='Set to use PSF')
@@ -34,7 +35,7 @@ def parse_args():
 
     return parser.parse_args()
 
-def plot_vmap_residuals(theta_pars, datacube, loglike, dc_vmap_array,
+def plot_vmap_residuals(theta_pars, datacube, loglike, true_vmap_array,
                         norm=True, s=(22,5), outfile=None, show=False):
 
     Nx, Ny = datacube.Nx, datacube.Ny
@@ -50,7 +51,7 @@ def plot_vmap_residuals(theta_pars, datacube, loglike, dc_vmap_array,
         )
 
     plt.subplot(131)
-    plt.imshow(dc_vmap_array, origin='lower')
+    plt.imshow(true_vmap_array, origin='lower')
     plt.colorbar(fraction=0.047)
     plt.title('Datacube vmap')
 
@@ -60,7 +61,7 @@ def plot_vmap_residuals(theta_pars, datacube, loglike, dc_vmap_array,
     plt.title('True Model')
 
     plt.subplot(133)
-    plt.imshow(dc_vmap_array-v_array, origin='lower',
+    plt.imshow(true_vmap_array-v_array, origin='lower',
                cmap='RdBu',
                norm=utils.MidpointNormalize(midpoint=0)
                )
@@ -133,56 +134,33 @@ def main(args):
     psf = args.psf
     show = args.show
 
-    outdir = os.path.join(utils.TEST_DIR, 'test_likelihood_by_param')
+    outdir = os.path.join(utils.SCRIPT_DIR, 'out', 'test_likelihood_by_param')
 
     if run_name is not None:
         outdir = os.path.join(outdir, run_name)
 
     utils.make_dir(outdir)
 
-    # for exp gal fits
-    true_flux = 1.8e4
-    true_hlr = 3.5
+    # We use the same mock observation for the baseline tests
+    # This could be modified to create your own custom observation for the test
+    obs = mocks.DefaultMockObservation(imap=imap, psf=psf, s2n=100000)
 
-    true_pars = {
-        'g1': 0.025,
-        'g2': -0.0125,
-        # 'g1': 0.0,
-        # 'g2': 0.0,
-        'theta_int': np.pi / 6,
-        # 'theta_int': 0.,
-        'sini': 0.7,
-        'v0': 5,
-        'vcirc': 200,
-        'rscale': 3,
-        # 'beta': np.NaN,
-        # 'flux': true_flux,
-        # 'hlr': true_hlr,
+    velocity_dict = {
+        'model': obs.datacube_pars['v_model'],
     }
-
-    if imap == 'exp':
+    if imap == 'inclined_exp':
         intensity_dict = {
-            # For this test, use truth info
             'type': 'inclined_exp',
-            'flux': true_flux, # counts
-            'hlr': true_hlr, # counts
-            }
+            'flux': 'sampled',
+            'hlr': 'sampled',
+        }
     elif imap == 'basis':
+        # For most tests, you want to use an identical basis model as the datacube generation. You can of course use a different basis model if testing model misspecification
         intensity_dict = {
             'type': 'basis',
-            # 'basis_type': 'shapelets',
-            # 'basis_type': 'sersiclets',
-            'basis_type': 'exp_shapelets',
-            'basis_kwargs': {
-                'Nmax': 12,
-                # 'plane': 'disk',
-                'plane': 'obs',
-                'beta': 0.2 # n12-exp_shapelet
-            #     'beta': 0.28,
-            #     'index': 1,
-            #     'b': 1,
-                }
-            }
+            'basis_type': obs.datacube_pars['basis_type'],
+            'basis_kwargs': obs.datacube_pars['basis_kwargs'],
+        }
 
     mcmc_pars = {
         'units': {
@@ -191,55 +169,42 @@ def main(args):
         },
         'priors': {},
         'intensity': intensity_dict,
-        'velocity': {
-            'model': 'centered'
-        },
+        'velocity': velocity_dict,
         # 'marginalize_intensity': True,
         'run_options': {
             'use_numba': False,
             }
     }
 
-    datacube_pars = {
-        # image meta pars
-        'Nx': 40, # pixels
-        'Ny': 40, # pixels
-        'pix_scale': 0.5, # arcsec / pixel
-        # intensity meta pars
-        'true_flux': true_flux, # counts
-        'true_hlr': true_hlr, # pixels
-        # velocty meta pars
-        'v_model': mcmc_pars['velocity']['model'],
-        'v_unit': mcmc_pars['units']['v_unit'],
-        'r_unit': mcmc_pars['units']['r_unit'],
-        # emission line meta pars
-        'wavelength': 656.28, # nm; halpha
-        'lam_unit': 'nm',
-        'z': 0.3,
-        'R': 5000.,
-        'sky_sigma': 0.01, # pixel counts for mock data vector
-    }
-
-    if psf is True:
-        datacube_pars['psf'] = gs.Gaussian(fwhm=1., flux=1.)
-
     print('Setting up test datacube and true Halpha image')
-    datacube, dc_vmap, true_im = mocks.setup_likelihood_test(
-        true_pars, datacube_pars
-        )
+    datacube = obs.datacube
+    true_vmap = obs.true_vmap
+    true_im = obs.true_im
     Nspec, Nx, Ny = datacube.shape
     lambdas = datacube.lambdas
 
     if psf is True:
-        datacube.set_psf(datacube_pars['psf'])
+        datacube.set_psf(obs.psf)
+
+    outfile = os.path.join(outdir, 'true_pars.pkl')
+    print(f'Saving true pars to {outfile}')
+    with open(outfile, 'wb') as out:
+        pickle.dump(obs.true_pars, out)
 
     outfile = os.path.join(outdir, 'datacube.fits')
     print(f'Saving test datacube to {outfile}')
     datacube.write(outfile)
+    outfile = os.path.join(outdir, 'datacube.pkl')
+    with open(outfile, 'wb') as out:
+        pickle.dump(datacube, out)
+
+    outfile = os.path.join(outdir, 'true_imap.npy')
+    print(f'Saving test datacube true imap to {outfile}')
+    np.save(outfile, true_im)
 
     outfile = os.path.join(outdir, 'vmap.png')
     print(f'Saving true vamp in obs plane to {outfile}')
-    plt.imshow(dc_vmap, origin='lower')
+    plt.imshow(true_vmap, origin='lower')
     plt.colorbar(label='v')
     plt.title('True velocity map in obs plane')
     plt.savefig(outfile, bbox_inches='tight', dpi=300)
@@ -284,33 +249,39 @@ def main(args):
     #-----------------------------------------------------------------
     # Setup sampled posterior
 
-    sampled_pars = list(true_pars)
+    sampled_pars = list(obs.true_pars)
+
     pars = Pars(sampled_pars, mcmc_pars)
     pars_order = pars.sampled.pars_order
 
     log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
     log_likelihood = log_posterior.log_likelihood
 
-    #-----------------------------------------------------------------
+    outfile = os.path.join(outdir, 'pars.pkl')
+    print(f'Saving Pars to {outfile}')
+    with open(outfile, 'wb') as out:
+        pickle.dump(pars, out)
 
-    # These are centered at truth
+    #-----------------------------------------------------------------
+    # Plot log likelihood slices
+    # 
+    # Center each slice around truth, with ranges of +/- d[var]
+
+    t = obs.true_pars
+    dg = 0.1
+    dtheta = np.pi/32
+    dsini = 0.01
+    dv0 = 0.05
+    dvcirc = 1
+    drscale = 0.05
     test_pars = {
-        # 'g1': (-0.01, 0.01, .0001),
-        # 'g2': (-0.01, 0.01, .0001),
-        'g1': (0.015, 0.035, .0001),
-        'g2': (-0.0225, -0.0025, .0001),
-        'theta_int': (np.pi/6-np.pi/32, np.pi/6+np.pi/32, .05),
-        'sini': (0.675, 0.725, .01),
-        'v0': (3, 7, .05),
-        'vcirc': (190, 210, 1),
-        'rscale': (2, 4, .05),
-        # 'g1': (-0.2, 0.2, .005),
-        # 'g2': (-0.2, 0.2, .005),
-        # 'theta_int': (0., np.pi, .05),
-        # 'sini': (0., 0.99, .01),
-        # 'v0': (0, 20, .05),
-        # 'vcirc': (100, 300, 1),
-        # 'rscale': (0, 10, .05),
+        'g1': (t['g1']-dg, t['g1']+dg, dg/N),
+        'g2': (t['g2']-dg, t['g2']+dg, dg/N),
+        'theta_int': (t['theta_int']-dtheta, t['theta_int']+dtheta, dtheta/N),
+        'sini': (t['sini']-dsini, t['sini']+dsini, dsini/N),
+        'v0': (t['v0']-dv0, t['v0']+dv0, dv0/N),
+        'vcirc': (t['vcirc']-dvcirc, t['vcirc']+dvcirc, dvcirc/N),
+        'rscale': (t['rscale']-drscale, t['rscale']+drscale, drscale/N),
     }
 
     # plot residuals for true log likelihood
@@ -318,7 +289,7 @@ def main(args):
     outfile = os.path.join(outdir, 'true-imap-residuals.png')
     print(f'Saving true imap residuals to {outfile}')
     plot_imap_residuals(
-        true_pars, datacube, log_likelihood, outfile=outfile, show=show
+        obs.true_pars, datacube, log_likelihood, outfile=outfile, show=show
         )
 
     outfile = os.path.join(outdir, 'true-vmap-residuals.png')
@@ -326,12 +297,12 @@ def main(args):
     # normalize datacube vmap
     norm = 1. / const.c.to(mcmc_pars['units']['v_unit']).value
     plot_vmap_residuals(
-        true_pars, datacube, log_likelihood, norm*dc_vmap,
+        obs.true_pars, datacube, log_likelihood, norm*true_vmap,
         outfile=outfile, show=show
         )
 
     # Compute best-fit log likelihood
-    theta_true = pars.pars2theta(true_pars)
+    theta_true = pars.pars2theta(obs.true_pars)
     true_loglike = log_likelihood(theta_true, datacube)
 
     # NOTE: Just for testing, can remove later
@@ -346,10 +317,13 @@ def main(args):
     # TODO: Can add a multiprocessing pool here if needed
     k = 1
     for par, par_range in test_pars.items():
-        print(f'Starting loop over {par}: {par_range}')
+        start = f'{par_range[0]:.3f}'
+        end = f'{par_range[1]:.3f}'
+        delta = f'{par_range[2]:.3f}'
+        print(f'Starting loop over {par}: ({start}, {end}; {delta})')
 
         # fresh copy
-        theta_pars = deepcopy(true_pars)
+        theta_pars = deepcopy(obs.true_pars)
 
         # Now update w/ test param
         left, right, dx = par_range
@@ -369,7 +343,7 @@ def main(args):
 
         plt.subplot(nrows, ncols, k)
         plt.plot(par_val, loglike)
-        truth = true_pars[par]
+        truth = obs.true_pars[par]
         plt.axvline(truth, lw=2, c='k', ls='--', label='Truth')
         plt.legend()
         plt.xlabel(par)
@@ -394,7 +368,7 @@ def main(args):
     #-----------------------------------------------------------------
     # Check how a given par offsets affect vmap residuals
 
-    theta_pars = true_pars.copy()
+    theta_pars = obs.true_pars.copy()
 
     var = 'g1'
     print(f'Making plots of vmap residuals while varying {var}')
@@ -410,7 +384,7 @@ def main(args):
 
         # norm = const.c.to(mcmc_pars['units']['v_unit']).value
         plot_vmap_residuals(
-            theta_pars, datacube, log_likelihood, dc_vmap, norm=False,
+            theta_pars, datacube, log_likelihood, true_vmap, norm=False,
             outfile=outfile, show=show
         )
 

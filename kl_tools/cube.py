@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.sparse import identity, dia_matrix
 import fitsio
-from astropy.io import fits
 import astropy.units as u
 import galsim
 import os
@@ -11,11 +10,9 @@ from astropy.table import Table
 import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 
-import utils
-import parameters
-from datavector import DataVector
-
-import ipdb
+import kl_tools.utils as utils
+import kl_tools.parameters as parameters
+from kl_tools.datavector import DataVector
 
 parser = ArgumentParser()
 
@@ -181,7 +178,7 @@ class CubePars(parameters.MetaPars):
     @property
     def lambdas(self):
         if self._lambdas is None:
-            self.build_lambdas()
+            self.build_wavelength_list()
 
         return self._lambdas
 
@@ -372,8 +369,6 @@ class DataCube(DataVector):
 
     def get_sed(self, line_index=None, line_pars_update=None):
         '''
-        Get emission line SED, or modify if needed
-
         line_index: int
             The index of the desired emission line
         line_pars_update: dict
@@ -464,8 +459,19 @@ class DataCube(DataVector):
     def slice(self, indx):
         return self.slices[indx]
 
-    def stack(self):
-        return np.sum(self._data, axis=0)
+    def stack(self, nan_fill=0):
+        '''
+        Return a stacked image for the imap generation
+
+        NOTE: As the stack() method is mostly to produce an imap for fitting, we fill NaNs with the nan_fill value and rely on the mask to handle any bad pixels
+
+        nan_fill: float
+            The value to fill NaNs with in the stack
+        '''
+        # TODO: Need a better estimate here...
+        data = np.nan_to_num(self._data, nan=nan_fill)
+
+        return np.sum(data, axis=0)
 
     def _set_maps(self, maps, map_type):
         '''
@@ -547,6 +553,19 @@ class DataCube(DataVector):
         self._set_maps(masks, 'masks')
 
         return
+
+    def get_2d_mask(self) -> np.ndarray:
+        '''
+        Generate a 2D mask using the masks across all wavelengths
+        '''
+
+        # for now, just select on the sum of mask entries. Subclasses can overload to handle more complex cases
+
+        mask_sum = np.sum(self.masks, axis=0)
+        mask = np.zeros(mask_sum.shape, dtype=bool)
+        mask[mask_sum > 0] = True
+
+        return mask
 
     def get_continuum(self):
         if self._continuum_template is None:
@@ -683,6 +702,63 @@ class DataCube(DataVector):
         '''
 
         return self._data[:,i,j]
+
+    def cutout(self, shape, center=None, cutout_type='in-place'):
+        '''
+        Cutout a smaller datacube from the current one
+
+        NOTE: This method only works on X,Y, for lambda use truncate()
+        TODO: We need to do more work to update the header & WCS correctly
+
+        shape: tuple
+            The (Nx, Ny) shape of the new datacube (keeps all wavelengths)
+        center: tuple
+            The center of the new datacube. If None, will use the existing center
+        cutout_type: str
+            Select whether to apply the cutout w/ the DataCube constructor (in-place) or to just return the (args, kwargs) needed to produce the cutout (return-args). This is particularly useful for subclasses of DataCube
+        '''
+
+        if center is None:
+            center = (self.Nx//2, self.Ny//2)
+        else:
+            if center[0] < 0 or center[0] > self.Nx:
+                raise ValueError('Center x must be within the datacube!')
+            if center[1] < 0 or center[1] > self.Ny:
+                raise ValueError('Center y must be within the datacube!')
+
+        x_cen = center[0]
+        y_cen = center[1]
+        Nx = shape[0]
+        Ny = shape[1]
+
+        x_cut = np.s_[x_cen-Nx//2:x_cen+Nx//2]
+        y_cut = np.s_[y_cen-Ny//2:y_cen+Ny//2]
+
+        cutout_data = self._data[:, x_cut, y_cut]
+        cutout_weights = self.weights[:, x_cut, y_cut]
+        cutout_masks = self.masks[:, x_cut, y_cut]
+
+        cutout_pars = self.pars.copy() # is a deep copy
+
+        # Reset any attributes set during initialization
+        cutout_pars.reset()
+
+        if cutout_type == 'in-place':
+            self.__init__(
+                cutout_data,
+                pars=cutout_pars,
+                weights=cutout_weights,
+                masks=cutout_masks,
+            )
+
+        elif cutout_type == 'return-args':
+            args = [cutout_data]
+            kwargs = {
+                'pars': cutout_pars,
+                'weights': cutout_weights,
+                'masks': cutout_masks
+            }
+            return (args, kwargs)
 
     def truncate(self, blue_cut, red_cut, lambda_unit=None, cut_type='edge',
                  trunc_type='in-place'):
@@ -853,6 +929,82 @@ class DataCube(DataVector):
             im_list.append(s._data)
 
         galsim.fits.writeCube(im_list, outfile)
+
+        return
+
+    def plot(self, show=True, outfile=None, size=None, title=None, imshow_kwargs={}, max_cols=12):
+        '''
+        Plot the mock observation; both the stack and individual channels
+
+        show: bool
+            Set to true to show the plot
+        outfile: str
+            Set to a filename to save the plot
+        size: tuple
+            The size of the figure in inches
+        title: str
+            The title of the figure
+        imshow_kwargs: dict
+            Any kwargs to pass to the imshow() function
+        max_cols: int
+            The maximum number of columns to use when plotting
+        '''
+
+        # total plots will be Nspec + 1 to include the stacked image
+        nplots = self.Nspec + 1
+
+        ncols = min(max_cols, nplots)
+        nrows = nplots // max_cols
+        if nplots % max_cols != 0:
+            nrows += 1
+        fig, axes = plt.subplots(nrows, ncols, sharex=True, sharey=True)
+        plt.subplots_adjust(wspace=0.5)
+
+        # set the plot size based on nrows and ncols
+        if size is None:
+            size = (ncols*3, nrows*2)
+
+        unit = self.lambda_unit
+        for i in range(0, nrows*ncols):
+            if len(axes.shape) == 1:
+                ax = axes[i]
+            else:
+                row = i // max_cols
+                col = i % max_cols
+                ax = axes[row, col]
+
+            # first, the stacked image
+            if i == 0:
+                im = ax.imshow(self.stack(), **imshow_kwargs, origin='lower')
+                ax.set_title('Stacked image')
+                utils.add_colorbar(im)
+            # next, the slice plots
+            elif i < nplots:
+                im = ax.imshow(self._data[i-1,:,:], **imshow_kwargs, origin='lower')
+                li, le = self.lambdas[i-1][0], self.lambdas[i-1][1]
+                # ax.set_title(rf'$S_{i}$: ({le:.2f}, {le:.2f}) {unit}')
+                ax.set_title(f'Slice {i}')
+                utils.add_colorbar(im)
+            else:
+                # make ax invisible
+                ax.axis('off')
+
+        if title is not None:
+            plt.title(title)
+        else:
+            li, le = self.lambdas[0][0], self.lambdas[-1][1]
+            plt.suptitle(f'DataCube; {li:.2f} {unit} < ' +\
+                         f'lambda < {le:.2f} {unit}', y=1.05)
+
+        fig.set_size_inches(size)
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight')
+
+        if show is True:
+            plt.show()
+        else:
+            plt.close()
 
         return
 

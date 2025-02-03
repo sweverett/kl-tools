@@ -12,7 +12,7 @@ class CleanCommand(Command):
         os.system('rm -vrf ./build ./dist ./*.pyc ./*.tgz ./*.egg-info')
 
 setup(name='kl_tools',
-      version='1.0',
+      version='0.1.0',
       packages=find_packages(),
       cmdclass={
         'clean': CleanCommand,

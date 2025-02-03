@@ -8,13 +8,14 @@ from argparse import ArgumentParser
 import galsim as gs
 from galsim.angle import Angle, radians
 
-import utils
-import basis
-import likelihood
-import parameters
-from transformation import transform_coords, TransformableImage
+import kl_tools.utils as utils
+import kl_tools.basis as basis
+import kl_tools.likelihood as likelihood
+import kl_tools.parameters as parameters
+from kl_tools.transformation import transform_coords, TransformableImage
 
 import ipdb
+import pudb
 
 '''
 This file contains a mix of IntensityMap classes for explicit definitions
@@ -217,9 +218,22 @@ class InclinedExponential(IntensityMap):
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
 
-        self.image = gal.drawImage(
-            nx=self.nx, ny=self.ny, scale=self.pix_scale
-            ).array
+        try:
+            self.image = gal.drawImage(
+                nx=self.nx, ny=self.ny, scale=self.pix_scale
+                ).array
+        except:
+            # Can fail if no PSF & very inclined
+            try:
+                self.image = gal.drawImage(
+                    nx=self.nx, ny=self.ny, scale=self.pix_scale, method='real'
+                ).array
+            except:
+                print('Rendering failed! Making blank image')
+                self.image = np.zeros((self.nx, self.ny))
+
+        # NOTE: this is because the returned image array is indexed by numpy, so (y,x) instead of our desired (x,y)
+        self.image = self.image.swapaxes(0,1)
 
         return
 
@@ -295,6 +309,10 @@ class BasisIntensityMap(IntensityMap):
                                 'must have pix_scale!')
             basis_kwargs['pix_scale'] = datacube.pix_scale
 
+        # grab the datacube weights & mask for basis fitting
+        self.dc_weights = datacube.weights
+        self.dc_mask = np.sum(datacube.masks, axis=0)
+
         # TODO: would be nice to generalize for chromatic
         # PSFs in the future!
         if 'psf' in basis_kwargs:
@@ -355,6 +373,8 @@ class BasisIntensityMap(IntensityMap):
             basis_type, nx, ny,
             continuum_template=self.continuum_template,
             psf=self.psf,
+            weights=self.dc_weights,
+            mask=self.dc_mask,
             basis_kwargs=basis_kwargs
             )
 
@@ -437,7 +457,7 @@ class IntensityMapFitter(object):
     by some set of basis functions {phi_i}.
     '''
     def __init__(self, basis_type, nx, ny, continuum_template=None,
-                 psf=None, basis_kwargs=None):
+                 psf=None, weights=None, mask=None, basis_kwargs=None):
         '''
         basis_type: str
             The name of the basis_type type used
@@ -450,6 +470,10 @@ class IntensityMapFitter(object):
         psf: galsim.GSObject
             A galsim object representing a PSF to convolve the
             basis functions by
+        weights: numpy.ndarray
+            A 2D array of floats to apply to the fitted stacked image
+        mask: numpy.ndarray
+            A 2D array of bools to mask the stacked image
         basis_kwargs: dict
             Keyword args needed to build given basis type
         '''
@@ -465,6 +489,8 @@ class IntensityMapFitter(object):
         self.ny = ny
 
         self.continuum_template = continuum_template
+        self.weights = weights
+        self.mask = mask
         self.psf = psf
 
         self.grid = utils.build_map_grid(nx, ny)
@@ -533,23 +559,35 @@ class IntensityMapFitter(object):
         x = X.reshape(Ndata)
         y = Y.reshape(Ndata)
 
+        # apply mask
+        mask = self.mask.reshape(Ndata)
+        select = np.where(mask == 0)
+        x = x[select]
+        y = y[select]
+        Npseudo = len(x)
+        self.selection = select
+
         # the design matrix for a given basis and datacube
         if self.basis.is_complex is True:
-            self.design_mat = np.zeros((Ndata, Nbasis), dtype=np.complex128)
+            self.design_mat = np.zeros((Npseudo, Nbasis), dtype=np.complex128)
         else:
-            self.design_mat = np.zeros((Ndata, Nbasis))
+            self.design_mat = np.zeros((Npseudo, Nbasis))
 
         for n in range(self.basis.N):
             self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
 
         # handle continuum template separately
         if self.continuum_template is not None:
-            template = self.continuum_template.reshape(Ndata)
+            template = self.continuum_template.reshape(Ndata)[select]
 
             # make sure we aren't overriding anything
             assert (self.basis.N + 1) == self.Nbasis
             assert np.sum(self.design_mat[:,-1]) == 0
             self.design_mat[:,-1] = template
+
+        # TODO: Undersand why there are nans!
+        # import pudb; pudb.set_trace()
+        self.design_mat = np.nan_to_num(self.design_mat)
 
         return
 
@@ -575,6 +613,9 @@ class IntensityMapFitter(object):
         fail = 0
         while True:
             try:
+                # NOTE: This can quietly fail in rare cases of near-zero
+                # design matrices. We check for thix explicitly in the
+                # likelihood call
                 self.pseudo_inv = np.linalg.pinv(self.design_mat)
                 break
             except np.linalg.LinAlgError as e:
@@ -635,7 +676,7 @@ class IntensityMapFitter(object):
 
         return det
 
-    def _initialize_fit(theta_pars, pars):
+    def _initialize_fit(self, theta_pars, pars):
         '''
         Setup needed quantities for finding MLE combination of basis
         funcs, along with marginalization factor from the determinant
@@ -722,7 +763,8 @@ class IntensityMapFitter(object):
         if cov is None:
             # The solution is simply the Moore-Penrose pseudo inverse
             # acting on the data vector
-            mle_coeff = self.pseudo_inv.dot(data)
+            mle_coeff = self.pseudo_inv.dot(data[self.selection])
+            # import pudb; pudb.set_trace()
 
         else:
             # If cov is diagonal but not constant sigma, then see
@@ -805,20 +847,31 @@ class TransformedIntensityMapFitter(object):
 
         return
 
-def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
-                 bmin=0.001, bmax=5):
+
+###############################################################################
+# helper funcs for guessing best beta value from data
+
+def fit_for_beta(datacube, basis, betas=None, Nbetas=100,
+                 bmin=0.001, bmax=5, ncores=1):
     '''
-    TODO: Finish!
     Scan over beta values for the best fit to the
-    stacked datacube image
+    stacked datacube image for a given basis set
 
     datacube: DataCube
         The datacube to find the preferred beta scale for
-    basis_type: str
-        The type of basis to use for fitting for beta
+    basis: basis.Basis subclass
+        An instance of a Basis subclass with all optional args set
     betas: list, np.array
         A list or array of beta values to use in finding
         optimal value. Will create one if not passed
+    Nbetas: int
+        The number of beta values to scane over (if betas is not passed)
+    bmin: float
+        The minimum beta value to check (it betas is not passed)
+    bmax: float
+        The maximum beta value to check (it betas is not passed)
+    ncores: int
+        The number of cores to use for the beta scan
 
     returns: float
         The value of beta that minimizes the imap chi2
@@ -827,10 +880,54 @@ def fit_for_beta(datacube, basis_type, betas=None, Nbetas=100,
     if betas is None:
         betas = np.linspace(bmin, bmax, Nbetas)
 
-    for beta in betas:
-        pass
+    if ncores > 1:
+        with Pool(ncores) as pool:
+            out = stack(pool.starmap(fit_one_beta,
+                                     [(i,
+                                       beta,
+                                       theta,
+                                       datacube,
+                                       pars,
+                                       sky,
+                                       vb
+                                       )
+                                      for i, beta in enumerate(betas)]
+                                     )
+                        )
+    else:
+        out = stack([fit_one_beta(
+            i, beta, theta, datacube, pars_shapelet_b, pars_sersiclet_b,
+            pars_exp_shapelet_b, sky, vb
+            ) for i, beta in enumerate(betas)])
 
     return
+
+def fit_one_beta(i, beta, theta_pars, datacube, basis, sky=1., vb=False):
+    '''
+    TODO: Incorporate full covariance matrix instead of sky sigma
+    TODO: Docstring
+    '''
+
+    if (vb is True) and (i % 10 == 0):
+        print(f'Fitting beta {i}')
+
+    pars = basis.pars
+
+    # TODO
+    imap = likelihood.DataCubeLikelihood._setup_imap(
+        theta_pars, datacube, pars
+    )
+    basis_im = imap.render(
+        theta_pars, datacube, pars
+                )
+    mle = imap.fitter.mle_coefficients
+
+    data = datacube.stack()
+    Npix = data.shape[0] * data.shape[1]
+
+    chi2_shapelet = np.sum((basis_im-data)**2/sky**2) / Npix
+
+    return np.array([chi2_shapelet, chi2_sersiclet, chi2_exp_shapelet])
 
 def main(args):
     '''

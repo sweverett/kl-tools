@@ -12,18 +12,12 @@ from galsim.angle import Angle, radians
 import matplotlib.pyplot as plt
 from numba import njit
 
-import utils
-import priors
-import intensity
-from parameters import Pars, MetaPars
-# import parameters
-from velocity import VelocityMap
-from cube import DataVector, DataCube
-
-import ipdb
-
-# TODO: Make LogLikelihood a base class w/ abstract call,
-# and make current implementation for IFU
+import kl_tools.utils as utils
+import kl_tools.priors as priors
+import kl_tools.intensity as intensity
+from kl_tools.parameters import Pars, MetaPars
+from kl_tools.velocity import VelocityMap
+from kl_tools.cube import DataVector, DataCube
 
 parser = ArgumentParser()
 
@@ -103,7 +97,8 @@ class LogPosterior(LogBase):
     the passed sampled & meta parameters
     '''
 
-    def __init__(self, parameters, datavector, likelihood='default'):
+    def __init__(self, parameters, datavector, likelihood='default',
+                 prior='default'):
         '''
         parameters: Pars
             Pars instance that holds all parameters needed for MCMC
@@ -111,11 +106,17 @@ class LogPosterior(LogBase):
         datavector: DataCube, etc.
             Arbitrary data vector that subclasses from DataVector.
             If DataCube, truncated to desired lambda bounds
+        likelihood: str
+            Type of likelihood model to build; see LIKELIHOOD_TYPES
+        prior: str
+            Type of prior model to build; see PRIOR_TYPES
         '''
 
         super(LogPosterior, self).__init__(parameters, datavector)
 
-        self.log_prior = LogPrior(parameters)
+        self.log_prior = build_prior_model(
+            prior, parameters
+            )
         self.log_likelihood = build_likelihood_model(
             likelihood, parameters, datavector
             )
@@ -153,7 +154,15 @@ class LogPosterior(LogBase):
         else:
             loglike = self.log_likelihood(theta, data)
 
-        return logprior + loglike, self.blob(logprior, loglike)
+        logpost = logprior + loglike
+
+        # In rare cases, particularly basis function imap modeling,
+        # NaN's can occur from pseudo-inverse solving. We try to catch
+        # it when it happens but we keep this as a fail-safe
+        if np.isnan(logpost):
+            logpost = -np.inf
+
+        return logpost, self.blob(logprior, loglike)
 
 class LogPrior(LogBase):
     def __init__(self, parameters):
@@ -187,6 +196,32 @@ class LogPrior(LogBase):
             logprior += prior(theta[indx], log=True)
 
         return logprior
+
+class LogCDFPrior(LogPrior):
+    '''
+    A prior class that returns the sampled value given defined
+    cumulative probability distributions for each sampled parameter
+    '''
+
+    def __call__(self, quantile_cube):
+        '''
+        quantile_cube: np.ndarray
+            An array of CDF quantile values for each parameter. See:
+            https://johannesbuchner.github.io/UltraNest/priors.html?highlight=prior
+        '''
+
+        # prepare the output array, which has the same shape
+        transformed_pars = np.empty_like(quantile_cube)
+
+        pars_order = self.parameters.sampled.pars_order
+
+        for name, prior in self.priors.items():
+            indx = pars_order[name]
+            transformed_pars[indx] = prior(
+                quantile_cube[indx], log=True, quantile=True
+                )
+
+        return transformed_pars
 
 class LogLikelihood(LogBase):
 
@@ -252,7 +287,16 @@ class LogLikelihood(LogBase):
         theta_pars = self.theta2pars(theta)
 
         # setup model corresponding to datavector type
-        model = self._setup_model(theta_pars, datavector)
+        model, imap = self._setup_model(
+            theta_pars, datavector, return_imap=True
+            )
+
+        # NOTE: in rare cases, the model will return a NaN datacube due
+        # to failure to find an inverse of the design matrix when using
+        # basis function imap modeling. This is usually due to an issue
+        # with sampling the scale factor, so we reject this sample
+        if np.isnan(model.data).any():
+            return -np.inf
 
         # if we are computing the marginalized posterior over intensity
         # map parameters, then we need to scale this likelihood by a
@@ -265,6 +309,14 @@ class LogLikelihood(LogBase):
         return (-0.5 * log_det) + self._log_likelihood(
             theta, datavector, model
             )
+
+    def _call_no_args(self, theta):
+        '''
+        TODO: A hack to make ultranest work. Will document later if it
+        is successful
+        '''
+
+        return self(theta, self.datavector)
 
     def _compute_log_det(self, imap):
         # TODO: Adapt this to work w/ new DataCube's w/ weight maps!
@@ -435,7 +487,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         return loglike
 
-    def _setup_model(self, theta_pars, datacube):
+    def _setup_model(self, theta_pars, datacube, return_imap=False):
         '''
         Setup the model datacube given the input datacube datacube
 
@@ -443,6 +495,8 @@ class DataCubeLikelihood(LogLikelihood):
             Dictionary of sampled pars
         datacube: DataCube
             Datavector datacube truncated to desired lambda bounds
+        return_imap: bool
+            Set to return the tuple (model, imap)
         '''
 
         Nx, Ny = datacube.Nx, datacube.Ny
@@ -455,9 +509,6 @@ class DataCubeLikelihood(LogLikelihood):
         # parameters
         vmap = self.setup_vmap(theta_pars)
         imap = self.setup_imap(theta_pars, datacube)
-
-        # TODO: temp for debugging!
-        self.imap = imap
 
         try:
             use_numba = self.meta['run_options']['use_numba']
@@ -478,7 +529,11 @@ class DataCubeLikelihood(LogLikelihood):
             theta_pars, v_array, i_array, cont_array, datacube
             )
 
-        return model_datacube
+        # TODO: I don't like this implementation, but for now will handle the case in which basis function marginalization requires imap return
+        if return_imap is True:
+            return model_datacube, imap
+        else:
+            return model_datacube
 
     def setup_imap(self, theta_pars, datacube):
         '''
@@ -586,7 +641,7 @@ class DataCubeLikelihood(LogLikelihood):
         for i in range(Nspec):
             data[i,:,:] = self._compute_slice_model(
                 lambdas[i], sed_array, zfactor, i_array, cont_array,
-                psf=psf, pix_scale=datacube.pix_scale
+                pix_scale=datacube.pix_scale, psf=psf
             )
 
         model_datacube = DataCube(
@@ -597,7 +652,7 @@ class DataCubeLikelihood(LogLikelihood):
 
     @classmethod
     def _compute_slice_model(cls, lambdas, sed, zfactor, imap, continuum,
-                             psf=None, pix_scale=None):
+                             pix_scale, psf=None):
         '''
         Compute datacube slice given lambda range, sed, redshift factor
         per pixel, and the intemsity map
@@ -617,15 +672,11 @@ class DataCubeLikelihood(LogLikelihood):
             at the emission line
         imap: np.ndarray (2D)
             An array corresponding to the continuum model
+        pix_scale: float
+            The image pixel scale
         psf: galsim.GSObject
             A galsim object representing the PSF to convolve by
-        pix_scale: float
-            The image pixel scale. Required if convolving by PSF
         '''
-
-        # they must come in pairs for PSF convolution
-        if (psf is not None) and (pix_scale is None):
-            raise Exception('Must pass a pix_scale if convovling by PSF!')
 
         lblue, lred = lambdas[0], lambdas[1]
 
@@ -689,14 +740,55 @@ class DataCubeLikelihood(LogLikelihood):
 
         return datacube.get_inv_cov_list()
 
-def get_likelihood_types():
-    return LIKELIHOOD_TYPES
+# NOTE: This is where you must register a new prior model
+PRIOR_TYPES = {
+    'default': LogPrior,
+    'prior': LogPrior,
+    'cdf_prior': LogCDFPrior
+    }
+
+def get_prior_types():
+    return PRIOR_TYPES
+
+def get_sampler_prior_type(sampler):
+    sampler_prior = {
+        'emcee': 'prior',
+        'zeus': 'prior',
+        'poco': 'prior',
+        'metropolis': 'prior',
+        'multinest': 'cdf_prior',
+        'ultranest': 'cdf_prior'
+    }
+
+    return sampler_prior[sampler]
+
+def build_prior_model(name, parameters):
+    '''
+    name: str
+        Name of prior model type
+    parameters: Pars
+        Pars instance that holds all parameters needed for MCMC
+        run, including SampledPars and MetaPars
+    '''
+
+    name = name.lower()
+
+    if name in PRIOR_TYPES.keys():
+        # User-defined input construction
+        prior = PRIOR_TYPES[name](parameters)
+    else:
+        raise ValueError(f'{name} is not a registered prior model!')
+
+    return prior
 
 # NOTE: This is where you must register a new likelihood model
 LIKELIHOOD_TYPES = {
     'default': DataCubeLikelihood,
     'datacube': DataCubeLikelihood
     }
+
+def get_likelihood_types():
+    return LIKELIHOOD_TYPES
 
 def build_likelihood_model(name, parameters, datavector):
     '''

@@ -11,12 +11,12 @@ import requests
 from io import BytesIO
 import os
 import pathlib
-
-import utils
-from cube import DataCube, CubePars
-import muse
-
 from tqdm import tqdm
+
+import kl_tools.utils as utils
+from kl_tools.cube import DataCube, CubePars
+import kl_tools.muse as muse
+
 import ipdb
 
 

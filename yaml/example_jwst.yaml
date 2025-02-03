@@ -91,6 +91,16 @@ params:
       scale: 0.05
       proposal: 0.05
     latex: \Deltay_\mathrm{disk}
+  dy_spec:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.05
+      proposal: 0.05
+    latex: \Deltay_\mathrm{spec}
   v0:
     prior:
       min: -100.0
@@ -115,34 +125,37 @@ params:
       proposal: 1.0e-4
     latex: v_\mathrm{circ}
   rscale:
-    prior:
-      min: 0.01
-      max: 1.0
-    ref:
-      dist: norm
-      loc: 0.1
-      scale: 1.0e-4
-      proposal: 1.0e-4
+    # prior:
+    #   min: 0.01
+    #   max: 1.0
+    # ref:
+    #   dist: norm
+    #   loc: 0.1
+    #   scale: 1.0e-4
+    #   proposal: 1.0e-4
+    value: 0.304
     latex: R_\mathrm{vscale}
   dx_kin:
-    prior:
-      min: -0.3
-      max: 0.3
-    ref:
-      dist: norm
-      loc: 0.0
-      scale: 0.05
-      proposal: 0.05
+    # prior:
+    #   min: -0.3
+    #   max: 0.3
+    # ref:
+    #   dist: norm
+    #   loc: 0.0
+    #   scale: 0.05
+    #   proposal: 0.05
+    value: 0.0
     latex: \Deltax_\mathrm{kin}
   dy_kin:
-    prior:
-      min: -0.3
-      max: 0.3
-    ref:
-      dist: norm
-      loc: 0.0
-      scale: 0.05
-      proposal: 0.05
+    # prior:
+    #   min: -0.3
+    #   max: 0.3
+    # ref:
+    #   dist: norm
+    #   loc: 0.0
+    #   scale: 0.05
+    #   proposal: 0.05
+    value: 0.0
     latex: \Deltay_\mathrm{kin}
   hlr:
     prior:
@@ -232,6 +245,8 @@ meta:
     #cont_PaA_hlr: param
     dx_disk: param
     dy_disk: param
+    dx_spec: 0.0
+    dy_spec: param
 
   psf: from_data
 

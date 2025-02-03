@@ -79,7 +79,8 @@ def main(args):
     if rank==0:
         print(f'Sampled parameters: {sampled_pars}')
         for i in range(len(sampled_pars)):
-            print(f'- {sampled_pars[i]}: fiducial = {fidvals[i]:.2e}; init = {ball_mean[i]:.2e} +- {ball_std[i]:.2e}')
+            key = sampled_pars[i]
+            print(f'- {key}: fiducial = {fidvals[key]:.2e}; init = {ball_mean[key]:.2e} +- {ball_std[key]:.2e}')
     nsteps = mcmc_dict["nsteps"] if args.nsteps==-1 else args.nsteps
     objID = mcmc_dict["objid"] if args.ID == -1 else args.ID
     ncores = args.ncores

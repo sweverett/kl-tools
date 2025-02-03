@@ -6,9 +6,10 @@ set -e
 CWD=$(pwd)
 SYS_DIR="$(realpath "$(dirname "$0")")"
 REPO_DIR="$(realpath "$SYS_DIR"/../)"
+echo "Repository directory: $REPO_DIR"
 
 ENV_FILE="$REPO_DIR/environment.yaml"
-ENV_NAME="$(grep '^name:' "$ENVFILE" | cut -d' ' -f2)"
+ENV_NAME="$(grep '^name:' "$ENV_FILE" | cut -d' ' -f2)"
 echo "Environment name: $ENV_NAME"
 
 # always execute this script with bash, so that conda shell.hook works.
@@ -19,19 +20,20 @@ then
 fi
 
 # check if the environment already exists
-if conda info --envs | grep -q "$ENVNAME"; then
-    echo "Environment '$ENVNAME' already exists. Removing it first..."
+if conda info --envs | grep -q "$ENV_NAME"; then
+    echo "Environment '$ENV_NAME' already exists. Removing it first..."
     conda deactivate || true
-    conda env remove -n "$ENVNAME" --yes
+    conda env remove -n "$ENV_NAME" --yes
 fi
 
 # install environment fresh
 # conda-lock install --name "$ENV_NAME" "$REPO_DIR/conda-lock.yml"
-conda install --name "$ENV_NAME" --file "$REPO_DIR/environment.yaml"
+echo "$REPO_DIR/environment.yaml"
+conda env create -f "$REPO_DIR/environment.yaml"
 
 # activate conda environment
 eval "$(conda shell.bash hook)"
-conda activate "$ENVNAME"
+conda activate "$ENV_NAME"
 
 # Install additional packages that are not in the conda-lock.yml, due to 
 # known issues with pip dependencies in conda-lock.

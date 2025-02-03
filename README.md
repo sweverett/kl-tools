@@ -5,6 +5,7 @@
 1. You will need an installation of `conda`. I recommend [`miniforge3`](https://www.google.com/search?client=firefox-b-1-d&q=miniforge3)
 2. Run `make install`
 3. Check your installation by running `make test`
+- **NOTE:** For now, many of these are likely to fail during the code transition
 
 You should be good to go! Make sure to `conda activate kl-tools` whenever you want to run or develop the code.
 

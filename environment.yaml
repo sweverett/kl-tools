@@ -1,4 +1,4 @@
-name: kl-tools
+name: kltools
 channels:
   - conda-forge
 dependencies:

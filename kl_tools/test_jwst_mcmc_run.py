@@ -175,9 +175,11 @@ def main(args):
     # with open("test_JWST_runner_class.pkl", 'wb') as f:
     #         pickle.dump(runner, f)
     print('>>>>>>>>>> Starting mcmc run <<<<<<<<<<')
-    runner.run(pool, nsteps, vb=True)
-
-    runner.burn_in = nsteps // 2
+    p0_mean = np.array([ball_mean[_key] for _key in sampled_pars])
+    p0_std = np.array([ball_std[_key] for _key in sampled_pars])
+    p0 = p0_mean + np.random.randn(nwalkers, ndims)*p0_std
+    runner.run(pool, nsteps, start=p0, vb=True)
+    runner.set_burn_in(nsteps // 2)
 
     if (args.sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
         # The sampler isn't pickleable for some reason in this scenario

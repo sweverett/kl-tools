@@ -26,8 +26,8 @@ if conda info --envs | grep -q "$ENVNAME"; then
 fi
 
 # install environment fresh
-echo "Installing '$ENV_NAME' from reproducible conda-lock.yml..."
-conda-lock install --name "$ENV_NAME" "$REPO_DIR/conda-lock.yml"
+# conda-lock install --name "$ENV_NAME" "$REPO_DIR/conda-lock.yml"
+conda install --name "$ENV_NAME" --file "$REPO_DIR/environment.yaml"
 
 # activate conda environment
 eval "$(conda shell.bash hook)"
@@ -36,7 +36,7 @@ conda activate "$ENVNAME"
 # Install additional packages that are not in the conda-lock.yml, due to 
 # known issues with pip dependencies in conda-lock.
 echo "Pip instaling kl-tools..."
-pip install --no-build-isolation --no-deps --editable "REPO_DIR/."
+pip install --no-build-isolation --no-deps --editable "$REPO_DIR/."
 
 echo "Pip installing pocomc..."
 pip install --no-build-isolation --no-deps pocomc

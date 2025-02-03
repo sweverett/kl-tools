@@ -111,6 +111,13 @@ class VelocityModel(object):
 
         return pars
 
+class CenteredVelocityModel(VelocityModel):
+    '''
+    Just an alias for the default velocity model, in case a user 
+    wants to be explicit about it
+    '''
+    pass
+
 class OffsetVelocityModel(VelocityModel):
     '''
     Same as default velocity model, but w/ a 2D centroid offset
@@ -783,6 +790,7 @@ class VelocityMap(TransformableImage):
         plt.axvline(rscale_pix, c='g', ls=':', label='rscale')
         plt.axvline(-rscale_pix, c='g', ls=':')
         if scale_radius is not None:
+            sr_title = f'; scale_radius: {scale_radius} arcsec'
             if pix_scale is None:
                 v22 = self.compute_v22(scale_radius, 1)
                 scale_radius_pix = scale_radius
@@ -793,10 +801,12 @@ class VelocityMap(TransformableImage):
                 scale_radius_pix, c='orange', ls='--', label='scale_radius'
                 )
             plt.axhline(v22, c='purple', ls=':', label='v22')
+        else:
+            sr_title = ''
         plt.xlabel('Radial Distance (pixels)')
         plt.ylabel('2D Rotational Velocity (km/s)')
         plt.legend()
-        plt.title(f'Model Rotation Curve')
+        plt.title(f'Model Rotation Curve{sr_title}')
         plt.grid(True)
 
         plt.gcf().set_size_inches(s)
@@ -844,9 +854,9 @@ class VelocityMap(TransformableImage):
         # evaluate the velocity map at this position
         r_unit = self.model.pars['r_unit']
         if r_unit == 'arcsec':
-            v22 = self('obs', x, y, pix_scale=pix_scale)
+            v22 = self('source', x, y, pix_scale=pix_scale)
         else:
-            v22 = self('obs', x, y)
+            v22 = self('source', x, y)
 
         return v22
 

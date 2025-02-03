@@ -39,7 +39,7 @@ def get_model(pars, X, Y):
     return vmap('obs', X, Y)
 
 def residuals(theta, data, weights, mask, X, Y):
-    pars = theta2pars(theta)
+    pars = theta2pars(theta, r_unit=u('pixel'), v_unit=u('km/s'))
     model = get_model(pars, X, Y)
     res = ((data - model) * np.sqrt(weights) * mask).flatten()
 
@@ -176,7 +176,6 @@ def main():
         vel_pa = OrientedAngle(vel_pa, unit='deg', orientation='east-of-north')
 
         # if kid != 171:
-            # import ipdb; ipdb.set_trace()
             # continue
 
         #-----------------------------------------------------------------------
@@ -225,11 +224,13 @@ def main():
         vcirc_base = vtf * sini_kross
         vcirc_low = vcirc_base / vtf_fator
         vcirc_high = vcirc_base * vtf_fator
+        sini_low = 0.9 * sini_kross
+        sini_high = 1.1 * sini_kross
         bounds_pair = [
-            (-50, 50), # v0
+            (-100, 100), # v0
             (vcirc_low, vcirc_high), # vcirc
-            (2, 20), # rscale; pixels
-            (0, 1), # sini
+            (0.5, 20), # rscale; pixels
+            (sini_low, sini_high), # sini
             (0, 2*np.pi), # theta_int
             (-0.000001, 0.000001), # g1
             (-0.000001, 0.000001), # g2
@@ -241,14 +242,14 @@ def main():
         initial_guess = pars2theta({
             'v0': 0.0,
             'vcirc': vtf * sini_kross,
-            'rscale': 1.0, # pixels
+            'rscale': 3.0, # pixels
             'sini': sini_kross,
             'theta_int': vel_pa.cartesian.rad,
             'g1': 0.0,
             'g2': 0.0,
             'x0': 0.0,
             'y0': 0.0,
-            'r_unit': u('pixels'),
+            'r_unit': u('pixel'),
             'v_unit': u('km/s'),
         })
 
@@ -272,14 +273,13 @@ def main():
         except Exception as e:
             print(f'Fitting failed for {name}; KID {kid}')
             print(f'Error: {e}')
-            import ipdb; ipdb.set_trace()
             print('Skipping')
             continue
 
         # import ipdb; ipdb.set_trace()
 
         fit_theta = result.x
-        fit_pars = theta2pars(fit_theta)
+        fit_pars = theta2pars(fit_theta, r_unit=u('pixel'), v_unit=u('km/s'))
         chi2 = result.cost / (np.sum(mask) - len(fit_theta))
         if vb is True:
             for key, val in fit_pars.items():

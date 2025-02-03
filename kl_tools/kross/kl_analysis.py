@@ -20,6 +20,10 @@ def parse_args():
         help='Unblind the KID of each source considered in the analysis'
     )
     parser.add_argument(
+        '-o', '--overwrite', action='store_true', default=False,
+        help='Overwrite existing sample files'
+    )
+    parser.add_argument(
         '-s', '--show', action='store_true',
         help='Show the plots'
         )
@@ -134,12 +138,16 @@ def main():
     kl_sample_file = args.kl_sample_file
     sini_max = args.sini_max
     unblind = args.unblind
+    overwrite = args.overwrite
     show = args.show
     zoom = args.zoom
 
     kross_dir = get_base_dir() / 'kl_tools/kross'
     plot_dir = kross_dir / 'plots/analysis'
+    sample_dir = kross_dir / 'sample'
+    out_dir = sample_dir / 'analysis'
     make_dir(plot_dir)
+    make_dir(out_dir)
 
     #---------------------------------------------------------------------------
     # define all selections
@@ -257,8 +265,13 @@ def main():
                             show=show
                             )
 
-    return
+                    # save the sample to disk
+                    sample.write(
+                        out_dir / f'sample_{combo}_{max_sini}_{quality}.fits',
+                        overwrite=overwrite
+                        )
 
+    return
 
 if __name__ == '__main__':
     main()

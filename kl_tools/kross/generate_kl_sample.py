@@ -78,16 +78,19 @@ def _setup_kl_tools_v2d(kids, name_map):
     t['kid'] = t_kids
 
     v2d = np.empty(len(kids))
+    sini = np.empty(len(kids))
     for indx, kid in enumerate(kids):
         if kid in t['kid']:
             i = np.where(t['kid'] == kid)[0]
             assert len(i) == 1
             i = i[0]
             v2d[indx] = t['vcirc'][i]
+            sini[indx] = t['sini'][i]
         else:
             v2d[indx] = np.nan
+            sini[indx] = np.nan
 
-    return v2d
+    return v2d, sini
 
 def main():
 
@@ -223,7 +226,8 @@ def main():
     eobs = (1. - np.sqrt(1. - boa**2)) / (1. + np.sqrt(1. - boa**2))
     # "observed" vcirc with beam smearing correction but *NOT* inclination 
     # correction
-    vcirc = vc * np.sin(np.deg2rad(theta_im)) 
+    kross_sini = np.sin(np.deg2rad(theta_im))
+    vcirc = vc * kross_sini
     # estimated error on 2D vcirc
     vcirc_err = (vc_err_h - vc_err_l) * np.sin(np.deg2rad(theta_im))
 
@@ -283,6 +287,7 @@ def main():
     table['ra'] = ra
     table['dec'] = dec
     table['z'] = z
+    table['kross_sini'] = kross_sini
     table['kross_v2d'] = vcirc
     table['kross_v2d_err'] = vcirc_err
     table['vc'] = vc
@@ -295,9 +300,12 @@ def main():
     table['log_mstar'] = log_mstar
 
     # grab our 2D velocity estimates, if available
-    our_vcirc = _setup_kl_tools_v2d(kid, name_map)
+    our_vcirc, our_sini = _setup_kl_tools_v2d(kid, name_map)
     if our_vcirc is not None:
         table['our_v2d'] = our_vcirc
+
+    table['our_vcirc'] = our_vcirc
+    table['our_sini'] = our_sini
 
     shears = {}
     if estimator == 'point':
@@ -340,6 +348,10 @@ def main():
             elif shear_name == 'map':
                 shear_args = (v2d, vtf, vcirc_err)
             sini = shear.estimate_sini(*shear_args)
+
+            # NOTE / TODO: TESTING, EVENTUALLY REMOVE!!
+            if shear_name == 'point':
+                sini = our_sini
 
             plt.hist(sini, bins=Nbins, ec='k')
             plt.xlabel(f'sini ({shear_name}, {vel_type})')

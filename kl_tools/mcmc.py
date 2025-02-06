@@ -308,7 +308,7 @@ class MCMCRunner(object):
 
         return
 
-    def set_burn_in(burn_in):
+    def set_burn_in(self, burn_in):
         self.burn_in = burn_in
 
         return

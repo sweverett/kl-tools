@@ -3,15 +3,15 @@
 #SBATCH --job-name=JWSTKL
 #SBATCH --output=/xdisk/timeifler/jiachuanxu/job_logs/JWSTKL-%A_%a.out
 #SBATCH --nodes=1
-#SBATCH --ntasks=30
+#SBATCH --ntasks=28
 #SBATCH --cpus-per-task=1
 
 ### >>> High priority purchase-in time
-#SBATCH --partition=high_priority
-#SBATCH --qos=user_qos_timeifler
+###SBATCH --partition=high_priority
+###SBATCH --qos=user_qos_timeifler
 ### >>> Qualified special project request
-###SBATCH --partition=standard
-###SBATCH --qos=qual_qos_timeifler
+#SBATCH --partition=standard
+#SBATCH --qos=qual_qos_timeifler
 
 #SBATCH --account=timeifler
 
@@ -29,8 +29,11 @@ source ~/.bashrc
 
 cd $SLURM_SUBMIT_DIR
 conda activate kltools
-
-/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.4/bin/mpirun -n ${SLURM_NTASKS} --mca btl tcp,self python test_jwst_mcmc_run.py ../yaml/example_jwst.yaml --mpi
+#MPIRUN=/opt/ohpc/pub/mpi/openmpi5-gnu13/5.0.5/bin/mpirun
+MPIRUN=/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.4/bin/mpirun
+MPI_PML="--mca pml ob1"
+MPI_BTL="--mca btl tcp,self"
+${MPIRUN} -n ${SLURM_NTASKS} ${MPI_BTL} python test_jwst_mcmc_run.py ../yaml/example_jwst.yaml --mpi
 
 
 

@@ -117,7 +117,7 @@ params:
       # loc: 300.0
       # scale: 0.06
       min: 200
-      max: 500
+      max: 700
     ref:
       dist: norm
       loc: 300.0
@@ -187,6 +187,17 @@ params:
       scale: 0.01
       proposal: 1.0e-4
     latex: R_h^{Pa\alpha}
+  em_PaA_sigma:
+    prior:
+      min: 0.065
+      max: 6.5
+    ref:
+      dist: norm
+      loc: 0.65
+      scale: 0.01
+      proposal: 1.0e-4
+#    value: 0.65
+    latex: \sigma_{Pa\alpha}
   # cont_PaA_hlr:
   #   prior:
   #     min: 0.01
@@ -285,7 +296,7 @@ meta:
     #obs_cont_norm_flam: param
     obs_cont_norm_flam: 0.0
     em_PaA_flux: param
-    em_PaA_sigma: 0.65
+    em_PaA_sigma: param # 0.65
 
   obs_conf:
     - INSTNAME: JWST

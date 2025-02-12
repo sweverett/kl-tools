@@ -489,9 +489,13 @@ class DataCube(DataVector):
         valid_maps = ['weights', 'masks']
         if map_type not in valid_maps:
             raise ValueError(f'map_type must be in {valid_maps}!')
+        if map_type == 'weights':
+            dtype = float
+        elif map_type == 'masks':
+            dtype = bool
 
         # base array that will be filled
-        stored_maps = np.ones(self.shape)
+        stored_maps = np.ones(self.shape, dtype=dtype)
 
         if isinstance(maps, (int, float)):
             # set all maps to constant value
@@ -506,7 +510,7 @@ class DataCube(DataVector):
                         for i in range(self.Nspec):
                             stored_maps[i] = maps
                     else:
-                        raise ValueError('Passed {map_type} map has shape ' +\
+                        raise ValueError(f'Passed {map_type} map has shape ' +\
                                          f'{maps.shape} but datacube shape ' +\
                                          f'is {self.shape}!')
 
@@ -545,25 +549,37 @@ class DataCube(DataVector):
 
     def set_masks(self, masks):
         '''
-        mask: float, list, np.ndarray
+        Set the 3D or 2D mask maps for the datacube. If a 2D mask is passed,
+        it will be applied to all slices.
 
-        see _set_maps()
+        NOTE: We use the convention that a pixel is masked if the mask is True
+        for the pixel. That means selections should be done with data[~mask]
+
+        See _set_maps()
+
+        masks: np.ndarray[bool]; 2D or 3D
         '''
 
         self._set_maps(masks, 'masks')
 
         return
 
-    def get_2d_mask(self) -> np.ndarray:
+    def get_2d_mask(self, method='sum') -> np.ndarray:
         '''
         Generate a 2D mask using the masks across all wavelengths
+
+        method: str
+            The method to use to combine the masks. Currently only 'sum'
+            is implemented, which flags any pixel that is masked in any
+            slice
         '''
 
-        # for now, just select on the sum of mask entries. Subclasses can overload to handle more complex cases
-
-        mask_sum = np.sum(self.masks, axis=0)
-        mask = np.zeros(mask_sum.shape, dtype=bool)
-        mask[mask_sum > 0] = True
+        if method == 'sum':
+            mask_sum = np.sum(self.masks, axis=0)
+            mask = np.zeros(mask_sum.shape, dtype=bool)
+            mask[mask_sum > 0] = True
+        else:
+            raise ValueError(f'Method {method} not implemented!')
 
         return mask
 
@@ -760,18 +776,16 @@ class DataCube(DataVector):
             }
             return (args, kwargs)
 
-    def truncate(self, blue_cut, red_cut, lambda_unit=None, cut_type='edge',
+    def truncate(self, blue_cut, red_cut, cut_type='edge',
                  trunc_type='in-place'):
         '''
         Modify existing datacube to only hold slices between blue_cut
         and red_cut using either the lambda on a slice center or edge
 
-        blue_cut: float
+        blue_cut: astropy.Quantity
             Blue-end wavelength for datacube truncation
-        red_cut: float
+        red_cut: astrpy.Quantity
             Red-end wavelength for datacube truncation
-        lambda_unit: astropy.Unit
-            The unit of the passed wavelength limits
         cut_type: str
             The type of truncation applied ['edge' or 'center']
         trunc_type: str
@@ -782,12 +796,16 @@ class DataCube(DataVector):
         '''
 
         for l in [blue_cut, red_cut]:
-            if (not isinstance(l, float)) and (not isinstance(l, int)):
-                raise ValueError('Truncation wavelengths must be ints or ' +\
-                                 'floats!')
+            if (not isinstance(l, u.Quantity)):
+                raise TypeError(
+                    'Truncation wavelengths must be astropy Quantities!'
+                )
 
-        if (blue_cut >= red_cut):
+        if (blue_cut.value >= red_cut.value):
             raise ValueError('blue_cut must be less than red_cut!')
+
+        if blue_cut.unit != red_cut.unit:
+            raise ValueError('blue_cut and red_cut must have the same units!')
 
         if cut_type not in ['edge', 'center']:
             raise ValueError('cut_type can only be at the edge or center!')
@@ -797,25 +815,24 @@ class DataCube(DataVector):
 
         # make sure we get a correct comparison between possible
         # unit differences
-        lu = self.lambda_unit
-
-        if lambda_unit is None:
-            lambda_unit = self.lambda_unit
-        blue_cut *= lambda_unit
-        red_cut *= lambda_unit
+        lu_cube = self.lambda_unit
 
         if cut_type == 'center':
             # truncate on slice center lambda value
-            lambda_means = np.mean(self.lambdas, axis=1)
+            lambda_means = np.mean(self.lambdas, axis=1) * lu_cube
 
-            cut = (lu*lambda_means >= blue_cut) & (lu*lambda_means <= red_cut)
+            cut = (lambda_means >= blue_cut) & (lambda_means <= red_cut)
 
         else:
             # truncate on slice lambda edge values
-            lambda_blues = np.array([self.lambdas[i][0] for i in range(self.Nspec)])
-            lambda_reds  = np.array([self.lambdas[i][1] for i in range(self.Nspec)])
+            lambda_blues = np.array(
+                [self.lambdas[i][0] for i in range(self.Nspec)]
+                ) * lu_cube
+            lambda_reds = np.array(
+                [self.lambdas[i][1] for i in range(self.Nspec)]
+                ) * lu_cube
 
-            cut = (lu*lambda_blues >= blue_cut) & (lu*lambda_reds  <= red_cut)
+            cut = (lambda_blues >= blue_cut) & (lambda_reds  <= red_cut)
 
         # NOTE: could either update attributes or return new DataCube
         # For base DataCube's, simplest to use constructor to build
@@ -828,9 +845,9 @@ class DataCube(DataVector):
         trunc_pars = self.pars.copy() # is a deep copy
 
         # Have to do it this way as lists cannot be indexed by np arrays
-        trunc_pars['bandpasses'] = [self.bandpasses[i]
-                                   for i in range(self.Nspec)
-                                   if cut[i] == True]
+        trunc_pars['bandpasses'] = [
+            self.bandpasses[i] for i in range(self.Nspec) if cut[i] == True
+            ]
         self.pars._bandpasses = None # Force CubePars to remake bandpass list
 
         # Reset any attributes set during initialization
@@ -882,7 +899,9 @@ class DataCube(DataVector):
 
         return
 
-    def plot_slice(self, slice_index, plot_kwargs):
+    def plot_slice(self, slice_index, plot_kwargs=None):
+        if plot_kwargs is None:
+            plot_kwargs = {}
         self.slices[slice_index].plot(**plot_kwargs)
 
         return
@@ -932,7 +951,16 @@ class DataCube(DataVector):
 
         return
 
-    def plot(self, show=True, outfile=None, size=None, title=None, imshow_kwargs={}, max_cols=12):
+    def plot(
+            self,
+            show=True,
+            outfile=None,
+            size=None,
+            mask=True,
+            title=None,
+            imshow_kwargs={},
+            max_cols=12,
+            ):
         '''
         Plot the mock observation; both the stack and individual channels
 
@@ -942,6 +970,8 @@ class DataCube(DataVector):
             Set to a filename to save the plot
         size: tuple
             The size of the figure in inches
+        mask: bool; default=False
+            Set to True to set masked regions to NaN
         title: str
             The title of the figure
         imshow_kwargs: dict
@@ -974,13 +1004,22 @@ class DataCube(DataVector):
                 ax = axes[row, col]
 
             # first, the stacked image
+            stack = self.stack()
+            if mask is True:
+                stack[self.get_2d_mask()] = np.nan
+
             if i == 0:
-                im = ax.imshow(self.stack(), **imshow_kwargs, origin='lower')
+                im = ax.imshow(stack, **imshow_kwargs, origin='lower')
                 ax.set_title('Stacked image')
                 utils.add_colorbar(im)
+
             # next, the slice plots
             elif i < nplots:
-                im = ax.imshow(self._data[i-1,:,:], **imshow_kwargs, origin='lower')
+                slice = self._data[i-1,:,:]
+                if mask is True:
+                    msk = self.masks[i-1,:,:]
+                    slice[msk] = np.nan
+                im = ax.imshow(slice, **imshow_kwargs, origin='lower')
                 li, le = self.lambdas[i-1][0], self.lambdas[i-1][1]
                 # ax.set_title(rf'$S_{i}$: ({le:.2f}, {le:.2f}) {unit}')
                 ax.set_title(f'Slice {i}')
@@ -990,7 +1029,7 @@ class DataCube(DataVector):
                 ax.axis('off')
 
         if title is not None:
-            plt.title(title)
+            plt.suptitle(title)
         else:
             li, le = self.lambdas[0][0], self.lambdas[-1][1]
             plt.suptitle(f'DataCube; {li:.2f} {unit} < ' +\
@@ -1056,8 +1095,9 @@ class Slice(object):
         else:
             li, le = self.blue_limit, self.red_limit
             unit = self.lambda_unit
-            plt.title(f'DataCube Slice; {li} {unit} < ' +\
-                      f'lambda < {le} {unit}')
+            plt.title(
+                f'DataCube Slice;\n{li:.2f} < '
+                f'lambda < {le:.2f} {unit}')
 
         plt.gcf().set_size_inches(size, size)
 

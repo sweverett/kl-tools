@@ -18,8 +18,6 @@ import kl_tools.utils as utils
 from kl_tools.cube import DataCube, CubePars
 from kl_tools.emission import EmissionLine, LINE_LAMBDAS
 
-import ipdb
-
 parser = ArgumentParser()
 
 parser.add_argument('--show', action='store_true', default=False,

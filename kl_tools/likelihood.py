@@ -1,30 +1,14 @@
 from abc import abstractmethod
 import numpy as np
-import os
 from copy import deepcopy
-from time import time
-from scipy.interpolate import interp1d
-import scipy
 from astropy.units import Unit
-from argparse import ArgumentParser
 import galsim as gs
-from galsim.angle import Angle, radians
-import matplotlib.pyplot as plt
-from numba import njit
 
 import kl_tools.utils as utils
-import kl_tools.priors as priors
 import kl_tools.intensity as intensity
-from kl_tools.parameters import Pars, MetaPars
+from kl_tools.parameters import Pars
 from kl_tools.velocity import VelocityMap
 from kl_tools.cube import DataVector, DataCube
-
-parser = ArgumentParser()
-
-parser.add_argument('--show', action='store_true', default=False,
-                    help='Set to show test plots')
-parser.add_argument('--test', action='store_true', default=False,
-                    help='Set to run tests')
 
 class LogBase(object):
     '''
@@ -465,6 +449,7 @@ class DataCubeLikelihood(LogLikelihood):
 
         Nspec = datacube.Nspec
         Nx, Ny = datacube.Nx, datacube.Ny
+        masks = datacube.masks # a list of masks for each slice
 
         # a (Nspec, Nx*Ny, Nx*Ny) inverse covariance matrix for the image pixels
         inv_cov = self._setup_inv_cov_list(datacube)
@@ -475,7 +460,13 @@ class DataCubeLikelihood(LogLikelihood):
         # will be fast enough with numba anyway
         for i in range(Nspec):
 
-            diff = (datacube.data[i] - model.data[i]).reshape(Nx*Ny)
+            msk = masks[i,:,:]
+            # ...
+
+
+            diff = (
+                datacube.data[i] - model.data[i]
+                ).reshape(Nx*Ny)
             chi2 = diff.T.dot(inv_cov[i].dot(diff))
 
             loglike += -0.5*chi2
@@ -811,88 +802,3 @@ def build_likelihood_model(name, parameters, datavector):
         raise ValueError(f'{name} is not a registered likelihood model!')
 
     return likelihood
-
-def main(args):
-
-    show = args.show
-
-    outdir = os.path.join(utils.TEST_DIR, 'likelihood')
-    utils.make_dir(outdir)
-
-    true_pars = {
-        'g1': 0.1,
-        'g2': 0.2,
-        'sini': 0.75,
-        'theta_int': np.pi / 3,
-        'v0': 10,
-        'vcirc': 200,
-        'rscale': 5,
-    }
-
-    mcmc_pars = {
-        'units': {
-            'v_unit': Unit('km / s'),
-            'r_unit': Unit('kpc'),
-        },
-        'priors': {
-            'g1': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-            'g2': priors.GaussPrior(0., 0.1, clip_sigmas=2),
-            'theta_int': priors.UniformPrior(0., np.pi),
-            'sini': priors.UniformPrior(0., 1.),
-            'v0': priors.UniformPrior(0, 20),
-            'vcirc': priors.GaussPrior(200, 20, clip_sigmas=3),
-            'rscale': priors.UniformPrior(0, 10),
-        },
-        'intensity': {
-            # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 3.8e4, # counts
-            'hlr': 3.5,
-        },
-        'velocity': {
-            'model': 'centered'
-        },
-        'run_options': {
-            'use_numba': False,
-            }
-    }
-
-    # create dummy datacube for tests
-    data = np.zeros((100,10,10))
-    pix_scale = 1
-    bandpasses = [gs.Bandpass(
-        1., 'A', blue_limit=1e4, red_limit=2e4)
-                  for i in range(100)
-                  ]
-    datacube = DataCube(
-        data, pix_scale=pix_scale, bandpasses=bandpasses
-        )
-
-    datacube.set_psf(gs.Gaussian(fwhm=0.8, flux=1.))
-
-    sampled_pars = list(true_pars)
-    pars = Pars(sampled_pars, mcmc_pars)
-    pars_order = pars.sampled.pars_order
-
-    print('Creating LogPosterior object w/ default likelihood')
-    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
-
-    print('Creating LogPosterior object w/ datacube likelihood')
-    log_posterior = LogPosterior(pars, datacube, likelihood='datacube')
-
-    print('Calling Logposterior w/ random theta')
-    theta = np.random.rand(len(sampled_pars))
-
-    return 0
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-
-    if args.test is True:
-        print('Starting tests')
-        rc = main(args)
-
-        if rc == 0:
-            print('All tests ran succesfully')
-        else:
-            print(f'Tests failed with return code of {rc}')

@@ -1015,7 +1015,7 @@ class DataCube(DataVector):
 
             # next, the slice plots
             elif i < nplots:
-                slice = self._data[i-1,:,:]
+                slice = self._data[i-1,:,:].copy()
                 if mask is True:
                     msk = self.masks[i-1,:,:]
                     slice[msk] = np.nan
@@ -1080,8 +1080,15 @@ class Slice(object):
 
         return self._data
 
-    def plot(self, show=True, close=True, outfile=None, size=9, title=None,
-             imshow_kwargs=None):
+    def plot(
+            self,
+            show=True,
+            close=True,
+            outfile=None,
+            size=9,
+            title=None,
+            imshow_kwargs=None
+            ):
 
         if imshow_kwargs is None:
             im = plt.imshow(self._data)

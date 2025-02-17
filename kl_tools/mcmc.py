@@ -14,10 +14,10 @@ import zeus
 import emcee
 #import pocomc as pc
 
-import utils
-import priors
-from likelihood import DataCubeLikelihood
-from velocity import VelocityMap
+import kl_tools.utils as utils
+import kl_tools.priors as priors
+from kl_tools.likelihood import DataCubeLikelihood
+from kl_tools.velocity import VelocityMap
 
 import ipdb
 

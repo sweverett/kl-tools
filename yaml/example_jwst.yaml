@@ -5,7 +5,7 @@ mcmc:
   nsteps: 30000
   monitor_autocorr: True
   objid: 181661
-
+  output: /Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/chains/jwst/test_run
 
 # (Might be) sampled parameters in simulation
 params:

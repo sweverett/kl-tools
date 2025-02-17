@@ -31,16 +31,15 @@ import zeus
 import astropy.io.fits as fits
 import astropy.units as u
 
-import utils
-from mcmc import KLensZeusRunner, KLensEmceeRunner
-import priors
-from muse import MuseDataCube
-import likelihood
-from parameters import Pars
-from emission import LINE_LAMBDAS
-from likelihood import LogPosterior, GrismLikelihood
-from velocity import VelocityMap
-from grism import GrismDataVector
+import kl_tools.utils as utils
+from kl_tools.mcmc import KLensZeusRunner, KLensEmceeRunner
+import kl_tools.priors as priors
+import kl_tools.likelihood as likelihood
+from kl_tools.parameters import Pars
+from kl_tools.emission import LINE_LAMBDAS
+from kl_tools.likelihood import LogPosterior, GrismLikelihood
+from kl_tools.velocity import VelocityMap
+from kl_tools.grism_modules.grism import GrismDataVector
 
 import ipdb
 
@@ -96,7 +95,7 @@ def main(args):
     if rank==0:
         print("Reading JWST observation ID-%d"%(objID))
     data_hdul = fits.open(data_file)
-    
+
     ''' read important information from fits file and overwrite YAML file
     Information to be overwrite
         - redshift
@@ -104,7 +103,7 @@ def main(args):
         - image flux
         - emission line flux
         - continuum flux?
-        - 
+        -
     '''
     eml_name = data_hdul[0].header["name_line_exp"] # emission line name
     src_z = data_hdul[0].header["fit_center_um"]*u.um/LINE_LAMBDAS[eml_name]-1
@@ -114,9 +113,9 @@ def main(args):
 
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
-    ### Loading data vector 
-    data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
-    #data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
+    ### Loading data vector
+    #data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
+    data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
     datafile = data_root + "data_compile_short_withmask_GDS_ID%d_emlonly_test.fits"%(objID)
     datavector = GrismDataVector(file=datafile)
 
@@ -200,6 +199,8 @@ def main(args):
         print(f'Pickling runner to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
+
+    #runner.sampler.
 
     return 0
 

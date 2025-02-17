@@ -12,9 +12,8 @@ import astropy.constants as const
 import astropy.units as units
 from scipy.special import eval_hermitenorm, genlaguerre, factorial, gamma
 
-import utils
-import likelihood
-from transformation import transform_coords
+import kl_tools.utils as utils
+from kl_tools.transformation import transform_coords
 
 import ipdb
 
@@ -944,7 +943,7 @@ class ShapeletBasis(Basis):
 #         pix_scale = datacube.pix_scale
 
 #     # if bmin is None:
-#     #     bmin = 
+#     #     bmin =
 
 #     bounds = {'bmin':bmin, 'bmax':bmax}
 #     for name, val in bounds.items():

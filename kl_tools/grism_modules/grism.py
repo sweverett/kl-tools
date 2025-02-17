@@ -17,15 +17,27 @@ import astropy.units as u
 import astropy.constants as constants
 from argparse import ArgumentParser
 from time import time
-#from mpi4py import MPI
+try:
+    import mpi4py
+    from mpi4py import MPI
+except:
+    print("Can not import MPI, use single process")
+try:
+    comm = MPI.COMM_WORLD
+    size = comm.Get_size()
+    rank = comm.Get_rank()
+except:
+    rank = 0
+    size = 1
+
 
 sys.path.insert(0, '../')
-import utils as utils
-import parameters
+import kl_tools.utils as utils
+import kl_tools.parameters as parameters
 #from cube import CubePars
-import emission
+import kl_tools.emission as emission
 import kltools_grism_module_2 as m
-from datavector import DataVector
+from kl_tools.datavector import DataVector
 
 try:
     import mpi4py
@@ -64,7 +76,7 @@ class GrismPars(parameters.CubePars):
         =======
         pars: dict obj
             Dictionary of meta pars for `GrismCube`. Note that this dict has
-            different convention than the parent class `cube.CubePars`. The 
+            different convention than the parent class `cube.CubePars`. The
             initialization step will translate the dictionary.
 
             An example structure of pars dict:
@@ -117,19 +129,20 @@ class GrismPars(parameters.CubePars):
         if obs_conf is None and _pars.get('obs_conf', None) is None:
             raise ValueError('Observation configuration is not set!')
         if obs_conf is not None:
-            print(f'GrismPars: Overwrite the observation configuration')
+            if rank==0:
+                print(f'GrismPars: Overwrite the observation configuration')
             utils.check_type(obs_conf, 'obs_conf', dict)
             _pars['obs_conf'] = deepcopy(obs_conf)
         self.is_dispersed = (_pars['obs_conf']['OBSTYPE'] == 2)
-        # tweak the pars dict such that it fits into `cube.CubePars` required 
+        # tweak the pars dict such that it fits into `cube.CubePars` required
         # fields
         # need to check whether the fields of `cube.CubePars` are consistent
         # across branches
         _lrange = _pars['model_dimension']['lambda_range'][0]
         _Nlam = (_lrange[1]-_lrange[0])/_pars['model_dimension']['lambda_res']
         _Nlam = np.ceil(_Nlam)
-        _pars['shape'] = np.array([_Nlam, 
-                         _pars['model_dimension']['Ny'], 
+        _pars['shape'] = np.array([_Nlam,
+                         _pars['model_dimension']['Ny'],
                          _pars['model_dimension']['Nx']], dtype=int)
         _pars['pix_scale'] = _pars['model_dimension']['scale']
         _pars['bandpasses'] = {
@@ -155,7 +168,7 @@ class GrismPars(parameters.CubePars):
 
         return
 
-    # quick approach to the `obs_conf` observation configuration (1 obs) 
+    # quick approach to the `obs_conf` observation configuration (1 obs)
     @property
     def conf(self):
         return self.pars['obs_conf']
@@ -171,9 +184,9 @@ class GrismPars(parameters.CubePars):
 
 class GrismModelCube(DataVector):
     ''' The most updated `GrismModelCube` implementation
-    This class wraps the theoretical cube after it is generated to produce 
+    This class wraps the theoretical cube after it is generated to produce
     simulated images.
-    It will use the latest C++ interface while process the theoretical cube 
+    It will use the latest C++ interface while process the theoretical cube
     on-the-fly
     '''
     def __init__(self, Gpars):
@@ -181,7 +194,7 @@ class GrismModelCube(DataVector):
         '''
         self.pars = Gpars
         return
-        
+
     @property
     def bp_array(self):
         return self.pars.bp_array
@@ -204,7 +217,7 @@ class GrismModelCube(DataVector):
             - force_noise_free: boolean
                 Flag to skip noise evaluation. Set to True to completely ignore
             - datavector: DataVector derived object
-                DataVector object for PSF from data, 
+                DataVector object for PSF from data,
             - gal_phot: gs.GSObject derived class
                 GalSim surface brightness object for photometry image
         '''
@@ -217,18 +230,18 @@ class GrismModelCube(DataVector):
         ### Get dispersed grism image
         if self.pars.is_dispersed:
             # prepare datacube and output, z-y-x indexing
-            img_array = np.ones([self.conf['NAXIS2'], self.conf['NAXIS1']], 
+            img_array = np.ones([self.conf['NAXIS2'], self.conf['NAXIS1']],
                                 dtype=np.float64, order='C')
-            m.get_image(self.conf['OBSINDEX'], kwargs["theory_cube"], 
+            m.get_image(self.conf['OBSINDEX'], kwargs["theory_cube"],
                 img_array, self.lambdas, self.bp_array)
-            img = gs.Image(img_array, dtype = np.float64, 
+            img = gs.Image(img_array, dtype = np.float64,
                 scale=self.conf['PIXSCALE'],)
             # apply PSF to the dispersed grism image
             if psf is not None:
                 try:
                     _gal = gs.InterpolatedImage(img,scale=self.conf['PIXSCALE'])
                     gal = gs.Convolve([_gal, psf])
-                    img = gal.drawImage(nx=self.conf['NAXIS1'], 
+                    img = gal.drawImage(nx=self.conf['NAXIS1'],
                         ny=self.conf['NAXIS2'], scale=self.conf['PIXSCALE'])
                 except gs.errors.GalSimValueError:
                     _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
@@ -238,7 +251,7 @@ class GrismModelCube(DataVector):
         else:
             gal = gs.Convolve([kwargs["gal_phot"], psf])
             try:
-                img = gal.drawImage(nx=self.conf['NAXIS1'], 
+                img = gal.drawImage(nx=self.conf['NAXIS1'],
                     ny=self.conf['NAXIS2'], scale=self.conf["PIXSCALE"])
             except gs.errors.GalSimFFTSizeError:
                 _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
@@ -250,19 +263,19 @@ class GrismModelCube(DataVector):
         # axes[1].imshow(theory_cube.sum(axis=0))
         # axes[2].imshow(theory_cube.sum(axis=1))
         # plt.show()
-        
-        
+
+
         # if psf is not None:
         #     try:
         #         _gal = gs.InterpolatedImage(img, scale=self.conf['PIXSCALE'])
         #         gal = gs.Convolve([_gal, psf])
-        #         img = gal.drawImage(nx=self.conf['NAXIS1'], 
+        #         img = gal.drawImage(nx=self.conf['NAXIS1'],
         #             ny=self.conf['NAXIS2'], scale=self.conf['PIXSCALE'])
         #     except gs.errors.GalSimValueError:
         #         _ary_ = np.zeros([self.conf['NAXIS2'], self.conf['NAXIS1']])
         #         _ary_[:,:] = np.inf
         #         img = gal.Image(_ary_)
-        
+
         #print("----- disperse image | %.2f ms -----" % (time()*1000 - start_time))
 
         ### apply noise
@@ -306,7 +319,7 @@ class GrismModelCube(DataVector):
                                 scale_unit=scale_unit)
             elif _type == 'airy_mean':
                 scale_unit = kwargs.get('scale_unit', gs.arcsec)
-                #return gs.Airy(config['psf_fwhm']/1.028993969962188, 
+                #return gs.Airy(config['psf_fwhm']/1.028993969962188,
                 #               scale_unit=scale_unit)
                 lam = kwargs.get("lam_mean", 1000) # nm
                 return gs.Airy(lam=lam, diam=config['DIAMETER']/100,
@@ -342,8 +355,8 @@ class GrismModelCube(DataVector):
             read_noise = config.get('RDNOISE', 8.5)
             gain = config.get('GAIN', 1.0)
             exp_time = config.get('EXPTIME', 1.0)
-            noise = gs.CCDNoise(rng=rng, gain=gain, 
-                                read_noise=read_noise, 
+            noise = gs.CCDNoise(rng=rng, gain=gain,
+                                read_noise=read_noise,
                                 sky_level=sky_level*exp_time/gain)
         elif _type == 'gauss':
             sigma = config.get('NOISESIG', 1.0)
@@ -357,7 +370,7 @@ class GrismModelCube(DataVector):
 
 class GrismDataVector(DataVector):
     '''
-    Class that defines grism data set, which generally has multiple grism and 
+    Class that defines grism data set, which generally has multiple grism and
     broadband image files.
 
     The data structure of this class is
@@ -406,7 +419,7 @@ class GrismDataVector(DataVector):
             - PSFFWHM : FWHM of the PSF model
             - RSPEC   : spectral resolution
             - DISPANG : dispersion angle in rad
-            - OFFSET  : offset of the dispersed frame center to the 
+            - OFFSET  : offset of the dispersed frame center to the
                         pointing center
     '''
     _default_header = {'NEXTEN': 6, 'OBSNUM': 3}
@@ -454,11 +467,11 @@ class GrismDataVector(DataVector):
         "OFFSET"  : 0.0,
     }
     _required_keys = ["OBSTYPE", "INSTNAME", "BANDPASS", "NAXIS", "NAXIS1",
-        "NAXIS2", "PIXSCALE", "DIAMETER", "EXPTIME", "GAIN", "NOISETYP", 
+        "NAXIS2", "PIXSCALE", "DIAMETER", "EXPTIME", "GAIN", "NOISETYP",
         "SKYLEVEL", "RDNOISE", "ADDNOISE", "PSFTYPE", "PSFFWHM", "RSPEC",
         "DISPANG", "OFFSET"]
 
-    def __init__(self, 
+    def __init__(self,
         file=None,
         header = None, data_header = None, data = None, noise = None,
         ):
@@ -468,7 +481,8 @@ class GrismDataVector(DataVector):
         '''
         if file is not None:
             if header!=None or data!=None or data_header!=None or noise!=None:
-                print("header, data, data_header and noise can't be set when file is set!")
+                if rank==0:
+                    print("header, data, data_header and noise can't be set when file is set!")
                 exit(-1)
             else:
                 self.from_fits(file)
@@ -511,11 +525,13 @@ class GrismDataVector(DataVector):
     def from_fits(self, file=None):
         ''' Read `GrismDataVector` from a fits file
         '''
-        print(f'Reading dataset from {file}...')
+        if rank==0:
+            print(f'Reading dataset from {file}...')
         hdul = fits.open(file)
         self.header = hdul[0].header
         self.Nobs = self.header['OBSNUM']
-        print(f'Find {self.Nobs} observations')
+        if rank==0:
+            print(f'Find {self.Nobs} observations')
         # collect image, noise, PSF, and mask (PSF and mask are optional)
         self.data = []
         self.data_header = []
@@ -541,7 +557,7 @@ class GrismDataVector(DataVector):
             # self.data.append(hdul[1+2*i].data)
             # self.data_header.append(hdul[1+2*i].header)
             # self.noise.append(hdul[2+2*i].data)
-            
+
         hdul.close()
 
     def to_fits(self, file, overwrite=False):
@@ -555,7 +571,7 @@ class GrismDataVector(DataVector):
             hdu_list.append(fits.ImageHDU(self.data[i], name="IMAGE%d"%(i+1)),
                 header=fits.Header(self.data_header[i]))
             hdu_primary.header["NOISE%d"%(i+1)] = "NOISE%d"%(i+1)
-            hdu_list.append(fits.ImageHDU(self.noise[i], name="NOISE%d"%(i+1)), 
+            hdu_list.append(fits.ImageHDU(self.noise[i], name="NOISE%d"%(i+1)),
                 header=fits.Header(self.data_header[i]))
             # Optional: PSF and mask
             if self.PSF[i] is not None:
@@ -582,7 +598,7 @@ class GrismDataVector(DataVector):
         The output of this function can be passed to `GrismModelCube:observe`
         method to generate realistic grism/photometry images.
 
-        Note that so far this would only be a wrapper of data_header, but 
+        Note that so far this would only be a wrapper of data_header, but
         in the future we can add more realistic attributes.
         '''
         _h = deepcopy(self.data_header[idx])
@@ -608,7 +624,7 @@ class GrismDataVector(DataVector):
 #     This class describe the obs-frame SED template of a source galaxy, includ-
 #     ing emission lines and continuum components.
 #     This is mostly a wrapper of the galsim.SED class object
-    
+
 #     Note that this class should only capture the intrinsic properties of
 #     the galaxy SED, like
 #         - redshift
@@ -655,7 +671,7 @@ class GrismDataVector(DataVector):
 #     _c = constants.c.to('nm/s').value
 #     # build-in emission line species and info
 #     _valid_lines = {k:v.to('nm').value for k,v in emission.LINE_LAMBDAS.items()}
-    
+
 #     def __init__(self, pars):
 #         '''
 #         Initialize SED class object with parameters dictionary
@@ -669,15 +685,15 @@ class GrismDataVector(DataVector):
 #         if self.pars['thin'] > 0:
 #             self.spectrum = self.spectrum.thin(rel_err=self.pars['thin'])
 #         super(GrismSED, self).__init__(
-#             self.pars['spectral_range'][0], self.pars['spectral_range'][1], 
+#             self.pars['spectral_range'][0], self.pars['spectral_range'][1],
 #             3000, 'nm')
 
 #     def __call__(self, wave):
 #         if isinstance(wave, u.Quantity):
 #             wave = wave.to(self.spectrum.wave_type).value
 #         return self.spectrum(wave)
-        
-        
+
+
 #     def updatePars(self, pars):
 #         '''
 #         Update parameters
@@ -695,8 +711,8 @@ class GrismDataVector(DataVector):
 #         # build GalSim SED object out of template file
 #         _template = np.genfromtxt(template)
 #         _table = gs.LookupTable(x=_template[:,0], f=_template[:,1],)
-#         SED = gs.SED(_table, 
-#                          wave_type=self.pars['wave_type'], 
+#         SED = gs.SED(_table,
+#                          wave_type=self.pars['wave_type'],
 #                          flux_type=self.pars['flux_type'],
 #                          redshift=self.pars['z'],
 #                          _blue_limit=self.pars['spectral_range'][0],
@@ -706,16 +722,16 @@ class GrismDataVector(DataVector):
 #         # TODO: add more flexible normalization parametrization
 #         norm = self.pars['obs_cont_norm'][1]*self.pars['obs_cont_norm'][0]/\
 #             (GrismSED._h*GrismSED._c)
-#         return SED.withFluxDensity(target_flux_density=norm, 
+#         return SED.withFluxDensity(target_flux_density=norm,
 #                                    wavelength=self.pars['obs_cont_norm'][0])
-    
+
 #     def _addEmissionLines(self):
 #         '''
 #         Build and return Gaussian emission lines GalSim SED object
 #         '''
 #         # init LookupTable for rest-frame SED
 #         lam_grid = np.arange(self.pars['spectral_range'][0]/(1+self.pars['z']),
-#                              self.pars['spectral_range'][1]/(1+self.pars['z']), 
+#                              self.pars['spectral_range'][1]/(1+self.pars['z']),
 #                              0.1)
 #         flux_grid = np.zeros(lam_grid.size)
 #         # Set emission lines: (specie, observer frame flux)
@@ -746,14 +762,14 @@ class GrismDataVector(DataVector):
 #                     norm_lam = cen*(1+self.pars['z'])
 #                     norm = flux[i]*norm_lam/(GrismSED._h*GrismSED._c)/\
 #                                 np.sqrt(2*np.pi*_lw_sq*(1+self.pars['z'])**2)
-            
+
 #         _table = gs.LookupTable(x=lam_grid, f=flux_grid,)
 #         SED = gs.SED(_table,
 #                          wave_type='nm',
 #                          flux_type='flambda',
 #                          redshift=self.pars['z'],)
 #         # normalize to observer-frame flux
-#         SED = SED.withFluxDensity(target_flux_density=norm, 
+#         SED = SED.withFluxDensity(target_flux_density=norm,
 #                                   wavelength=norm_lam)
 #         return SED
 
@@ -761,7 +777,7 @@ class GrismDataVector(DataVector):
 
 def initialize_observations(Nobs, pars_list, datavector=None, overwrite=False):
     ''' Initialize the C++ simulated observation routines
-    This will inform the C++ library about the info of each observation and 
+    This will inform the C++ library about the info of each observation and
     the data vector. Both header info and data images array are saved in C++
 
     Inputs:
@@ -769,11 +785,11 @@ def initialize_observations(Nobs, pars_list, datavector=None, overwrite=False):
     - Nobs: int
         Number of observations
     - pars_list: list of `GrismPars` object
-        The `GrismPars` object associated with each observation. C++ routines 
+        The `GrismPars` object associated with each observation. C++ routines
         will be initialized by the parameters therein.
     - datavector: `GrismDataVector` object
         Optional. Default is `None`. If set, the C++ routines will be
-        initialized with the data vector (observed images) given in the data 
+        initialized with the data vector (observed images) given in the data
         vector. Otherwise, set with empty arrays.
     '''
     assert Nobs==len(pars_list), f'pars_list has {len(pars_list)} elements,'+\
@@ -783,7 +799,8 @@ def initialize_observations(Nobs, pars_list, datavector=None, overwrite=False):
         f'{Nobs} observations but has {datavector.Nobs}!'
     if((Nobs != m.get_Nobs()) or overwrite):
         if(m.get_Nobs() > 0):
-            print(f'cleaning up {m.get_Nobs()} observations')
+            if rank==0:
+                print(f'cleaning up {m.get_Nobs()} observations')
             m.clear_observation()
         for i in range(Nobs):
             pars = pars_list[i]

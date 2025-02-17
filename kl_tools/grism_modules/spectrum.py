@@ -7,16 +7,16 @@ import sys
 import galsim
 
 sys.path.insert(0, '../')
-import parameters as parameters
-import emission as emission
-from emission import LINE_LAMBDAS
+import kl_tools.parameters as parameters
+import kl_tools.emission as emission
+from kl_tools.emission import LINE_LAMBDAS
 
 class Spectrum(emission.SED):
     '''
     This class describe the obs-frame SED template of a source galaxy, includ-
     ing emission lines and continuum components.
     This is mostly a wrapper of the galsim.SED class object
-    
+
     Note that this class should only capture the intrinsic properties of
     the galaxy SED, like
         - redshift
@@ -57,7 +57,7 @@ class Spectrum(emission.SED):
     _c = constants.c.to('nm/s').value
     # build-in emission line species and info
     _valid_lines = {k:v.to('nm').value for k,v in LINE_LAMBDAS.items()}
-    
+
     def __init__(self, pars):
         '''
         Initialize SED class object with parameters dictionary
@@ -71,7 +71,7 @@ class Spectrum(emission.SED):
             self.spectrum = self.spectrum.thin(rel_err=self.pars['thin'])
         super(Spectrum, self).__init__(self.pars['spectral_range'][0],
 self.pars['spectral_range'][1], 3000, 'nm')
-        
+
     def updatePars(self, pars):
         '''
         Update parameters
@@ -89,8 +89,8 @@ self.pars['spectral_range'][1], 3000, 'nm')
         # build GalSim SED object out of template file
         _template = np.genfromtxt(template)
         _table = galsim.LookupTable(x=_template[:,0], f=_template[:,1],)
-        SED = galsim.SED(_table, 
-                         wave_type=self.pars['wave_type'], 
+        SED = galsim.SED(_table,
+                         wave_type=self.pars['wave_type'],
                          flux_type=self.pars['flux_type'],
                          redshift=self.pars['z'],
                          _blue_limit=self.pars['spectral_range'][0],
@@ -100,16 +100,16 @@ self.pars['spectral_range'][1], 3000, 'nm')
         # TODO: add more flexible normalization parametrization
         norm = self.pars['obs_cont_norm'][1]*self.pars['obs_cont_norm'][0]/\
             (Spectrum._h*Spectrum._c)
-        return SED.withFluxDensity(target_flux_density=norm, 
+        return SED.withFluxDensity(target_flux_density=norm,
                                    wavelength=self.pars['obs_cont_norm'][0])
-    
+
     def _addEmissionLines(self):
         '''
         Build and return Gaussian emission lines GalSim SED object
         '''
         # init LookupTable for rest-frame SED
         lam_grid = np.arange(self.pars['spectral_range'][0]/(1+self.pars['z']),
-                             self.pars['spectral_range'][1]/(1+self.pars['z']), 
+                             self.pars['spectral_range'][1]/(1+self.pars['z']),
                              0.1)
         flux_grid = np.zeros(lam_grid.size)
         # Set emission lines: (specie, observer frame flux)
@@ -140,13 +140,13 @@ self.pars['spectral_range'][1], 3000, 'nm')
                     norm_lam = cen*(1+self.pars['z'])
                     norm = flux[i]*norm_lam/(Spectrum._h*Spectrum._c)/\
                                 np.sqrt(2*np.pi*_lw_sq*(1+self.pars['z'])**2)
-            
+
         _table = galsim.LookupTable(x=lam_grid, f=flux_grid,)
         SED = galsim.SED(_table,
                          wave_type='nm',
                          flux_type='flambda',
                          redshift=self.pars['z'],)
         # normalize to observer-frame flux
-        SED = SED.withFluxDensity(target_flux_density=norm, 
+        SED = SED.withFluxDensity(target_flux_density=norm,
                                   wavelength=norm_lam)
         return SED

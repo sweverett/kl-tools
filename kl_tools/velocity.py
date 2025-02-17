@@ -6,11 +6,11 @@ from argparse import ArgumentParser
 import astropy.constants as const
 import astropy.units as units
 
-import utils
-from transformation import TransformableImage
-import transformation as transform
-from parameters import SampledPars
-import numba_transformation as numba_transform
+import kl_tools.utils as utils
+from kl_tools.transformation import TransformableImage
+import kl_tools.transformation as transform
+from kl_tools.parameters import SampledPars
+import kl_tools.numba_transformation as numba_transform
 
 import ipdb
 
@@ -118,7 +118,7 @@ class OffsetVelocityModel(VelocityModel):
     during evaluation. The X and Y grid will be transformed to centered coord.
     by Xp = X - x0 and Yp = Y - y0.
     The relation between x0/y0 and dx_kin/dy_kin (in Pranjal's paper) is
-    x0 = dx_kin, y0 = dy_kin 
+    x0 = dx_kin, y0 = dy_kin
     '''
     _model_params = ['v0', 'vcirc', 'rscale', 'sini', 'x0', 'y0',
                      'theta_int', 'g1', 'g2', 'r_unit', 'v_unit']

@@ -1,5 +1,5 @@
 from copy import deepcopy
-import utils
+import kl_tools.utils as utils
 import os
 import galsim as gs
 import numpy as np
@@ -424,7 +424,7 @@ class CubePars(MetaPars):
 class FiberPars(MetaPars):
     _req_fields = ['model_dimension']
     # model_dimension:
-    #   Nx, Ny, scale, lambda_range, lambda_res, lambda_unit 
+    #   Nx, Ny, scale, lambda_range, lambda_res, lambda_unit
 
     _opt_fields = ['obs_conf',]
     # obs_conf:
@@ -442,7 +442,7 @@ class FiberPars(MetaPars):
         =======
         meta_pars: dict obj
             Dictionary of meta pars for `FiberCube`. Note that this dict has
-            different convention than the parent class `cube.CubePars`. The 
+            different convention than the parent class `cube.CubePars`. The
             initialization step will translate the dictionary.
         '''
         # assure the input dictionary obj has required fields & obs config
@@ -459,7 +459,7 @@ class FiberPars(MetaPars):
         # set up bandpass, model cube shape, and model cube pixel scale
 
         ### 1. Fiber Data
-        
+
         if self.is_dispersed:
             _bid = self.conf['SEDBLKID']
             _lrange = self.pars['model_dimension']['lambda_range'][_bid]
@@ -472,9 +472,9 @@ class FiberPars(MetaPars):
             self._bp_array = self.throughput(self.wave)
             self.lambdas = np.array([self.wave, self.wave + _dlam]).T
             _Nlam = len(self.wave)
-        
+
         ### 2. Photometry data
-        
+
         else:
             _from_file_ = os.path.isfile(self.pars['obs_conf']['BANDPASS'])
             if _from_file_:
@@ -486,17 +486,17 @@ class FiberPars(MetaPars):
                 'nm', blue_limit=_lrange[0], red_limit=_lrange[1])
             self.wave, _Nlam, self._bp_array = None, 1, None
 
-        self.pars['shape'] = np.array([_Nlam, 
-                         self.pars['model_dimension']['Ny'], 
+        self.pars['shape'] = np.array([_Nlam,
+                         self.pars['model_dimension']['Ny'],
                          self.pars['model_dimension']['Nx']], dtype=int)
         self.pars['pix_scale'] = self.pars['model_dimension']['scale']
-        self.X, self.Y = utils.build_map_grid(self.pars['shape'][2], 
+        self.X, self.Y = utils.build_map_grid(self.pars['shape'][2],
             self.pars['shape'][1], indexing='xy', scale=self.pars['pix_scale'])
         self.obs_index = self.pars['obs_conf']['OBSINDEX']
 
         return
 
-    # quick approach to the `obs_conf` observation configuration (1 obs) 
+    # quick approach to the `obs_conf` observation configuration (1 obs)
     @property
     def conf(self):
         return self.pars['obs_conf']
@@ -552,7 +552,7 @@ def setup_simple_bandpasses(lambda_blue, lambda_red, dlambda,
     bandpasses = []
     if file is None:
         for l1, l2 in lambdas:
-            bandpasses.append(gs.Bandpass(f'{throughput}', unit, 
+            bandpasses.append(gs.Bandpass(f'{throughput}', unit,
                 blue_limit=l1, red_limit=l2, zeropoint=zp))
     else:
         # build bandpass from file

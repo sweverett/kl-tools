@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 from argparse import ArgumentParser
 from photutils.geometry import circular_overlap_grid as cog
 
-import utils
-import parameters
-from datavector import DataVector
+import kl_tools.utils as utils
+import kl_tools.parameters as parameters
+from kl_tools.datavector import DataVector
 
 import ipdb
 
@@ -757,7 +757,7 @@ class Slice(object):
 
 class FiberModelCube(DataVector):
     ''' The most updated `FiberModelCube` implementation
-    This class wraps the theoretical cube after it is generated to produce 
+    This class wraps the theoretical cube after it is generated to produce
     simulated images.
     '''
     def __init__(self, meta_pars, obs_conf=None):
@@ -773,7 +773,7 @@ class FiberModelCube(DataVector):
             self.ATMPSF_conv_fiber_mask = None
             self.resolution_mat = None
         return
-        
+
     @property
     def bp_array(self):
         return self.Fpars.bp_array
@@ -785,7 +785,7 @@ class FiberModelCube(DataVector):
         return self.Fpars.lambdas
     @property
     def wave(self):
-        return self.Fpars.wave 
+        return self.Fpars.wave
     @property
     def lambda_eff(self):
         return self.Fpars.lambda_eff
@@ -798,8 +798,8 @@ class FiberModelCube(DataVector):
             fiber_rad = self.conf['FIBERRAD'] # radius in arcsec
             xmin, xmax = -mNx/2*mscale, mNx/2*mscale
             ymin, ymax = -mNy/2*mscale, mNy/2*mscale
-            mask = cog(xmin-fiber_cen[0], xmax-fiber_cen[0], 
-                ymin-fiber_cen[1], ymax-fiber_cen[1], 
+            mask = cog(xmin-fiber_cen[0], xmax-fiber_cen[0],
+                ymin-fiber_cen[1], ymax-fiber_cen[1],
                 mNx, mNy, fiber_rad, 1, 2)
         else:
             mask = np.ones([mNy, mNx])
@@ -827,7 +827,7 @@ class FiberModelCube(DataVector):
             offset=np.arange(kernel.shape[0]//2, -(kernel.shape[0]//2)-1, -1)
             #print(band.shape, offset)
             #plt.imshow(band)
-            Rmat = dia_matrix((band, offset), 
+            Rmat = dia_matrix((band, offset),
                 shape=(self.Fpars['shape'][0], self.Fpars['shape'][0]))
         else:
             Rmat = None
@@ -840,7 +840,7 @@ class FiberModelCube(DataVector):
         mscale = self.Fpars['pix_scale']
         psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
         mask = galsim.InterpolatedImage(
-            galsim.Image(array=self.get_fiber_mask()), 
+            galsim.Image(array=self.get_fiber_mask()),
             scale=mscale)
         # convolve fiber mask with atmospheric PSF
         maskC = mask if psf is None else galsim.Convolve([mask, psf])
@@ -859,18 +859,18 @@ class FiberModelCube(DataVector):
                 psf = self._build_PSF_model(self.conf, lam_mean=self.lambda_eff)
                 gal = gal_chro if psf is None else galsim.Convolve([gal_chro, psf])
                 img = gal.drawImage(
-                    bandpass = self.Fpars.throughput, 
-                    nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
-                    scale=self.conf['PIXSCALE'], method='auto', 
+                    bandpass = self.Fpars.throughput,
+                    nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'],
+                    scale=self.conf['PIXSCALE'], method='auto',
                     area=np.pi*(self.conf['DIAMETER']/2.)**2,
                     exptime=self.conf['EXPTIME'],gain=self.conf['GAIN'])
             elif self.Fpars['run_options']['run_mode'] == 'SNR':
                 # theory_cube, gal, and sed, in this case, are arbitrary units
                 # However, theory_cube and gal are already scaled by flux factor
                 assert self.conf['NOISETYP'].lower() == 'gauss'
-                img = gal.drawImage( 
-                    nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'], 
-                    scale=self.conf['PIXSCALE'], method='auto', 
+                img = gal.drawImage(
+                    nx=self.conf['NAXIS1'], ny=self.conf['NAXIS2'],
+                    scale=self.conf['PIXSCALE'], method='auto',
                     )
             if force_noise_free:
                 return img.array, None
@@ -902,7 +902,7 @@ class FiberModelCube(DataVector):
             #  - sum slice-wise to get 1D spectrum
             # But you want to ensure your grid is large enough to accommodate
             # convolution
-            
+
             # theory_cube (should be) in units of [photons / (s cm2)]
             #print(f'theory cube shape: {theory_cube.shape}')
             #print(f'mask shape: {ary.shape}')
@@ -965,7 +965,7 @@ class FiberModelCube(DataVector):
                                 scale_unit=scale_unit)
             elif _type == 'airy_mean':
                 scale_unit = kwargs.get('scale_unit', galsim.arcsec)
-                #return galsim.Airy(config['psf_fwhm']/1.028993969962188, 
+                #return galsim.Airy(config['psf_fwhm']/1.028993969962188,
                 #               scale_unit=scale_unit)
                 lam = kwargs.get("lam_mean", 1000) # nm
                 return galsim.Airy(lam=lam, diam=config['DIAMETER']/100,
@@ -999,8 +999,8 @@ class FiberModelCube(DataVector):
             read_noise = config.get('RDNOISE', 8.5)
             gain = config.get('GAIN', 1.0)
             exp_time = config.get('EXPTIME', 1.0)
-            noise = galsim.CCDNoise(rng=rng, gain=gain, 
-                                read_noise=read_noise, 
+            noise = galsim.CCDNoise(rng=rng, gain=gain,
+                                read_noise=read_noise,
                                 sky_level=sky_level*exp_time/gain)
         elif _type == 'gauss':
             sigma = config.get('NOISESIG', 1.0)

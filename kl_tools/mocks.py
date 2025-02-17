@@ -2,13 +2,13 @@ import numpy as np
 from astropy.units import Unit
 import galsim as gs
 
-from emission import EmissionLine
-import cube
-from cube import CubePars, DataCube
-from velocity import VelocityMap
-from likelihood import DataCubeLikelihood
-import intensity
-import utils
+from kl_tools.emission import EmissionLine
+import kl_tools.cube as cube
+from kl_tools.cube import CubePars, DataCube
+from kl_tools.velocity import VelocityMap
+from kl_tools.likelihood import DataCubeLikelihood
+import kl_tools.intensity as intensity
+import kl_tools.utils as utils
 
 import ipdb
 

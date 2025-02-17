@@ -5,7 +5,7 @@ import yaml
 import matplotlib.colors as colors
 import pdb
 import copy
-import priors
+import kl_tools.priors as priors
 try:
     import schwimmbad
     import mpi4py
@@ -197,20 +197,21 @@ def parse_param(config, params):
                     config[key] = 'sampled'
                     Nsampled += 1
                 else:
-                    print("WARNING: can not parse parameter %s in meta!"%key)
+                    if rank==0:
+                        print("WARNING: can not parse parameter %s in meta!"%key)
     return Nsampled
 
 def parse_prior(config):
     prior_type = config.get("dist", "flat")
     if prior_type=="flat":
-        return priors.UniformPrior(config["min"], config["max"], 
+        return priors.UniformPrior(config["min"], config["max"],
                                    inclusive=config.get("inclusive", False))
     elif prior_type=="norm":
         return priors.GaussPrior(config["loc"], config["scale"],
                                  clip_sigmas=config.get("clip_sigmas", None),
                                  zero_boundary=config.get("zero_boundary", None))
     elif prior_type=="lognorm":
-        return priors.LognormalPrior(config["loc"], config["scale"], 
+        return priors.LognormalPrior(config["loc"], config["scale"],
                                    clip_sigmas=config.get("clip_sigmas", None))
     else:
         raise ValueError(f'Can not support prior of type {prior_type}!')

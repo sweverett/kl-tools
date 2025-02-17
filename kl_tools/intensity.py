@@ -8,12 +8,12 @@ from argparse import ArgumentParser
 import galsim as gs
 from galsim.angle import Angle, radians
 
-import utils
-import basis
-import likelihood
-import parameters
-from emission import LINE_LAMBDAS
-from transformation import transform_coords, TransformableImage
+import kl_tools.utils as utils
+import kl_tools.basis as basis
+import kl_tools.likelihood as likelihood
+import kl_tools.parameters as parameters
+from kl_tools.emission import LINE_LAMBDAS
+from kl_tools.transformation import transform_coords, TransformableImage
 
 import ipdb
 
@@ -139,21 +139,21 @@ class IntensityMap(object):
 
 class GMixModel(IntensityMap):
     '''
-    This class use the mixture of Gaussian to fit inclined exponential or 
+    This class use the mixture of Gaussian to fit inclined exponential or
     inclined Sersic profile, see NGMIX (Sheldon 2014) and Hogg & Lang (2012)
     **Methodology:**
     - [components]: The model has two components: emission line (exponential
     disk) and continuum (de Vaucouleurs, n=4 Sersic). The two components can
     have different flux and half-light radius, but the inclination and posi-
     tion angle are the same.
-    - [projection]: To translate between inclination and ellipticity, we use 
+    - [projection]: To translate between inclination and ellipticity, we use
     the description in Cappellari (2002) (Eqn 9, the oblate axisymmetric),
         (q')^2 = (q*sin(i))*2 + cos^2(i)
     In this version we fix q to some reasonable value (0.1). But since the q
     of galactic bulge and galactic disk are not necessarily the same, we might
     release q for sampling with some prior in future.
     - [shear transform]: Gaussian profile is so simple that it has an analy-
-    tical solution under shear transform. Eqn 2.11 and 2.12 in Bernstein & 
+    tical solution under shear transform. Eqn 2.11 and 2.12 in Bernstein &
     Jarvis (2002) show how the ellipticity of sheared image relates with shear
     and the intrinsic ellipticity
     '''
@@ -186,7 +186,7 @@ class GMixModel(IntensityMap):
         qobs = np.sqrt(1-(1-qz**2)*sini**2)
         # build inclined MoGs for both the emission line and stellar continuum
         # the shear is applied via Eqn 2.12 in Bernstein & Jarvis 2002
-        
+
 
         # Only add knots if a psf is provided
         # NOTE: no longer workds due to psf conovlution
@@ -242,7 +242,7 @@ class InclinedExponential(IntensityMap):
             citly (other than shape info), general intensity generation will,
             like shapelet method relies on some specific intensity profile to
             get reasonably good guess.
-            For `InclinedExponential`, you can pass `datavector = None` then 
+            For `InclinedExponential`, you can pass `datavector = None` then
             pass the shape information by kwargs:
                 theory_Nx = blahblah, theory_Ny = blahblah, scale = blahblah
         kwargs: dict
@@ -294,7 +294,7 @@ class InclinedExponential(IntensityMap):
         return: np.ndarray
             The rendered intensity map
         '''
-        # pars has higher priority than theta_pas, such that when 
+        # pars has higher priority than theta_pas, such that when
         # we want to fix parameters of g1,g2,sini,theta_int, we can
         # set key:fixed_val in the pars.
         sini = pars.get('sini', theta_pars['sini'])
@@ -318,7 +318,7 @@ class InclinedExponential(IntensityMap):
         ).rotate(rot_angle).shear(g1=g1, g2=g2).shift(dx_disk, dy_disk)
         #print(self.gal)
         try:
-            self.image["phot"] = self.gal["phot"].drawImage(nx=self.nx, ny=self.ny, 
+            self.image["phot"] = self.gal["phot"].drawImage(nx=self.nx, ny=self.ny,
                 scale=self.pix_scale).array
         except gs.GalSimFFTSizeError:
             self.image["phot"] = np.zeros([self.ny, self.nx])
@@ -354,7 +354,7 @@ class InclinedExponential(IntensityMap):
         #         gal = gal + knots
 
         # try:
-        #     self.image = gal.drawImage(nx=self.nx, ny=self.ny, 
+        #     self.image = gal.drawImage(nx=self.nx, ny=self.ny,
         #         scale=self.pix_scale).array
         # except gs.GalSimFFTSizeError:
         #     #print(f'WARNING: FFT size too large, return -np.inf')

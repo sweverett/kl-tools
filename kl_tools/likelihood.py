@@ -19,17 +19,16 @@ from numba import njit
 #_mpi_size = _mpi_comm.Get_size()
 #_mpi_rank = _mpi_comm.Get_rank()
 
-import utils
-import priors
-import intensity
-from parameters import Pars, MetaPars
-# import parameters
-from velocity import VelocityMap
-import cube
-from cube import DataCube
-from datavector import DataVector, FiberDataVector
-import grism
-import emission
+import kl_tools.utils as utils
+import kl_tools.priors as priors
+import kl_tools.intensity as intensity
+from kl_tools.parameters import Pars, MetaPars
+from kl_tools.velocity import VelocityMap
+import kl_tools.cube as cube
+from kl_tools.cube import DataCube
+from kl_tools.datavector import DataVector, FiberDataVector
+import kl_tools.grism_modules.grism as grism
+import kl_tools.emission as emission
 import kltools_grism_module_2 as m
 #m.set_mpi_info(_mpi_size, _mpi_rank)
 
@@ -373,7 +372,7 @@ class LogLikelihood(LogBase):
         # while the parameters used in vmap model are absolute x0/y0 center pos
         if model_name == 'offset':
             for k_sample, k_model, k_intoff in zip(['dx_kin', 'dy_kin'], ['x0', 'y0'], ['dx_spec', 'dy_spec']):
-                # if not sampled, filled with the fiducial or default 
+                # if not sampled, filled with the fiducial or default
                 if theta_pars.get(k_sample, None) is None:
                     theta_pars[k_sample] = meta['velocity'].get(k_sample, 0.0)
                 # transform from fractional difference to absolute offset
@@ -784,7 +783,7 @@ class DataCubeLikelihood(LogLikelihood):
 #         > _setup_sed(cls, theta_pars, datacube)
 #         - _interp1d(np.ndarray:table, np.ndarray:values, kind='linear')
 #         o _log_likelihood(list:theta, DataVector:datavector, DataCube:model)
-#         o _setup_model(list:theta_pars, DataVector:datavector) 
+#         o _setup_model(list:theta_pars, DataVector:datavector)
 
 #     attributes:
 #         From LogBase
@@ -807,7 +806,7 @@ class DataCubeLikelihood(LogLikelihood):
 #         Nx = self.meta['model_dimension']['Nx']
 #         Ny = self.meta['model_dimension']['Ny']
 #         # init with an empty modelcube object
-#         self.modelcube = grism.GrismModelCube(self.parameters, 
+#         self.modelcube = grism.GrismModelCube(self.parameters,
 #             datacube=np.zeros([Nspec, Nx, Ny]))
 #         self.set_obs_methods(datavector)
 #         return
@@ -924,7 +923,7 @@ class DataCubeLikelihood(LogLikelihood):
 #         i_array, gal = imap.render(theta_pars, datavector, _pars)
 #         self.i_array = i_array
 #         self._construct_model_datacube(theta_pars, v_array, i_array, gal)
-        
+
 #     def setup_imap(self, theta_pars, datavector):
 #         '''
 #         theta_pars: dict
@@ -991,7 +990,7 @@ class DataCubeLikelihood(LogLikelihood):
 #         # build Doppler-shifted datacube
 #         # self.lambda_cen = observed frame lambda grid
 #         # w_mesh = rest frame wavelengths evaluated on observed frame grid
-#         # To make energy conserved, dc_array in units of 
+#         # To make energy conserved, dc_array in units of
 #         # photons / (s cm2)
 #         w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
 #         w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
@@ -999,7 +998,7 @@ class DataCubeLikelihood(LogLikelihood):
 #         dc_array = sed.spectrum(w_mesh.flatten()) * _dl
 #         dc_array = dc_array.reshape(w_mesh.shape) * \
 #                         i_array[np.newaxis, :, :] /\
-#                         (1+v_array[np.newaxis, :, :]) 
+#                         (1+v_array[np.newaxis, :, :])
 
 #         self.modelcube.set_data(dc_array, gal, sed)
 #         #model_datacube = grism.GrismModelCube(self.parameters,
@@ -1031,7 +1030,7 @@ class GrismLikelihood(LogLikelihood):
     '''
     def __init__(self, parameters, datavector, **kwargs):
         ''' Initialization
-        Set up GrismPars and GrismModelCube objects by providing a 
+        Set up GrismPars and GrismModelCube objects by providing a
         GrismDataVector object or fiducial parameters
         '''
 
@@ -1053,11 +1052,11 @@ class GrismLikelihood(LogLikelihood):
             _d, _n = self.get_images(_fid, force_noise_free=False, return_noise=True)
             _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
             init_GlobalDataVector([FiberDataVector(
-                 header=_header, data_header=_conf, 
+                 header=_header, data_header=_conf,
                  data=_d, noise=_n)])
             # set the fiducial images to C++ routine
             print("FiberLikelihood: Caching the (fiducial) data vector...")
-        ### Case 2: Build data vector from input FiberDataVector object 
+        ### Case 2: Build data vector from input FiberDataVector object
         else:
             init_GlobalDataVector([datavector])
             self._set_model_dimension()
@@ -1112,13 +1111,13 @@ class GrismLikelihood(LogLikelihood):
             _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
             _data_header = obs_conf_list
             self.datavector = grism.GrismDataVector(
-                header=_header, data_header=_data_header, 
+                header=_header, data_header=_data_header,
                 data=fid_img_list, noise=fid_noise_list)
             # set the fiducial images to C++ routine
             print("GrismLikelihood: Caching the (fiducial) data vector...")
             grism.initialize_observations(self.Nobs, GrismPars_list, datavector=self.datavector, overwrite=True)
             input_from_fid_theta = True
-        ### Case 2: Build data vector from input GrismDataVector object 
+        ### Case 2: Build data vector from input GrismDataVector object
         else:
             init_GlobalDataVector([datavector])
             self._set_model_dimension()
@@ -1185,12 +1184,12 @@ class GrismLikelihood(LogLikelihood):
         lambdas_hires = [np.array([lb, lb+dw/Nsub]).T for lb,dw,Nsub in zip(lb_hi, self.dwave, self.Nsub)]
         init_GlobalLambdas_hires(lambdas_hires)
         self.mNlam_hires = [grid.shape[0] for grid in lambdas_hires]
-       
+
         # spatial grid
         self.mNx = self.meta['model_dimension']['Nx']
         self.mNy = self.meta['model_dimension']['Ny']
         self.mscale = self.meta['model_dimension']['scale']
-        return 
+        return
 
     def get_images(self, theta):
         ''' Get simulated images given parameter values
@@ -1201,14 +1200,14 @@ class GrismLikelihood(LogLikelihood):
         dc_array, gal_phot, sed = self._setup_model(theta_pars, None)
         for i in range(self.Nobs):
             fc = get_Cube(i)
-            if fc.pars.is_dispersed: 
+            if fc.pars.is_dispersed:
                 iblock, obsid = fc.conf['SEDBLKID'], fc.conf['OBSINDEX']
                 img, _ = fc.observe(theory_cube=dc_array[iblock], datavector=dv)
             else:
                 img, _ = fc.observe(gal_phot=gal_phot, datavector=dv)
             image_list.append(img)
         return image_list
-        
+
     # def __call__(self, theta, datavector, model):
     #     '''
     #     Do setup and type / sanity checking here
@@ -1266,7 +1265,7 @@ class GrismLikelihood(LogLikelihood):
 
         for i in range(self.Nobs):
             fc = get_Cube(i)
-            if fc.pars.is_dispersed: 
+            if fc.pars.is_dispersed:
                 iblock, obsid = fc.conf['SEDBLKID'], fc.conf['OBSINDEX']
                 #img, _ = fc.observe(dc_array[iblock], gal, sed)
                 img, _ = fc.observe(theory_cube=dc_array[iblock], datavector=dv)
@@ -1345,7 +1344,7 @@ class GrismLikelihood(LogLikelihood):
 
         # create grid of pixel centers in image coordinates
         # 'xy' indexing is the usual imshow y-x scheme
-        X, Y = utils.build_map_grid(self.mNx, self.mNy, 
+        X, Y = utils.build_map_grid(self.mNx, self.mNy,
             indexing='xy', scale=self.mscale)
 
         # create 2D velocity & intensity maps given sampled transformation
@@ -1366,7 +1365,7 @@ class GrismLikelihood(LogLikelihood):
         # axes[1].imshow(v_array)
         # plt.show()
 
-        # dc_array, sed = self._construct_model_datacube(theta_pars, 
+        # dc_array, sed = self._construct_model_datacube(theta_pars,
         #     v_array, i_array, gal)
 
         # create observer-frame SED and the 3D model cubes, block-by-block
@@ -1477,7 +1476,7 @@ class GrismLikelihood(LogLikelihood):
         # build Doppler-shifted datacube
         # self.lambda_cen = observed frame lambda grid
         # w_mesh = rest frame wavelengths evaluated on observed frame grid
-        # To make energy conserved, dc_array in units of 
+        # To make energy conserved, dc_array in units of
         # photons / (s cm2)
         w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
         w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
@@ -1485,7 +1484,7 @@ class GrismLikelihood(LogLikelihood):
         dc_array = sed(w_mesh.flatten()) * self._dl
         dc_array = dc_array.reshape(w_mesh.shape) * \
                         i_array[np.newaxis, :, :] /\
-                        (1+v_array[np.newaxis, :, :]) 
+                        (1+v_array[np.newaxis, :, :])
 
         return dc_array, sed
 
@@ -1497,14 +1496,14 @@ class GrismLikelihood(LogLikelihood):
 class FiberLikelihood(LogLikelihood):
     '''
     An implementation of a LogLikelihood for a Fiber KL measurement
-    Compare to reduced 1D data F_tilde, which is related to model F as 
+    Compare to reduced 1D data F_tilde, which is related to model F as
         F_tilde = RF,
     where R is the ""resolution matrix", see DESI spectrum pipeline paper
     and spectro-perfectionism
     '''
     def __init__(self, parameters, datavector, **kwargs):
         ''' Initialization
-        Set up CubePars and ModelCube objects by providing a 
+        Set up CubePars and ModelCube objects by providing a
         FiberDataVector object or fiducial parameters
         - parameters: Pars object
         - datavector: FiberDataVector object
@@ -1526,11 +1525,11 @@ class FiberLikelihood(LogLikelihood):
             _d, _n = self.get_images(_fid, force_noise_free=False, return_noise=True)
             _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
             init_GlobalDataVector([FiberDataVector(
-                 header=_header, data_header=_conf, 
+                 header=_header, data_header=_conf,
                  data=_d, noise=_n)])
             # set the fiducial images to C++ routine
             print("FiberLikelihood: Caching the (fiducial) data vector...")
-        ### Case 2: Build data vector from input FiberDataVector object 
+        ### Case 2: Build data vector from input FiberDataVector object
         else:
             init_GlobalDataVector([datavector])
             self._set_model_dimension()
@@ -1569,7 +1568,7 @@ class FiberLikelihood(LogLikelihood):
         lambdas_hires = [np.array([lb, lb+dw/Nsub]).T for lb,dw,Nsub in zip(lb_hi, self.dwave, self.Nsub)]
         init_GlobalLambdas_hires(lambdas_hires)
         self.mNlam_hires = [grid.shape[0] for grid in lambdas_hires]
-       
+
         # spatial grid
         self.mNx = self.meta['model_dimension']['Nx']
         self.mNy = self.meta['model_dimension']['Ny']
@@ -1619,7 +1618,7 @@ class FiberLikelihood(LogLikelihood):
         dv = get_GlobalDataVector(0)
         for i in range(self.Nobs):
             fc = get_Cube(i)
-            if fc.Fpars.is_dispersed: 
+            if fc.Fpars.is_dispersed:
                 iblock, obsid = fc.conf['SEDBLKID'], fc.conf['OBSINDEX']
                 img, _ = fc.observe(dc_array[iblock], gal, sed)
                 # apply a flux norm factor to cancel out shear impact on intensity profile, if it's offset fiber
@@ -1645,7 +1644,7 @@ class FiberLikelihood(LogLikelihood):
         # Three parameterization schemes are available for the Euler angle
         # 1. sini_pa: parameterize through sin(inc) and pa
         # 2. inc_pa: parameterize through inc and pa
-        # 3. eint: parametrize through eint_1 and eint_2 
+        # 3. eint: parametrize through eint_1 and eint_2
         #    **Warning: this parametrization has spin-2 symmetry, so it's missing half of the inclination parameter space, but could be useful when inferring with image-only**
         '''
         _meta_update = self.meta.copy_with_sampled_pars(theta_pars)
@@ -1713,7 +1712,7 @@ class FiberLikelihood(LogLikelihood):
         # build Doppler-shifted datacube
         # self.lambda_cen = observed frame lambda grid
         # w_mesh = rest frame wavelengths evaluated on observed frame grid
-        # To make energy conserved, dc_array in units of 
+        # To make energy conserved, dc_array in units of
         # photons / (s cm2)
         # w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
         # w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
@@ -1721,7 +1720,7 @@ class FiberLikelihood(LogLikelihood):
         # dc_array = sed(w_mesh.flatten()) * self._dl
         # dc_array = dc_array.reshape(w_mesh.shape) * \
         #                 i_array[np.newaxis, :, :] /\
-        #                 (1+v_array[np.newaxis, :, :]) 
+        #                 (1+v_array[np.newaxis, :, :])
 
         return dc_array, gal, sed
 
@@ -1748,7 +1747,7 @@ class FiberLikelihood(LogLikelihood):
     #     # build Doppler-shifted datacube
     #     # self.lambda_cen = observed frame lambda grid
     #     # w_mesh = rest frame wavelengths evaluated on observed frame grid
-    #     # To make energy conserved, dc_array in units of 
+    #     # To make energy conserved, dc_array in units of
     #     # photons / (s cm2)
     #     w_mesh = np.outer(lambda_cen, 1./(1.+ v_array))
     #     w_mesh = w_mesh.reshape(lambda_cen.shape+v_array.shape)
@@ -1756,7 +1755,7 @@ class FiberLikelihood(LogLikelihood):
     #     dc_array = sed(w_mesh.flatten()) * self._dl
     #     dc_array = dc_array.reshape(w_mesh.shape) * \
     #                     i_array[np.newaxis, :, :] /\
-    #                     (1+v_array[np.newaxis, :, :]) 
+    #                     (1+v_array[np.newaxis, :, :])
 
     #     return dc_array, sed
 

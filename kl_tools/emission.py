@@ -11,7 +11,7 @@ import astropy.constants as constants
 from scipy.interpolate import interp1d
 from numpy import interp
 # kltools
-import utils
+import kl_tools.utils as utils
 
 ### some constants
 _h = constants.h.to('erg s').value
@@ -48,12 +48,12 @@ LINE_LAMBDAS = {
     'N2_2': 6585.255 * u.Unit('Angstrom'),
     'S2_1': 6718.271 * u.Unit('Angstrom'),
     'S2_2': 6732.645 * u.Unit('Angstrom'),
-    'PaA': 1.875 * u.um, 
-    'PaB': 1.282 * u.um, 
-    'PaG': 1.094 * u.um, 
-    'BrA': 4.051 * u.um, 
-    'BrB': 2.625 * u.um, 
-    'BrG': 2.166 * u.um, 
+    'PaA': 1.875 * u.um,
+    'PaB': 1.282 * u.um,
+    'PaG': 1.094 * u.um,
+    'BrA': 4.051 * u.um,
+    'BrB': 2.625 * u.um,
+    'BrG': 2.166 * u.um,
     'BrD': 1.944 * u.um,
 }
 
@@ -78,7 +78,7 @@ _default_sed_pars = {
     # 1. normalized to specific flam (erg/s/cm2/nm) at specific wavelength (nm)
     'obs_cont_norm_wave': 400,
     'obs_cont_norm_flam': 0.0,
-    # 2. normalized to specific magnitude at specific band 
+    # 2. normalized to specific magnitude at specific band
     'obs_norm_band': "../data/Bandpass/HST/WFC3_IR_F105W.dat",
     'obs_norm_mag': 17,
     ### **obs-frame** emission line properties
@@ -237,24 +237,24 @@ class ObsFrameSED(SED):
         #print(self.pars)
         self.calculate_obsframe_sed(self.pars)
         self.inventory = {
-            'total':     self.obs_frame_sed, 
-            'continuum': self.continuum, 
+            'total':     self.obs_frame_sed,
+            'continuum': self.continuum,
             'emissions': self.emissions,
         }
 
     def __call__(self, wave, new_pars=None, component='total', flux_type='fphotons'):
         if isinstance(wave, u.Quantity):
             wave = wave.to(self.spectrum.wave_type).value
-            
+
         # check SED recomputation
         if (new_pars is not None) and self.updatePars(self.pars, new_pars):
             self.calculate_obsframe_sed(self.pars)
-        
+
         # check returned flux type
         norm = {'fphotons': 1, '1': 1, 'flambda': (_h*_c)/wave, 'fnu': wave*_h}
         if flux_type not in norm.keys():
             raise ValueError(f'`flux_type` only supports ({norm.keys()})!')
-        
+
         # check returned SED components
         if component=='total' or component=='continuum':
             return self.inventory[component](wave)*norm[flux_type]
@@ -263,10 +263,10 @@ class ObsFrameSED(SED):
         else:
         #if component not in self.inventory.keys():
             raise ValueError(f'`component`={component} not supported!')
-            
-    
+
+
     def calculate_obsframe_sed(self, pars):
-        meta_obs_wave = np.arange(self.pars['lblue'], self.pars['lred'], 
+        meta_obs_wave = np.arange(self.pars['lblue'], self.pars['lred'],
             1000/self.pars['resolution'])
         self.continuum, _cont_tab = self.addContinuum(pars, meta_obs_wave)
         self.emissions, _emis_tabs = self.addEmissionLines(pars, meta_obs_wave)
@@ -281,7 +281,7 @@ class ObsFrameSED(SED):
         self.obs_frame_sed = gs.SED(_total_tab, "nm", "flambda", fast=True, interpolant='linear')
         if pars['thin'] > 0:
             self.obs_frame_sed = self.obs_frame_sed.thin(rel_err=pars['thin'])
-        
+
     @classmethod
     def updatePars(cls, old_pars, new_pars):
         '''
@@ -298,7 +298,7 @@ class ObsFrameSED(SED):
                 recompute = True
                 old_pars[key] = val
         return recompute
-    
+
     @classmethod
     def wrap_emline_string(cls, center, sigma, share):
         eml_fmt = 'np.exp(-0.5*((wave-%le)/%le)**2)*%le/np.sqrt(2*np.pi*%le**2)'
@@ -306,7 +306,7 @@ class ObsFrameSED(SED):
         assert _cen.shape == _sig.shape == _shr.shape, 'center, sigma, share have inconsistent shape!'
         eml_strings = ' + '.join([eml_fmt%(_c,_s,_f,_s) for _c,_s,_f in zip(_cen, _sig, _shr)])
         return eml_strings
-            
+
     @classmethod
     def addEmissionLines(cls, pars, meta_obs_wave):
         # Gaussian emission line profile (no spectra resolution convolved)
@@ -328,15 +328,15 @@ class ObsFrameSED(SED):
                 emlsed = eval('lambda wave:'+emlstr) # erg/s/cm2/nm
                 #meta_obsframe_flux += emlsed(meta_obs_wave)*obs_flux
                 meta_obsframe_flux = emlsed(meta_obs_wave)*obs_flux
-                _tables[f'em_{emline}'] = gs.LookupTable(meta_obs_wave, 
+                _tables[f'em_{emline}'] = gs.LookupTable(meta_obs_wave,
                     meta_obsframe_flux, interpolant='linear', )
-                _seds[f'em_{emline}'] = gs.SED(_tables[f'em_{emline}'], "nm", 
+                _seds[f'em_{emline}'] = gs.SED(_tables[f'em_{emline}'], "nm",
                     "flambda", fast=True, interpolant='linear')
                 #emline_list.append(gs.SED(emlstr, wave_type='nm', flux_type='flambda', redshift=z)*obs_flux)
         #_table = gs.LookupTable(meta_obs_wave, meta_obsframe_flux, interpolant='linear', )
         #_sed = gs.SED(_table, "nm", "flambda", fast=True, interpolant='linear')
         return _seds, _tables
-    
+
     @classmethod
     def addContinuum(cls, pars, meta_obs_wave):
         # TODO: add support to other continuum methods: desi spectra
@@ -350,16 +350,16 @@ class ObsFrameSED(SED):
                 raise OSError(f'Can not find template file {template}!')
             #_temp = np.genfromtxt(template)
             # convert wavelength and flux to nm and flambda
-            #wave_factor = {'nm': 1, 
-            #               'ang': 10, 
-            #               'angstrom': 10, 
+            #wave_factor = {'nm': 1,
+            #               'ang': 10,
+            #               'angstrom': 10,
             #               'aa': 10}[pars['temp_wave_type'].lower()]
             #flux_factor = {'flambda': wave_factor,
             #                'fnu': _c_nms/(_temp[:,0]/wave_factor)**2,
             #                'fphotons': wave_factor**2*_h*_c/_temp[:,0],
             #                '1': wave_factor}[pars['temp_flux_type']]
             #cont = gs.LookupTable(
-            #    _temp[:,0]/wave_factor*(1.+pars['z']), _temp[:,1]*flux_factor, 
+            #    _temp[:,0]/wave_factor*(1.+pars['z']), _temp[:,1]*flux_factor,
             #    interpolant='linear')
             cont = gs.SED(template, pars['temp_wave_type'], pars['temp_flux_type'], redshift=pars['z'])
         else:
@@ -372,11 +372,11 @@ class ObsFrameSED(SED):
         # normalization: either specify flux at specific wavelength (do not require emission line)
         # or specify band magnitude (need to subtract emission line flux)
         if pars.get('cont_norm_method', 'flux') == 'flux':
-            # note for the units 
+            # note for the units
             # `withFluxDensity`:    phot/s/cm2/nm
             # `obs_cont_norm_flam`: erg/s/cm2/nm
             _sed = cont.withFluxDensity(
-                pars['obs_cont_norm_flam']/(_h*_c/pars['obs_cont_norm_wave']), 
+                pars['obs_cont_norm_flam']/(_h*_c/pars['obs_cont_norm_wave']),
                 pars['obs_cont_norm_wave'])
         elif pars.get('cont_norm_method', 'flux') == 'mag':
             # TODO: compensate for emission line fluxes here
@@ -389,11 +389,11 @@ class ObsFrameSED(SED):
         _tab = gs.LookupTable(meta_obs_wave,
                 _sed(meta_obs_wave)*_h*_c/meta_obs_wave, interpolant='linear')
         return _sed, _tab
-    
+
     def calculateMagnitude(self, bandpass, zp='AB', component='total'):
         bp = gs.Bandpass(bandpass, wave_type='nm').withZeropoint(zp)
         return self.inventory[component].calculateMagnitude(bp)
-    
+
     def calculateFlux(self, bandpass, zp='AB', component='total'):
         bp = gs.Bandpass(bandpass, wave_type='nm').withZeropoint(zp)
         return self.inventory[component].calculateFlux(bp)

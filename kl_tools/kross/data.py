@@ -2,6 +2,7 @@ import fitsio
 from pathlib import Path
 from glob import glob
 from astropy.coordinates import SkyCoord
+from astropy.io.fits import Header
 import astropy.units as u
 
 from kl_tools.utils import get_base_dir
@@ -65,30 +66,41 @@ def get_kross_obj_data(kid, load_data=True, vb=False):
     if load_data is True:
         try:
             cube, cube_hdr = fitsio.read(cube_file, header=True)
+            # cube_hdr = Header(cube_hdr)
         except FileNotFoundError:
             if vb is True:
                 print(f'Cube file not found: {cube_file}')
             cube, cube_hdr = None
         try:
             velocity, velocity_hdr = fitsio.read(velocity_file, header=True)
+            # velocity_hdr = Header(velocity_hdr)
         except FileNotFoundError:
             if vb is True:
                 print(f'Velocity map file not found: {velocity_file}')
             velocity, velocity_hdr = None, None
         try:
             sigma, sigma_hdr = fitsio.read(sigma_file, header=True)
+            # sigma_hdr = Header(sigma_hdr)
         except FileNotFoundError:
             if vb is True:
                 print(f'Sigma file not found: {sigma_file}')
             sigma, sigma_hdr = None, None
         try:
             halpha, halpha_hdr = fitsio.read(halpha_file, header=True)
+            # halpha_hdr = Header(halpha_hdr)
         except FileNotFoundError:
             if vb is True:
                 print(f'Halpha file not found: {halpha_file}')
             halpha, halpha_hdr = None, None
         try:
             hst, hst_hdr = fitsio.read(hst_file, header=True)
+            # hst_hdr = Header(hst_hdr)
+
+            # NOTE: the HST image cutouts we've been using have some errors
+            # in them; handle them now
+            for i, key in enumerate(hst_hdr):
+                if (key == None) or (key == 'None'):
+                    hst_hdr.delete(key)
         except FileNotFoundError:
             if vb is True:
                 print(f'HST file not found: {hst_file}')

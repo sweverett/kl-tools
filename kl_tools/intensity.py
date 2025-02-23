@@ -1,6 +1,11 @@
+'''
+This file contains a mix of IntensityMap classes for explicit definitions
+(e.g. an inclined exponential) and IntensityMapFitter + Basis classes for
+fitting a a chosen set of arbitrary basis functions to the stacked datacube
+image
+'''
+
 import numpy as np
-import os
-import time
 from abc import abstractmethod
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -11,18 +16,7 @@ from galsim.angle import Angle, radians
 import kl_tools.utils as utils
 import kl_tools.basis as basis
 import kl_tools.likelihood as likelihood
-import kl_tools.parameters as parameters
-from kl_tools.transformation import transform_coords, TransformableImage
-
-import ipdb
-import pudb
-
-'''
-This file contains a mix of IntensityMap classes for explicit definitions
-(e.g. an inclined exponential) and IntensityMapFitter + Basis classes for
-fitting a a chosen set of arbitrary basis functions to the stacked datacube
-image
-'''
+from kl_tools.transformation import transform_coords
 
 parser = ArgumentParser()
 
@@ -455,28 +449,29 @@ class IntensityMapFitter(object):
     '''
     This base class represents an intensity map defined
     by some set of basis functions {phi_i}.
+
+    basis_type: str
+        The name of the basis_type type used
+    nx: int
+        The number of pixels in the x-axis
+    ny: int
+        The number of pixels in the y-ayis
+    continuum_template: numpy.ndarray
+        A template array for the object continuum
+    psf: galsim.GSObject
+        A galsim object representing a PSF to convolve the
+        basis functions by
+    weights: numpy.ndarray
+        A 2D array of floats to apply to the fitted stacked image
+    mask: numpy.ndarray
+        A 2D array of bools to mask the stacked image
+    basis_kwargs: dict
+        Keyword args needed to build given basis type
     '''
-    def __init__(self, basis_type, nx, ny, continuum_template=None,
-                 psf=None, weights=None, mask=None, basis_kwargs=None):
-        '''
-        basis_type: str
-            The name of the basis_type type used
-        nx: int
-            The number of pixels in the x-axis
-        ny: int
-            The number of pixels in the y-ayis
-        continuum_template: numpy.ndarray
-            A template array for the object continuum
-        psf: galsim.GSObject
-            A galsim object representing a PSF to convolve the
-            basis functions by
-        weights: numpy.ndarray
-            A 2D array of floats to apply to the fitted stacked image
-        mask: numpy.ndarray
-            A 2D array of bools to mask the stacked image
-        basis_kwargs: dict
-            Keyword args needed to build given basis type
-        '''
+
+    def __init__(
+            self, basis_type, nx, ny, continuum_template=None, psf=None,
+            weights=None, mask=None, basis_kwargs=None):
 
         for name, n in {'nx':nx, 'ny':ny}.items():
             if name in basis_kwargs:
@@ -928,275 +923,3 @@ def fit_one_beta(i, beta, theta_pars, datacube, basis, sky=1., vb=False):
     chi2_shapelet = np.sum((basis_im-data)**2/sky**2) / Npix
 
     return np.array([chi2_shapelet, chi2_sersiclet, chi2_exp_shapelet])
-
-def main(args):
-    '''
-    For now, just used for testing the classes
-    '''
-
-    from mocks import setup_likelihood_test
-    from astropy.units import Unit
-
-    show = args.show
-
-    outdir = os.path.join(utils.TEST_DIR, 'intensity')
-    utils.make_dir(outdir)
-
-    print('Creating IntensityMapFitter w/ shapelet basis')
-    nmax = 12
-    nx, ny = 30,30
-    pix_scale = 0.1 # arcsec / pixel
-    basis_kwargs = {'Nmax': nmax, 'pix_scale': pix_scale, 'plane':'obs'}
-    fitter = IntensityMapFitter(
-        'shapelets', nx, ny, basis_kwargs=basis_kwargs
-        )
-
-    print('Creating IntensityMapFitter w/ transformed shapelet basis')
-    basis_kwargs = {'Nmax': nmax, 'plane':'disk', 'pix_scale':1}
-    fitter_transform = IntensityMapFitter(
-        'shapelets', nx, ny, basis_kwargs=basis_kwargs
-        )
-
-    print('Setting up test datacube and true Halpha image')
-    true_pars = {
-        'g1': 0.025,
-        'g2': -0.0125,
-        'theta_int': np.pi / 6,
-        'sini': 0.7,
-        'v0': 5,
-        'vcirc': 200,
-        'rscale': 3,
-    }
-
-    mcmc_pars = {
-        'units': {
-            'v_unit': Unit('km / s'),
-            'r_unit': Unit('kpc'),
-        },
-        'intensity': {
-            # For this test, use truth info
-            'type': 'inclined_exp',
-            'flux': 3.8e4, # counts
-            'hlr': 3.5,
-        },
-        'velocity': {
-            'model': 'centered'
-        },
-        'run_options': {
-            'use_numba': False,
-            }
-    }
-
-    datacube_pars = {
-        # image meta pars
-        'Nx': 40, # pixels
-        'Ny': 40, # pixels
-        'pix_scale': 0.5, # arcsec / pixel
-        # intensity meta pars
-        'true_flux': mcmc_pars['intensity']['flux'],
-        'true_hlr': mcmc_pars['intensity']['hlr'], # pixels
-        # velocty meta pars
-        'v_model': mcmc_pars['velocity']['model'],
-        'v_unit': mcmc_pars['units']['v_unit'],
-        'r_unit': mcmc_pars['units']['r_unit'],
-        # emission line meta pars
-        'wavelength': 656.28, # nm; halpha
-        'lam_unit': 'nm',
-        'z': 0.3,
-        'R': 5000.,
-        'sky_sigma': 0.5, # pixel counts for mock data vector
-        # 'psf': mcmc_pars['psf']
-    }
-
-    datacube, vmap, true_im = setup_likelihood_test(
-        true_pars, datacube_pars
-        )
-    Nspec = datacube.Nspec
-    lambdas = datacube.lambdas
-
-    outfile = os.path.join(outdir, 'datacube.fits')
-    print(f'Saving test datacube to {outfile}')
-    datacube.write(outfile)
-
-    outfile = os.path.join(outdir, 'datacube-slices.png')
-    print(f'Saving example datacube slice images to {outfile}')
-    # if Nspec < 10:
-    sqrt = int(np.ceil(np.sqrt(Nspec)))
-    slice_indices = range(Nspec)
-
-    k = 1
-    for i in slice_indices:
-        plt.subplot(sqrt, sqrt, k)
-        plt.imshow(datacube.slices[i]._data, origin='lower')
-        plt.colorbar()
-        l, r = lambdas[i]
-        plt.title(f'lambda=({l:.1f}, {r:.1f})')
-        k += 1
-    plt.gcf().set_size_inches(12,12)
-    plt.tight_layout()
-    plt.savefig(outfile, bbox_inches='tight', dpi=300)
-    if show is True:
-        plt.show()
-    else:
-        plt.close()
-
-    #---------------------------------------------------------
-    # Fits to inclined exp
-
-    true_flux = datacube_pars['true_flux']
-    true_hlr = datacube_pars['true_hlr']
-
-    imap = InclinedExponential(
-        datacube, flux=true_flux, hlr=true_hlr
-        )
-
-    outfile = os.path.join(outdir, 'compare-inc-exp-to-data.png')
-    print(f'Plotting inclined exp fit compared to stacked data to {outfile}')
-    imap.render(true_pars, datacube, mcmc_pars)
-    imap.plot_fit(datacube, outfile=outfile, show=show)
-
-    #---------------------------------------------------------
-    # Fits to incined exp + knots
-    # NOTE: this no longer works due to how psf is now handled
-
-    # add some knot features
-    # knot_frac = 0.05 # not really correct, but close enough for tests
-    # datacube_pars['psf'] = gs.Gaussian(fwhm=2) # pixels w/o pix_scale defined
-    # mcmc_pars['intensity']['knots'] = {
-    #     # 'npoints': 25,
-    #     'npoints': 15,
-    #     'half_light_radius': 1.*true_hlr,
-    #     'flux': knot_frac * true_flux,
-    # }
-
-    # datacube, vmap, true_im = setup_likelihood_test(
-    #     true_pars, datacube_pars
-    #     )
-
-    # outfile = os.path.join(outdir, 'datacube-knots.fits')
-    # print(f'Saving test datacube to {outfile}')
-    # datacube.write(outfile)
-
-    # outfile = os.path.join(outdir, 'datacube-knots-slices.png')
-    # print(f'Saving example datacube slice images to {outfile}')
-    # # if Nspec < 10:
-    # sqrt = int(np.ceil(np.sqrt(Nspec)))
-    # slice_indices = range(Nspec)
-
-    # k = 1
-    # for i in slice_indices:
-    #     plt.subplot(sqrt, sqrt, k)
-    #     plt.imshow(datacube.slices[i]._data, origin='lower')
-    #     plt.colorbar()
-    #     l, r = lambdas[i]
-    #     plt.title(f'lambda=({l:.1f}, {r:.1f})')
-    #     k += 1
-    # plt.gcf().set_size_inches(12,12)
-    # plt.tight_layout()
-    # plt.savefig(outfile, bbox_inches='tight', dpi=300)
-    # if show is True:
-    #     plt.show()
-    # else:
-    #     plt.close()
-
-    # print('Fitting simulated datacube with shapelet basis')
-    # start = time.time()
-    # mle_im = fitter.fit(true_pars, datacube, pars=pars)
-    # t = time.time() - start
-    # print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} basis funcs')
-
-    # outfile = os.path.join(outdir, 'compare-mle-to-data.png')
-    # print(f'Plotting MLE fit compared to stacked data to {outfile}')
-    # fitter.plot_mle_fit(datacube, outfile=outfile, show=show)
-
-    # print('Fitting simulated datacube with transformed shapelet basis')
-    # start = time.time()
-    # mle_im_transform = fitter_transform.fit(true_pars, datacube, pars=pars)
-    # t = time.time() - start
-    # print(f'Total fit time took {1000*t:.2f} ms for {fitter.Nbasis} transformed basis funcs')
-
-    # outfile = os.path.join(outdir, 'compare-transform-mle--to-data.png')
-    # print(f'Plotting transform MLE fit compared to stacked data to {outfile}')
-    # fitter_transform.plot_mle_fit(datacube, outfile=outfile, show=show)
-
-    # # Now compare the fits
-    # outfile = os.path.join(outdir, 'compare-disk-vs-obs-mle-to-data.png')
-    # print(f'Comparing MLE fits to data for basis in obs vs. disk')
-    # data = datacube.stack()
-    # im = fitter.mle_im
-    # im_transform = fitter_transform.mle_im
-
-    # X, Y = utils.build_map_grid(nx, ny)
-
-    # images = [data, im, im_transform,
-    #           im-im_transform, im-data, im_transform-data]
-    # titles = ['Data', 'Obs basis', 'Disk basis',
-    #           'Obs-Disk', 'Obs-data', 'Disk-data']
-
-    # diff_max = np.max([np.max(im-data), np.max(im_transform-data)])
-    # diff_min = np.max([np.min(im-data), np.min(im_transform-data)])
-
-    # fig, axes = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True,
-    #                          figsize=(12,7))
-    # for i in range(6):
-    #     ax = axes[i//3, i%3]
-    #     if (i//3 == 1) and (i%3 > 0):
-    #         vmin, vmax = diff_min, diff_max
-    #     else:
-    #         vmin, vmax = None, None
-    #     mesh = ax.pcolormesh(X, Y, images[i], vmin=vmin, vmax=vmax)
-    #     divider = make_axes_locatable(ax)
-    #     cax = divider.append_axes('right', size='5%', pad=0.05)
-    #     plt.colorbar(mesh, cax=cax)
-    #     ax.set_title(titles[i])
-    # nbasis = fitter.basis.N
-    # fig.suptitle(f'Nmax={nmax}; {nbasis} basis functions')#, y=1.05)
-    # plt.tight_layout()
-
-    # plt.savefig(outfile, bbox_inches='tight', dpi=300)
-
-    # if show is True:
-    #     plt.show()
-    # else:
-    #     plt.close()
-
-    #---------------------------------------------------------
-    # Intensity map constructors and renders
-
-    print('Initializing a BasisIntensityMap for shapelets in obs plane')
-    imap = BasisIntensityMap(
-        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax,
-                                                        'pix_scale':pix_scale,
-                                                        'plane':'obs'}
-        )
-    imap.render(true_pars, datacube, mcmc_pars)
-
-    outfile = os.path.join(outdir, 'shapelet-imap-render.png')
-    print(f'Saving render for shapelet basis to {outfile}')
-    imap.plot(outfile=outfile, show=show)
-
-    print('Initializing a BasisIntensityMap for shapelets in disk plane')
-    imap_transform = BasisIntensityMap(
-        datacube, basis_type='shapelets', basis_kwargs={'Nmax':nmax,
-                                                        'pix_scale':pix_scale,
-                                                        'plane':'disk'}
-        )
-    imap_transform.render(true_pars, datacube, mcmc_pars)
-
-    outfile = os.path.join(outdir, 'shapelet-imap-transform-render.png')
-    print(f'Saving render for shapelet basis to {outfile}')
-    imap_transform.plot(outfile=outfile, show=show)
-
-    return 0
-
-if __name__ == '__main__':
-    args = parser.parse_args()
-
-    if args.test is True:
-        print('Starting tests')
-        rc = main(args)
-
-        if rc == 0:
-            print('All tests ran succesfully')
-        else:
-            print(f'Tests failed with return code of {rc}')

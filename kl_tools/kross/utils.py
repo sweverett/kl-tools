@@ -3,16 +3,8 @@ Various helper methods for the KROSS measurement. Should be refined & refactored
 in the future
 '''
 
-from pathlib import Path
 import numpy as np
 from astropy.units import Unit as u
-import matplotlib.pyplot as plt
-import fitsio
-from glob import glob
-from astropy.coordinates import SkyCoord
-from astropy.units import deg
-
-from kl_tools.utils import get_base_dir
 
 def theta2pars(theta, r_unit=u('arcsec'), v_unit=u('km/s')):
     '''

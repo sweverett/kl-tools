@@ -221,6 +221,12 @@ class Basis(object):
         Xobs, Yobs = utils.build_map_grid(nx, ny, indexing='xy')
         Xobs *= pixel_scale
         Yobs *= pixel_scale
+
+        # NOTE/TODO: think about how to generalize this in the future!
+        # adapt any offset parameters as well
+        transformation_pars['x0'] = pixel_scale * transformation_pars['x0']
+        transformation_pars['y0'] = pixel_scale * transformation_pars['y0']
+
         X, Y = transform_coords(
             Xobs, Yobs, 'obs', plane, transformation_pars
             )
@@ -231,7 +237,9 @@ class Basis(object):
             im = np.zeros((nx, ny))
 
         for n in range(self.N):
-            bfunc = self.get_basis_func(n, X, Y, nx, ny, pixel_scale)
+            bfunc = self.get_basis_func(
+                n, X, Y, nx=nx, ny=ny, pixel_scale=pixel_scale
+                )
             im += coefficients[n] * bfunc
 
         if self.is_complex is True:
@@ -751,6 +759,8 @@ class ExpShapeletBasis(PolarBasis):
         A PSF model to convolve the basis by, if desired
     '''
 
+    is_complex = True
+
     def __init__(
             self, beta=None, nmax=None, offset=None, psf=None
             ):
@@ -1064,7 +1074,9 @@ class ShapeletBasis(Basis):
             Nfuncs=None,
             outfile=None,
             show=True,
-            size=(9,9)
+            size=(9,9),
+            hspace=0.15,
+            wspace=0.5
             ):
         '''
         Plot the Shapelet basis functions.
@@ -1084,6 +1096,10 @@ class ShapeletBasis(Basis):
             Whether to show the plot or not
         size: tuple; default (12,12)
             The size of the plot
+        hspace: float; default 0.15
+            The height space between subplots
+        wspace: float; default 0.5
+            The width space between subplots
         '''
 
         N = self.N
@@ -1120,7 +1136,7 @@ class ShapeletBasis(Basis):
             fig.delaxes(axes[x,y])
 
         plt.tight_layout()
-        plt.subplots_adjust(hspace=0.15, wspace=0.5)
+        plt.subplots_adjust(hspace=hspace, wspace=wspace)
 
         if self.psf is not None:
             pstr = ' with PSF'

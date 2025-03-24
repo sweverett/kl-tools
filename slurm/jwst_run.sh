@@ -27,13 +27,16 @@ module load gsl
 conda init bash
 source ~/.bashrc
 
-cd $SLURM_SUBMIT_DIR
+cd /home/u17/jiachuanxu/kl-tools/scripts
 conda activate kltools
 #MPIRUN=/opt/ohpc/pub/mpi/openmpi5-gnu13/5.0.5/bin/mpirun
 MPIRUN=/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.4/bin/mpirun
+
+YAML=../yaml/example_jwst_noshear_freekine.yaml
+
 MPI_PML="--mca pml ob1"
 MPI_BTL="--mca btl tcp,self"
-${MPIRUN} -n ${SLURM_NTASKS} ${MPI_BTL} python test_jwst_mcmc_run.py ../yaml/example_jwst.yaml --mpi
+${MPIRUN} -n ${SLURM_NTASKS} ${MPI_BTL} python test_jwst_mcmc_run.py ${YAML} --mpi
 
 
 

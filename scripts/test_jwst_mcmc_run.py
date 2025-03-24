@@ -114,8 +114,8 @@ def main(args):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector
-    #data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
-    data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
+    data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
+    #data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
     datafile = data_root + "data_compile_short_withmask_GDS_ID%d_emlonly_test.fits"%(objID)
     datavector = GrismDataVector(file=datafile)
 
@@ -200,7 +200,10 @@ def main(args):
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
 
-    #runner.sampler.
+        chain = runner.sampler.get_chain(flat=True)
+        post = runner.sampler.get_log_prob(flat=True)
+        np.savetxt(mcmc_dict["output"], np.hstack([chain, post[:,np.newaxis]]), 
+                  header = "# " + " ".join(sampled_pars) + " logprob", comments="")
 
     return 0
 

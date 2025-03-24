@@ -211,7 +211,7 @@ def parse_prior(config):
                                  clip_sigmas=config.get("clip_sigmas", None),
                                  zero_boundary=config.get("zero_boundary", None))
     elif prior_type=="lognorm":
-        return priors.LognormalPrior(config["loc"], config["scale"],
+        return priors.LognormalPrior(config["mu"], config["dex"],
                                    clip_sigmas=config.get("clip_sigmas", None))
     else:
         raise ValueError(f'Can not support prior of type {prior_type}!')

@@ -5,29 +5,31 @@ mcmc:
   nsteps: 30000
   monitor_autocorr: True
   objid: 181661
-  output: /Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/chains/jwst/test_run
+  output: /xdisk/timeifler/jiachuanxu/kltools_jwst_chains/obj181661_noshear
 
 # (Might be) sampled parameters in simulation
 params:
   g1: 
-    prior: 
-      min: -1.0 
-      max: 1.0
-    ref:
-      dist: norm
-      loc: 0.0
-      scale: 0.1
-      proposal: 1.0e-4
+    value: 0.0
+#    prior: 
+#      min: -1.0 
+#      max: 1.0
+#    ref:
+#      dist: norm
+#      loc: 0.0
+#      scale: 0.1
+#      proposal: 1.0e-4
     latex: g_1
   g2:
-    prior:
-      min: -1.0
-      max: 1.0
-    ref:
-      dist: norm
-      loc: 0.0
-      scale: 0.1
-      proposal: 1.0e-4
+    value: 0.0
+#    prior:
+#      min: -1.0
+#      max: 1.0
+#    ref:
+#      dist: norm
+#      loc: 0.0
+#      scale: 0.1
+#      proposal: 1.0e-4
     latex: g_2
 #  eint1:
 #    prior:
@@ -117,7 +119,7 @@ params:
       # loc: 300.0
       # scale: 0.06
       min: 200
-      max: 700
+      max: 2000
     ref:
       dist: norm
       loc: 300.0
@@ -233,8 +235,10 @@ params:
 
 ### Meta parameters used in simulation
 meta:
-  g1: param
-  g2: param
+#  g1: param
+#  g2: param
+  g1: 0.0
+  g2: 0.0
 #  eint1: param
 #  eint2: param
   theta_int: param

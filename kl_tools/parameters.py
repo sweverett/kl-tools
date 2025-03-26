@@ -276,6 +276,7 @@ class DerivedPars(MetaPars):
             - kwargs: **dict
                 Sampled parameters used to evaluate the derived parameters
         '''
+        print(kwargs)
         func_string = self.pars[key]
         res = eval(func_string)
         return res

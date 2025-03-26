@@ -202,7 +202,7 @@ def main(args):
 
         chain = runner.sampler.get_chain(flat=True)
         post = runner.sampler.get_log_prob(flat=True)
-        blobs = runner.sampler.get_blob(flat=True)
+        blobs = np.array(runner.sampler.get_blobs(flat=True))
         blobs_name = ['logprior', 'loglike', ]
         if pars.derived.keys() is not None:
             blobs_name += pars.derived.keys()

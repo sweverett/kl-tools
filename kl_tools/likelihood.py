@@ -197,7 +197,7 @@ class LogPosterior(LogBase):
         if derived is None:
             return (prior, likelihood)
         else:
-            return (prior, likelihood, derived)
+            return (prior, likelihood, *derived)
 
     def __call__(self, theta, data, pars):
         '''
@@ -214,7 +214,7 @@ class LogPosterior(LogBase):
 
         logprior = self.log_prior(theta)
         theta_pars = self.theta2pars(theta)
-        _dp_ = [self.derived.eval(p, theta_pars) for p in self.derived.keys()]
+        _dp_ = [self.derived.eval(p, **theta_pars) for p in self.derived.keys()]
         # ad hoc prior on g1/g2/eint1/eint2
         if ('g1' in theta_pars.keys()) and ('g2' in theta_pars.keys()):
             if np.abs(theta_pars['g1'] + 1j*theta_pars['g2'])>1.:

@@ -276,12 +276,12 @@ class DerivedPars(MetaPars):
             - kwargs: **dict
                 Sampled parameters used to evaluate the derived parameters
         '''
-        print(kwargs)
-        func_string = self.pars[key] # lambda expression
+        func_string = self.pars[key] # only support lambda expression so far
         func = eval(func_string)
         variables = re.split('\W+', func_string.split(":")[0])[1:]
         vals = []
         for var in variables:
+            assert var in kwargs, f'{var} not provided for evaluating {key}!'
             vals.append(kwargs.get(var))
         res = func(*vals)
         return res

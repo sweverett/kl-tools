@@ -202,8 +202,14 @@ def main(args):
 
         chain = runner.sampler.get_chain(flat=True)
         post = runner.sampler.get_log_prob(flat=True)
-        np.savetxt(mcmc_dict["output"], np.hstack([chain, post[:,np.newaxis]]), 
-                  header = "# " + " ".join(sampled_pars) + " logprob", comments="")
+        blobs = runner.sampler.get_blob(flat=True)
+        blobs_name = ['logprior', 'loglike', ]
+        if pars.derived.keys() is not None:
+            blobs_name += pars.derived.keys()
+        np.savetxt(mcmc_dict["output"], 
+            np.hstack([chain, post[:,np.newaxis], blobs]), 
+                  header = "# " + " ".join(sampled_pars) + " logprob " + " ".join(blobs_name), 
+                  comments="")
 
     return 0
 

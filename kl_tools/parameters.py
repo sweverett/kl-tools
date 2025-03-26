@@ -260,8 +260,8 @@ class DerivedPars(MetaPars):
 
     '''
     Class that defines structure for the derived parameters
-    NOTE: 
-        The input pars is a dict of derived param name: function string of 
+    NOTE:
+        The input pars is a dict of derived param name: function string of
         sampled parameters, e.g.
         pars = {"V22": "vcirc/(np.pi/2)*np.arctan(1.3*hlr/rscale)"}
     '''
@@ -269,13 +269,14 @@ class DerivedPars(MetaPars):
     _req_fields = []
     _opt_fields = []
     def eval(self, key, **kwargs):
-        ''' Evaluate the derived parameter 
+        ''' Evaluate the derived parameter
         Input:
             - key: string
                 Which derived parameter to evaluate
             - kwargs: **dict
                 Sampled parameters used to evaluate the derived parameters
         '''
+        print(kwargs)
         func_string = self.pars[key] # lambda expression
         func = eval(func_string)
         variables = re.split('\W+', func_string.split(":")[0])[1:]

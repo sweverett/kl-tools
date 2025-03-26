@@ -260,11 +260,11 @@ def parse_yaml(filename):
         # sampled parameters with prior and is not derived params
         if ("prior" in pinfo.keys()) and ("derived" not in pinfo.keys()):
             sampled_pars.append(key)
-            fidvals[key] = config['params'][key]["ref"]["loc"]
+            fidvals[key] = pinfo["ref"]["loc"]
         # setup derived parameters
         if "derived" in pinfo.keys():
-            derived[key] = config['params'][key]["derived"]
-        latex_labels[key] = config['params'][key].get("latex", key)
+            derived[key] = pinfo["derived"]
+        latex_labels[key] = pinfo.get("latex", key)
     # start from the `meta` field and fill parameters that are set to `param`
     Nsampled = parse_param(config['meta'], config['params'])
     if rank==0:

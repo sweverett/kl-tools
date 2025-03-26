@@ -384,7 +384,7 @@ class LogLikelihood(LogBase):
         for key in ['v0', 'vcirc', 'rscale']:
             if theta_pars.get(key, None) is None:
                 theta_pars[key] = meta['velocity'][key]
-        for key in ['theta_int', 'sini']:
+        for key in ['theta_int', 'sini', 'g1', 'g2']:
             if theta_pars.get(key, None) is None:
                 theta_pars[key] = meta[key]
         # setup vmap offset parameters

@@ -4,7 +4,7 @@ import os
 import galsim as gs
 import numpy as np
 import astropy.units as u
-
+import re
 import ipdb
 
 '''
@@ -276,8 +276,13 @@ class DerivedPars(MetaPars):
             - kwargs: **dict
                 Sampled parameters used to evaluate the derived parameters
         '''
-        func_string = self.pars[key]
-        res = eval(func_string)
+        func_string = self.pars[key] # lambda expression
+        func = eval(func_string)
+        variables = re.split('\W+', func_string.split(":")[0])[1:]
+        vals = []
+        for var in variables:
+            vals.append(kwargs.get(var))
+        res = func(*vals)
         return res
 
 ########## parameters for observation and cube modeling ########

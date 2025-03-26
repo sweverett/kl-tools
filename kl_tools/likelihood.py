@@ -140,6 +140,10 @@ class LogBase(object):
         return self.parameters.sampled
 
     @property
+    def derived(self):
+        return self.parameters.derived
+
+    @property
     def pars_order(self):
         return self.parameters.sampled.pars_order
 
@@ -183,14 +187,17 @@ class LogPosterior(LogBase):
 
         return
 
-    def blob(self, prior, likelihood):
+    def blob(self, prior, likelihood, derived=None):
         '''
         Set what the blob returns
 
         For the base class, this will just be the (prior, likelihood)
         tuple
         '''
-        return (prior, likelihood)
+        if derived is None:
+            return (prior, likelihood)
+        else:
+            return (prior, likelihood, derived)
 
     def __call__(self, theta, data, pars):
         '''
@@ -207,6 +214,7 @@ class LogPosterior(LogBase):
 
         logprior = self.log_prior(theta)
         theta_pars = self.theta2pars(theta)
+        _dp_ = [self.derived.eval(p, theta_pars) for p in self.derived.keys()]
         # ad hoc prior on g1/g2/eint1/eint2
         if ('g1' in theta_pars.keys()) and ('g2' in theta_pars.keys()):
             if np.abs(theta_pars['g1'] + 1j*theta_pars['g2'])>1.:
@@ -215,7 +223,7 @@ class LogPosterior(LogBase):
             if np.abs(theta_pars['eint1'] + 1j*theta_pars['eint2'])>1.:
                 logprior = -np.inf
         if logprior == -np.inf:
-            return -np.inf, self.blob(-np.inf, -np.inf)
+            return -np.inf, self.blob(-np.inf, -np.inf, _dp_)
 
         else:
             loglike = self.log_likelihood(theta, data)
@@ -223,7 +231,7 @@ class LogPosterior(LogBase):
             print("loglike is NaN at theta = ", theta)
             exit(-1)
 
-        return logprior + loglike, self.blob(logprior, loglike)
+        return logprior + loglike, self.blob(logprior, loglike, _dp_)
 
 class LogPrior(LogBase):
     def __init__(self, parameters):
@@ -249,12 +257,24 @@ class LogPrior(LogBase):
         '''
 
         pars_order = self.parameters.sampled.pars_order
+        theta_dict = self.parameters.sampled.theta2pars(theta)
+        derived_params = self.parameters.derived.keys()
 
         logprior = 0
 
         for name, prior in self.priors.items():
-            indx = pars_order[name]
-            logprior += prior(theta[indx], log=True)
+            # if the parameter is sampled
+            if name in pars_order.keys():
+                indx = pars_order[name]
+                logprior += prior(theta[indx], log=True)
+            # if the parameter is derived
+            elif name in derived_params:
+                _derived_val = self.parameters.derived.eval(name, **theta_dict)
+                logprior += prior(_derived_val, log=True)
+            # unknown parameter
+            else:
+                raise ValueError(f'{name} in meta.priors is not recognized!')
+                exit(-1)
 
         return logprior
 

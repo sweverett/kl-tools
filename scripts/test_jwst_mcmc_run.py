@@ -109,7 +109,7 @@ def main(args):
     src_z = data_hdul[0].header["fit_center_um"]*u.um/LINE_LAMBDAS[eml_name]-1
     meta_dict['sed']['z'] = src_z.to('1').value
 
-    pars = Pars(sampled_pars, meta_dict)
+    pars = Pars(sampled_pars, meta_dict, derived)
 
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 

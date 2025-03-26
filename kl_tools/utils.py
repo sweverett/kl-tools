@@ -256,20 +256,28 @@ def parse_yaml(filename):
     derived = {}
     # make a list of fiducial values of parameters being sampled
     for key in config['params']:
-        if "prior" in config['params'][key].keys():
+        pinfo = config['params'][key]
+        # sampled parameters with prior and is not derived params
+        if ("prior" in pinfo.keys()) and ("derived" not in pinfo.keys()):
             sampled_pars.append(key)
             fidvals[key] = config['params'][key]["ref"]["loc"]
-        if "derived" in config['params'][key].keys():
+        # setup derived parameters
+        if "derived" in pinfo.keys():
             derived[key] = config['params'][key]["derived"]
         latex_labels[key] = config['params'][key].get("latex", key)
     # start from the `meta` field and fill parameters that are set to `param`
     Nsampled = parse_param(config['meta'], config['params'])
     if rank==0:
         print(f'{Nsampled} parameters are being sampled: {sampled_pars}')
-    # set the priors in meta
+    ### set the priors in meta
+    ### Incl. sampled AND derived parameters
     config['meta']['priors'] = {}
     for key in sampled_pars:
         config['meta']['priors'][key] = parse_prior(config['params'][key]['prior'])
+    for key in derived.keys():
+        pinfo = config["params"][key]
+        if "prior" in pinfo.keys():
+            config['meta']['priors'][key] = parse_prior(pinfo['prior'])
     # set the MCMC initialized sample ball
     for key in sampled_pars:
         propose_mean, propose_std, proposal = parse_propose(config["params"][key]["ref"])

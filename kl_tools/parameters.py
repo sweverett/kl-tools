@@ -29,7 +29,7 @@ class Pars(object):
     sampled and meta parameters
     '''
 
-    def __init__(self, sampled_pars, meta_pars):
+    def __init__(self, sampled_pars, meta_pars, derived_pars={}):
         '''
         sampled_pars: list of str's
             A list of parameter names to be sampled in the MCMC.
@@ -41,7 +41,8 @@ class Pars(object):
 
         args = {
             'sampled_pars': (sampled_pars, list),
-            'meta_pars': (meta_pars, dict)
+            'meta_pars': (meta_pars, dict),
+            'derived_pars': (derived_pars, dict),
             }
         utils.check_types(args)
 
@@ -51,6 +52,7 @@ class Pars(object):
         pars_order = dict(zip(sampled_pars, range(len(sampled_pars))))
         self.sampled = SampledPars(pars_order)
         self.meta = MCMCPars(meta_pars)
+        self.derived = DerivedPars(derived_pars)
 
         return
 
@@ -253,6 +255,30 @@ class MCMCPars(MetaPars):
                 pars[key] = cls._set_sampled_pars(theta_pars, pars[key])
 
         return pars
+
+class DerivedPars(MetaPars):
+
+    '''
+    Class that defines structure for the derived parameters
+    NOTE: 
+        The input pars is a dict of derived param name: function string of 
+        sampled parameters, e.g.
+        pars = {"V22": "vcirc/(np.pi/2)*np.arctan(1.3*hlr/rscale)"}
+    '''
+
+    _req_fields = []
+    _opt_fields = []
+    def eval(self, key, **kwargs):
+        ''' Evaluate the derived parameter 
+        Input:
+            - key: string
+                Which derived parameter to evaluate
+            - kwargs: **dict
+                Sampled parameters used to evaluate the derived parameters
+        '''
+        func_string = self.pars[key]
+        res = eval(func_string)
+        return res
 
 ########## parameters for observation and cube modeling ########
 

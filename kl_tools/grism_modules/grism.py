@@ -553,7 +553,7 @@ class GrismDataVector(DataVector):
             if "MASK%d"%(i+1) in self.header:
                 self.mask.append(hdul[self.header["MASK%d"%(i+1)]].data)
             else:
-                self.mask.append(None)
+                self.mask.append(np.ones(self.data[-1].shape))
             # self.data.append(hdul[1+2*i].data)
             # self.data_header.append(hdul[1+2*i].header)
             # self.noise.append(hdul[2+2*i].data)

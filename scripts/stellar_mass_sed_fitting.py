@@ -84,6 +84,7 @@ def build_model(object_redshift=0.0, fixed_metallicity=None, add_duste=False,
     model_params["tau"]["prior"] = priors.LogUniform(mini=1e-1, maxi=10)
     model_params["logMass"]["prior"] = priors.TopHat(mini=6, maxi=12)
     model_params["dust_index"]["prior"] = priors.TopHat(mini=-3.0, maxi=1.0)
+    model_params["logzsol"]["prior"] = priors.TopHat(mini=-2.0, maxi=0.40)
 
     # Change the model parameter specifications based on some keyword arguments
     if fixed_metallicity is not None:
@@ -159,6 +160,7 @@ def build_obs(ind=0, phottable='demo_photometry.fits', **kwargs):
     # e.g.:
     # import astropy.io.fits as pyfits
     # catalog = pyfits.getdata(phottable)
+    from prospect.utils.obsutils import fix_obs
 
     # Here we will read in an fits catalog
     catalog = Table().read(phottable)
@@ -166,18 +168,26 @@ def build_obs(ind=0, phottable='demo_photometry.fits', **kwargs):
     assert ind<Nrows, f'ind = {ind} is larger than the size of table {Nrows}!'
 
     # Find the object right now
-    objid = catalog['ID'][ind]
-    zgal = catalog[ind]['z_spec']
+    obj_gal = catalog[ind]
+    objid = obj_gal['ID']
+    zgal = obj_gal['z_spec']
     print(f'Building observation of object {objid} at redshift {zgal:.2f}')
     # convert the flux from nJy  to maggy & set negative fluxes to zero
     # NOTE: the factor of 1.25 is aperture correction
-    maggies = np.array([catalog[ind]["%s_CIRC0"%bp]*1.25*1.0e-9/3631.0 for bp in filters_used]).flatten()
+    nJy2maggy = 1.25*1.0e-9/3631.0
+    maggies = np.array([obj_gal["%s_CIRC0"%bp]*nJy2maggy for bp in filters_used]).flatten()
     maggies[maggies<0] = 0.0
-    magerr = np.array([catalog[ind]["%s_CIRC0_e"%bp]*1.25*1.0e-9/3631.0 for bp in filters_used]).flatten()
+    magerr = np.array([obj_gal["%s_CIRC0_e"%bp]*nJy2maggy for bp in filters_used]).flatten()
+    print(f'Object flux:')
+    for i,bp in enumerate(filters_used):
+        flux = maggies[i]
+        flux_err = magerr[i]
+        print(f'--- {bp:10s}: {flux:.2e} pm {flux_err:.2e} nJy')
 
     # Build output dictionary.
     obs = dict(redshift=zgal, wavelength=None, spectrum=None,unc=None,
-           maggies=maggies, maggies_unc=magerr, filters=filters)
+           maggies=maggies, maggies_unc=magerr, filters=filters,
+           mask=(np.isfinite(maggies) & np.isfinite(magerr)) )
     obs = fix_obs(obs)
 
     return obs
@@ -224,22 +234,28 @@ if __name__ == '__main__':
                         help="If set, add dust emission to the model.")
     parser.add_argument('--phottable', type=str, default="demo_photometry.dat",
                         help="Names of table from which to get photometry.")
-    parser.add_argument('--ind', type=int, default=0,
-                        help="zero-index row number in the table to fit.")
+    parser.add_argument('--ind', type=int, default=1,
+                        help="ONE-index row number in the table to fit.")
 
     # --- Configure ---
     args = parser.parse_args()
     config = vars(args)
     config["param_file"] = __file__
     catalog = Table().read(config['phottable'])
+    # SLURM array jobs start from ind=1, we have to convert it to zero-indexed
+    config['ind'] = config['ind'] - 1
+    assert config['ind'] < len(catalog), f'{config["ind"]} beyond catalog size {len(catalog)}!'
     config['objid'] = catalog[config['ind']]['ID']
     config['object_redshift'] = catalog[config['ind']]['z_spec']
     config['nested_method']="rwalk"
+    print(f'\nRunning SED fitting for object {config["objid"]}...')
+    print("\n\nRunning with the following configuration:")
+    for k,v in config.items():
+        print(f'>>> {k} = {v}')
 
     # --- Get fitting ingredients ---
     obs, model, sps = build_all(**config)
     config["sps_libraries"] = sps.ssp.libraries
-    print(f'Running SED fitting for object {config["objid"]}...')
     print(model)
 
     if args.debug:
@@ -250,10 +266,11 @@ if __name__ == '__main__':
     hfile = f'{target_dir}/ID{config["objid"]}_DelayedTau_result.h5'
 
     #  --- Run the actual fit ---
-    output = fit_model(obs, model, sps, optimize=False, lnprobfn=lnprobfn, 
+    print(f'\nStart SED fitting...')
+    output = fit_model(obs, model, sps, lnprobfn=lnprobfn, 
         noise=(None, None), **config)
 
-    print("writing to {}".format(hfile))
+    print("\nWriting to {}".format(hfile))
     writer.write_hdf5(hfile,
                       config,
                       model,

@@ -1293,6 +1293,7 @@ class GrismLikelihood(LogLikelihood):
                 #img, _ = fc.observe(None, gal, sed)
                 img, _ = fc.observe(gal_phot=gal_phot, datavector=dv)
             mask = dv.get_mask(i)
+            temp = fc.conf.get('TEMP', 1.0)
             #if mask:
             #    mask = np.ones_like(img)
             #axes[i].imshow(img, origin='lower')
@@ -1301,7 +1302,7 @@ class GrismLikelihood(LogLikelihood):
             #noise = np.std(dv.get_noise(i))
             noise = dv.get_noise(i)
             chi2 = np.sum(((data-img)*mask/noise)**2)
-            loglike += -0.5*chi2
+            loglike += -0.5*chi2/temp
             if timing:
                 print("---- calculate dchi2 %d/%d | %.2f ms -----" % (i+1,self.Nobs,time()*1000 - start_time))
         #plt.show()

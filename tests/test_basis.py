@@ -187,8 +187,6 @@ class TestBasis(unittest.TestCase):
         exp_shapelets = kl_basis.ExpShapeletBasis(nmax=nmax, beta=beta)
         shapelets = kl_basis.ShapeletBasis(nmax=nmax, beta=beta)
 
-        self.show = True
-
         # test the plot_basis_funcs() method
         for basis in [sersiclets, exp_shapelets, shapelets]:
             outfile = self.outdir / f'{basis.name}-basis-funcs.png'

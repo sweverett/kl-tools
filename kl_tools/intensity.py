@@ -118,7 +118,8 @@ class IntensityMap(object):
         weights: np.ndarray; default None
             A 2D array of weights to apply to the image pixels, if needed
         mask: np.ndarray; default None
-            A 2D array of bools to mask the image pixels, if needed
+            A 2D array of bools to mask the image pixels, if needed. NOTE: we
+            assume a convention where 0 is unmasked and all else is masked
         image: np.ndarray; default None
             The 2D image that is being modeled, if necessary. Most intensity 
             maps do not need this, but some may need to be fit to a specific
@@ -520,7 +521,9 @@ class BasisIntensityMap(IntensityMap):
             # imap depend on the sample draw
             self.is_static = False
 
-        image, continuum = self._fit_to_image(image, theta_pars, pars)
+        image, continuum = self._fit_to_image(
+            image, image_pars, theta_pars, pars
+            )
 
         return image, continuum
 
@@ -529,6 +532,7 @@ class BasisIntensityMap(IntensityMap):
         self.fitter = IntensityMapFitter(
             self.basis_type,
             self.basis_kwargs,
+            self.basis_plane,
             image_pars,
             continuum_template=self.continuum,
             psf=self.psf,
@@ -538,9 +542,11 @@ class BasisIntensityMap(IntensityMap):
 
         return
 
-    def _fit_to_image(self, image, theta_pars, pars):
+    def _fit_to_image(self, image, image_pars, theta_pars, pars):
 
-        image, continuum = self.fitter.fit(image, theta_pars, pars)
+        image, continuum = self.fitter.fit(
+            image, image_pars, theta_pars, pars
+            )
 
         return image, continuum
 
@@ -581,6 +587,9 @@ class IntensityMapFitter(object):
         The name of the basis_type type used
     basis_kwargs: dict
         Keyword args needed to build given basis type
+    basis_plane: str
+        The plane where the basis functions are defined. See transformation.py
+        for the supported planes.
     image_pars: ImagePars
         The image parameters, including the shape & pixel scale
     continuum_template: numpy.ndarray
@@ -591,14 +600,15 @@ class IntensityMapFitter(object):
     weights: numpy.ndarray
         A 2D array of floats to apply to the fitted stacked image
     mask: numpy.ndarray
-        A 2D array of bools to mask the stacked image
+        A 2D array of bools to mask the stacked image. NOTE: we assume a
+        convention where 0 is unmasked and all else is masked
     '''
 
     def __init__(
             self,
             basis_type,
-            basis_plane,
             basis_kwargs,
+            basis_plane,
             image_pars, 
             continuum_template=None,
             psf=None,
@@ -612,7 +622,10 @@ class IntensityMapFitter(object):
 
         Nrow, Ncol = image_pars.Nrow, image_pars.Ncol
         self.image_shape = (Nrow, Ncol)
+        self.image_pixel_scale = image_pars.pixel_scale
         self.Ndata = Nrow * Ncol
+
+        assert self.image_shape == image_pars.shape
 
         self.continuum_template = continuum_template
 
@@ -621,6 +634,11 @@ class IntensityMapFitter(object):
                 raise ValueError(
                     f'{k} shape {v.shape} must match image shape {self.image_shape}'
                     )
+
+        if weights is None:
+            weights = np.ones(self.image_shape, dtype=float)
+        if mask is None:
+            mask = np.zeros(self.image_shape, dtype=bool)
         self.weights = weights
         self.mask = mask
 
@@ -630,9 +648,13 @@ class IntensityMapFitter(object):
         # not as (row,col) in numpy format due to the definition of the basis
         # functions in basis.py
         Nx, Ny = image_pars.Nx, image_pars.Ny
-        self.grid = utils.build_map_grid(Nx, Ny, indexing='xy')
+        Xpix, Ypix = utils.build_map_grid(Nx, Ny, indexing='xy')
+        # account for pixel scale
+        X = Xpix * self.image_pixel_scale
+        Y = Ypix * self.image_pixel_scale
+        self.grid = (X, Y)
 
-        self._initialize_basis(basis_kwargs)
+        self._initialize_basis(basis_kwargs, image_pars)
 
         # will be set once transformation params and cov are passed
         self.design_mat = None
@@ -642,7 +664,7 @@ class IntensityMapFitter(object):
 
         return
 
-    def _initialize_basis(self, basis_kwargs):
+    def _initialize_basis(self, basis_kwargs, image_pars):
         if 'use_continuum_template' in basis_kwargs:
             basis_kwargs.pop('use_continuum_template')
 
@@ -651,6 +673,15 @@ class IntensityMapFitter(object):
 
         if self.continuum_template is not None:
             self.Nbasis += 1
+
+        if self.basis.beta is None:
+            # try to guess a good scale radius given the image parameters
+            # NOTE: while the basis render_im() method can handle varying beta
+            # per call, the design matrix cannot and so we set it here
+            Nx = image_pars.Nx
+            Ny = image_pars.Ny
+            pixel_scale = image_pars.pixel_scale
+            self.basis.set_default_beta(Nx, Ny, pixel_scale)
 
         self.mle_coefficients = np.zeros(self.Nbasis)
 
@@ -683,11 +714,11 @@ class IntensityMapFitter(object):
                 Xobs, Yobs, 'obs', basis_plane, theta_pars
                 )
 
-        x = X.reshape(Ndata)
-        y = Y.reshape(Ndata)
+        x = X.flatten(order='C')
+        y = Y.flatten(order='C')
 
         # apply mask
-        mask = self.mask.reshape(Ndata)
+        mask = self.mask.flatten(order='C')
         select = np.where(mask == 0)
         x = x[select]
         y = y[select]
@@ -705,7 +736,7 @@ class IntensityMapFitter(object):
 
         # handle continuum template separately
         if self.continuum_template is not None:
-            template = self.continuum_template.reshape(Ndata)[select]
+            template = self.continuum_template.flatten(order='C')[select]
 
             # make sure we aren't overriding anything
             assert (self.basis.N + 1) == self.Nbasis
@@ -820,7 +851,7 @@ class IntensityMapFitter(object):
 
         return
 
-    def fit(self, image, theta_pars, pars, cov=None):
+    def fit(self, image, image_pars, theta_pars, pars, cov=None):
         '''
         Fit MLE of the basis intensity map for a given 2D image
 
@@ -828,10 +859,12 @@ class IntensityMapFitter(object):
         be only bearound the relevant emission line region, though not 
         necessarily with the continuum emission subtracted
 
-        theta_pars: dict
-            A dictionary of sampled parameters
         image: np.ndarray
             The stacked, 2D photometric image to fit to
+        image_pars: ImagePars
+            An ImagePars instance containing parameters such as image shape
+        theta_pars: dict
+            A dictionary of sampled parameters
         cov: np.ndarray
             The covariance matrix of the fitted image.
             NOTE: If the covariance matrix is of the form sigma*I for a
@@ -847,9 +880,12 @@ class IntensityMapFitter(object):
             # try looking for it in pars first
             try:
                 cov = pars['cov']
-            except KeyError:
+            except (TypeError, KeyError):
                 # if not found, keep it None
                 pass
+        else:
+            if cov.shape != self.image_shape:
+                raise ValueError('Cov matrix and image must have same shape!')
 
         # Initialize pseudo-inverse given the transformation parameters, plus
         # possibly other parameters
@@ -873,7 +909,12 @@ class IntensityMapFitter(object):
             if self.basis.is_complex is True:
                 mle_continuum = mle_continuum.real
 
-        mle_im = self.basis.render_im(theta_pars, used_coeff)
+        mle_im = self.basis.render_im(
+            used_coeff,
+            image_pars,
+            plane=self.basis_plane,
+            transformation_pars=theta_pars
+            )
 
         assert mle_im.shape == image.shape
         self.mle_im = mle_im
@@ -881,16 +922,20 @@ class IntensityMapFitter(object):
 
         return mle_im, mle_continuum
 
-    def _fit_mle_coeff(self, data, cov=None):
+    def _fit_mle_coeff(self, image, cov=None):
         '''
-        data: np.array
-            The (nx*ny) data vector
+        image: np.array
+            The 2D image to fit to
+        cov: np.array
+            The 2D covariance matrix to use in the fit. NOTE: non-diagonal
+            covariance matrices are not yet implemented!
         '''
 
         if cov is None:
             # The solution is simply the Moore-Penrose pseudo inverse
             # acting on the data vector
-            mle_coeff = self.pseudo_inv.dot(data[self.selection])
+            image_flattened = image.flatten(order='C')
+            mle_coeff = self.pseudo_inv.dot(image_flattened[self.selection])
             # import pudb; pudb.set_trace()
 
         else:

@@ -122,6 +122,15 @@ class Basis(object):
 
         return default_beta
 
+    def set_default_beta(self, nx, ny, pixel_scale):
+        '''
+        Set the basis scale radius beta given some image parameters
+        '''
+
+        self.beta = self._get_default_beta(nx, ny, pixel_scale)
+
+        return
+
     def get_basis_func(self, n, x, y, nx=None, ny=None, pixel_scale=None):
         '''
         Return the function call that will evaluate the nth basis
@@ -130,9 +139,9 @@ class Basis(object):
         n: int
             The indexed basis function to evaluate
         x: numpy.ndarray
-            X positions to evaluate basis at
+            X positions to evaluate basis at, in units of beta
         y: numpy.ndarray
-            Y positions to evaluate basis at
+            Y positions to evaluate basis at, in units of beta
         nx: int; default None
             The number of pixels along the x-axis; only needed for PSF
             convolutions
@@ -167,9 +176,7 @@ class Basis(object):
     def render_im(
             self,
             coefficients,
-            nx,
-            ny,
-            pixel_scale,
+            image_pars,
             plane='obs',
             transformation_pars=None,
             allow_default_beta=True
@@ -179,15 +186,8 @@ class Basis(object):
 
         coefficients: list, np.array
             A list or array of basis coefficients
-        nx: int
-            The number of pixels along the x-axis. NOTE: Not the same as nrow
-            (numpy.shape[0])!
-        ny: int
-            The number of pixels along the y-axis. NOTE: Not the same as ncol
-            (numpy.shape[1])!
-        pixel_scale: float
-            The pixel scale of the image, in the same units as beta. Typically
-            arcseconds per pixel.
+        image_pars: ImagePars
+            An ImaegPars instance, including image shape and pixel scale
         plane: str; default 'obs'
             The image plane to render the image in. Must be one of the
             planes defined in the transformation module, e.g. obs, disk, etc.
@@ -199,6 +199,12 @@ class Basis(object):
             set, given the image parameters. If False, then an error will be 
             raised
         '''
+
+        nrow = image_pars.Nrow # numpy shape[0]
+        ncol = image_pars.Ncol # numpy shape[1]
+        nx = image_pars.Nx # numpy shape[1]
+        ny = image_pars.Ny # numpy shape[0]
+        pixel_scale = image_pars.pixel_scale
 
         if len(coefficients) != self.N:
             raise ValueError(
@@ -224,17 +230,28 @@ class Basis(object):
 
         # NOTE/TODO: think about how to generalize this in the future!
         # adapt any offset parameters as well
-        transformation_pars['x0'] = pixel_scale * transformation_pars['x0']
-        transformation_pars['y0'] = pixel_scale * transformation_pars['y0']
+        if transformation_pars is not None:
+            for col in ['x0', 'y0']:
+                if not col in transformation_pars.keys():
+                    raise ValueError(
+                        'transformation_pars must contain x0 and y0 keys!'
+                        )
+            transformation_pars['x0'] = pixel_scale * transformation_pars['x0']
+            transformation_pars['y0'] = pixel_scale * transformation_pars['y0']
+        else:
+            transformation_pars = {}
 
-        X, Y = transform_coords(
-            Xobs, Yobs, 'obs', plane, transformation_pars
-            )
+        if plane == 'obs':
+            X, Y = Xobs, Yobs
+        else:
+            X, Y = transform_coords(
+                Xobs, Yobs, 'obs', plane, transformation_pars
+                )
 
         if self.is_complex is True:
-            im = np.zeros((nx, ny), dtype=np.complex128)
+            im = np.zeros((nrow, ncol), dtype=np.complex128)
         else:
-            im = np.zeros((nx, ny))
+            im = np.zeros((nrow, ncol))
 
         for n in range(self.N):
             bfunc = self.get_basis_func(
@@ -457,9 +474,7 @@ class PolarBasis(Basis):
     def render_im(
             self,
             coefficients,
-            nx,
-            ny,
-            pixel_scale,
+            image_pars,
             plane='obs',
             transformation_pars=None,
             allow_default_beta=True
@@ -472,15 +487,17 @@ class PolarBasis(Basis):
         if self.nmax is None:
             nmax_set = False
             # set nmax automatically given image parameters
-            self._set_default_nmax(nx, ny, pixel_scale)
+            self._set_default_nmax(
+                image_pars.Nx,
+                image_pars.Ny,
+                image_pars.pixel_scale
+                )
         else:
             nmax_set = True
 
         basis_im = super().render_im(
             coefficients,
-            nx,
-            ny,
-            pixel_scale,
+            image_pars,
             plane=plane,
             transformation_pars=transformation_pars,
             allow_default_beta=allow_default_beta

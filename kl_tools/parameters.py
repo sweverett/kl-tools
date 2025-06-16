@@ -321,8 +321,8 @@ class ImagePars(object):
             raise ValueError('Only one of pixel_scale or wcs can be passed!')
 
         if pixel_scale is not None:
-            if not isinstance(pixel_scale, float):
-                raise TypeError('pixel_scale must be a float!')
+            if not isinstance(pixel_scale, (int, float)):
+                raise TypeError('pixel_scale must be an int or float!')
             self.pixel_scale = pixel_scale
             self.wcs = WCS(naxis=2)
             self.wcs.wcs.cdelt = np.array([pixel_scale, pixel_scale])

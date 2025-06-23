@@ -40,6 +40,16 @@ class Basis(object):
         A PSF model to convolve the basis by, if desired
     '''
 
+    # TODO: we should add the capability of caching PSF-convolved basis
+    # functions, so that we don't have to convolve them every time. This
+    # requires certain assumptions, so something like the following:
+    # 1) Only used in render_im() method, which is able to ensure that the
+    #    position grid, PSF, pixel scale, etc. are constant within the method 
+    #    scope
+    # 2) Create a hash table based off of a (n, nx, ny, pixel_scale) tuple
+    # 3) If the hash table already has the convolved basis function, then
+    #    return it, otherwise convolve & cache
+
     # each subclass must override this, if necessary
     is_complex = False
 
@@ -134,7 +144,8 @@ class Basis(object):
     def get_basis_func(self, n, x, y, nx=None, ny=None, pixel_scale=None):
         '''
         Return the function call that will evaluate the nth basis
-        function at (x,y) positions
+        function at (x,y) positions. Will account for pixel area noralization
+        if the pixel_scale is passed
 
         n: int
             The indexed basis function to evaluate
@@ -168,10 +179,10 @@ class Basis(object):
         args = [x, y, *func_args]
         bfunc = func(*args)
 
-        if self.psf is None:
-            return bfunc
-        else:
-            return self.convolve_basis_func(bfunc, nx, ny, pixel_scale)
+        if self.psf is not None:
+            bfunc = self.convolve_basis_func(bfunc, nx, ny, pixel_scale)
+
+        return bfunc
 
     def render_im(
             self,
@@ -193,7 +204,10 @@ class Basis(object):
             planes defined in the transformation module, e.g. obs, disk, etc.
         transformation_pars: dict; default None
             A dict that holds the sampled transformation parameters. If None,
-            then cannot render the image in any plane other than `obs`
+            then cannot render the image in any plane other than `obs`. All
+            scale parameters in the transformation_pars dict should be in
+            units of beta, including x0 and y0 offsets, if applicable. All
+            angles should be in radians.
         allow_default_beta: bool; default True
             If True, then the default beta value will be used if it is not
             set, given the image parameters. If False, then an error will be 
@@ -236,8 +250,6 @@ class Basis(object):
                     raise ValueError(
                         'transformation_pars must contain x0 and y0 keys!'
                         )
-            transformation_pars['x0'] = pixel_scale * transformation_pars['x0']
-            transformation_pars['y0'] = pixel_scale * transformation_pars['y0']
         else:
             transformation_pars = {}
 
@@ -268,7 +280,7 @@ class Basis(object):
 
         return im
 
-    def convolve_basis_func(self, bfunc, nx, ny, pixel_scale):
+    def convolve_basis_func(self, bfunc, nx, ny, pixel_scale, method='auto'):
         '''
         Convolve a given basis vector/function by the stored PSF
 
@@ -280,6 +292,10 @@ class Basis(object):
             The number of pixels along the y-axis
         pixel_scale: float
             The pixel scale of the rendered image
+        method: str; default 'auto'
+            The method to use for convolution. If 'auto', then use the
+            default method for galsim.drawImage(). For real PSF estimates with
+            the pixel convolution already applied, use 'no_pixel'.
         '''
 
         if self.psf is None:
@@ -289,20 +305,26 @@ class Basis(object):
             real = bfunc.real
             imag = bfunc.imag
 
-            real_conv_b = self._convolve_basis_func(real, nx, ny, pixel_scale)
-            imag_conv_b = self._convolve_basis_func(imag, nx, ny, pixel_scale)
+            real_conv_b = self._convolve_basis_func(
+                real, nx, ny, pixel_scale, method=method
+                )
+            imag_conv_b = self._convolve_basis_func(
+                imag, nx, ny, pixel_scale, method=method
+                )
 
             conv_b = real_conv_b + 1j*imag_conv_b
 
         else:
-            conv_b = self._convolve_basis_func(bfunc, nx, ny, pixel_scale)
+            conv_b = self._convolve_basis_func(
+                bfunc, nx, ny, pixel_scale, method=method
+                )
 
         return conv_b
 
-    def _convolve_basis_func(self, bfunc, nx, ny, pixel_scale):
+    def _convolve_basis_func(self, bfunc, nx, ny, pixel_scale, method='auto'):
         '''
         Handle the conversion of a basis vector to a galsim interpolated image, 
-        and then colvolve by the psf
+        and then convolve by the psf
 
         bfunc: np.array (1D)
             A vector of a basis function evaluateon the pixel grid
@@ -312,28 +334,32 @@ class Basis(object):
             The number of pixels along the y-axis
         pixel_scale: float
             The pixel scale of the rendered image
+        method: str; default 'auto'
+            The method to use for convolution. If 'auto', then use the
+            default method for galsim.drawImage(). For real PSF estimates with
+            the pixel convolution already applied, use 'no_pixel'.dfk
         '''
+
+        # the real/imag modes of some complex basis functions are fully zero 
+        # across all samples; no need to bother convolving in this case
+        if np.equal(bfunc, 0.0).all():
+            return bfunc
 
         orig_shape = bfunc.shape
 
         if len(orig_shape) == 1:
-            bfunc = bfunc.reshape(nx,ny)
+            bfunc = bfunc.reshape(ny, nx, order='C')
 
         im = gs.Image(bfunc, scale=pixel_scale)
 
-        # the following kwarg options are needed to instantiate
-        # an interpolatd image w/ 0 total image flux
-        im_gs = gs.InterpolatedImage(
-            im, calculate_stepk=False, calculate_maxk=False
-            )
+        im_gs = gs.InterpolatedImage(im)
         conv = gs.Convolve([self.psf, im_gs])
         conv_func = conv.drawImage(
-            scale=pixel_scale, nx=nx, ny=ny, method='no_pixel'
+            scale=pixel_scale, nx=nx, ny=ny, method=method
         ).array
 
-        # needed to make the mapping between 1D and 2D to work...
         if len(orig_shape) == 1:
-            conv_func = conv_func.reshape(nx*ny, order='F')
+            conv_func = conv_func.reshape(nx*ny, order='C')
 
         return conv_func
 
@@ -511,9 +537,7 @@ class PolarBasis(Basis):
 
     def plot_basis_funcs(
             self,
-            nx,
-            ny,
-            pixel_scale,
+            image_pars,
             Nfuncs=None,
             outfile=None,
             show=True,
@@ -522,12 +546,8 @@ class PolarBasis(Basis):
         '''
         Plot the polar basis functions.
         
-        nx: int
-            The number of pixels along the x-axis
-        ny: int
-            The number of pixels along the y-axis
-        pixel_scale: float
-            The pixel scale of the rendered image. In units of beta
+        image_pars: ImagePars
+            An ImagePars instance, including image shape and pixel scale
         Nfuncs: int; default None
             The number of basis functions to plot. If None, then plot all basis 
             functions
@@ -548,9 +568,11 @@ class PolarBasis(Basis):
         nmax = self.nmax
         sqrt = int(np.ceil(np.sqrt(Nfuncs)))
 
-        X, Y = utils.build_map_grid(nx, ny, indexing='xy')
-        X *= pixel_scale
-        Y *= pixel_scale
+        X, Y = utils.build_map_grid(
+            image_pars.Nx, image_pars.Ny, indexing='xy'
+            )
+        X *= image_pars.pixel_scale
+        Y *= image_pars.pixel_scale
 
         for component in ['real', 'imag']:
             fig, axes = plt.subplots(
@@ -561,8 +583,14 @@ class PolarBasis(Basis):
                 l, m = self.n_to_lm(i)
                 nx, ny = self.n_to_NxNy(i)
                 ax = axes[nx, ny]
-                # TODO: figure out nx, ny, pixel_scale
-                image = self.get_basis_func(i, X, Y, nx, ny, pixel_scale)
+                image = self.get_basis_func(
+                    i,
+                    X,
+                    Y,
+                    nx=image_pars.Nx,
+                    ny=image_pars.Ny,
+                    pixel_scale=image_pars.pixel_scale
+                    )
 
                 try:
                     if component == 'real':
@@ -594,7 +622,7 @@ class PolarBasis(Basis):
                 pstr = ''
             plt.suptitle(
                 f'First {Nfuncs} {component} basis functions for {self.name}'
-                f'{pstr}\nbeta={self.beta}, pixel_scale={pixel_scale}',
+                f'{pstr}\nbeta={self.beta}, pixel_scale={image_pars.pixel_scale}',
                 y=0.95
                 )
 
@@ -714,9 +742,9 @@ class SersicletBasis(PolarBasis):
         def from https://arxiv.org/abs/1106.6045
 
         r: float, np.array
-            The array of r values to evaluate at
+            The array of r values to evaluate at, in units of beta
         phi: float, np.array
-            The array of phi values to evaluate at
+            The array of phi values to evaluate at, in radians
         beta: float
             The scale factor of the disclets
         l: int
@@ -841,11 +869,13 @@ class ExpShapeletBasis(PolarBasis):
         We use the def from https://arxiv.org/abs/1903.05837
 
         x: float, np.array
-            The array of x values to evaluate at (converted to r, phi)
+            The array of x values to evaluate at (converted to r, phi), in
+            units of beta
         y: float, np.array
-            The array of y values to evaluate at (converted to r, phi)
+            The array of y values to evaluate at (converted to r, phi), in
+            units of beta
         phi: float, np.array
-            The array of phi values to evaluate at
+            The array of phi values to evaluate at, in radians
         beta: float
             The scale factor of the exponential shapelets
         l: int
@@ -1061,9 +1091,9 @@ class ShapeletBasis(Basis):
         Parameters
         ----------
         x: float, np.array
-            The array of x values to evaluate at (in units of beta)
+            The array of x values to evaluate at, in units of beta
         y: float, np.array
-            The array of y values to evaluate at (in units of beta)
+            The array of y values to evaluate at, in units of beta
         beta: float
             The scale factor of the shapelets
         Nx: int
@@ -1085,9 +1115,7 @@ class ShapeletBasis(Basis):
 
     def plot_basis_funcs(
             self,
-            nx,
-            ny,
-            pixel_scale,
+            image_pars,
             Nfuncs=None,
             outfile=None,
             show=True,
@@ -1098,12 +1126,8 @@ class ShapeletBasis(Basis):
         '''
         Plot the Shapelet basis functions.
         
-        nx: int
-            The number of pixels along the x-axis (*not* the x-axis eigenstate!)
-        ny: int
-            The number of pixels along the y-axis (*not* the y-axis eigenstate!)
-        pixel_scale: float
-            The pixel scale of the rendered image. In units of beta
+        image_pars: ImagePars
+            An ImagePars instance, including image shape and pixel scale
         Nfuncs: int; default None
             The number of basis functions to plot. If None, then plot all basis 
             functions
@@ -1123,9 +1147,11 @@ class ShapeletBasis(Basis):
         nmax = self.nmax
         sqrt = int(np.ceil(np.sqrt(N)))
 
-        X, Y = utils.build_map_grid(nx, ny, indexing='xy')
-        X *= pixel_scale
-        Y *= pixel_scale
+        X, Y = utils.build_map_grid(
+            image_pars.Nx, image_pars.Ny, indexing='xy'
+            )
+        X *= image_pars.pixel_scale
+        Y *= image_pars.pixel_scale
 
 
         if Nfuncs is None:
@@ -1137,7 +1163,14 @@ class ShapeletBasis(Basis):
         for i in range(Nfuncs):
             nx, ny = self.n_to_NxNy(i)
             ax = axes[nx, ny]
-            image = self.get_basis_func(i, X, Y)
+            image = self.get_basis_func(
+                i,
+                X,
+                Y,
+                image_pars.Nx,
+                image_pars.Ny,
+                pixel_scale=image_pars.pixel_scale
+                )
             im = ax.imshow(image, origin='lower')
 
             divider = make_axes_locatable(ax)
@@ -1161,7 +1194,7 @@ class ShapeletBasis(Basis):
             pstr = ''
         plt.suptitle(
             f'First {Nfuncs} basis functions for {self.name}'
-            f'{pstr}\nbeta={self.beta} pixel_scaled={pixel_scale}',
+            f'{pstr}\nbeta={self.beta} pixel_scaled={image_pars.pixel_scale}',
             y=0.1
             )
 

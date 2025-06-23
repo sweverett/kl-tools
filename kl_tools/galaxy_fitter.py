@@ -14,8 +14,9 @@ def estimate_gal_properties(
     mask=None,
     method='galsim',
     draw_image_kwargs=None,
+    gsparams=None,
     optimizer='minimize',
-    optimize_kwargs=None
+    optimize_kwargs=None,
 ):
     '''
     Estimate the best-fit profile parameters for an inclined galaxy model.
@@ -46,6 +47,9 @@ def estimate_gal_properties(
         Fitting backend to use. Currently only 'galsim' is implemented.
     draw_image_kwargs : dict or None, optional
         Additional keyword arguments passed to `galsim.GSObject.drawImage`.
+    gsparams : galsim.GSParams or None, optional
+        Optional GSParams for controlling the precision of the Galsim 
+        calculations. If None, default GSParams are used.
     optimizer : str, optional
         Optimizer to use. Currently only 'minimize' and 
         'differential_evolution' are supported.
@@ -70,6 +74,7 @@ def estimate_gal_properties(
             weight=weight,
             mask=mask,
             draw_image_kwargs=draw_image_kwargs,
+            gsparams=gsparams,
             optimizer=optimizer,
             optimize_kwargs=optimize_kwargs
         )
@@ -87,6 +92,7 @@ def _estimate_gal_properties_with_galsim(
     weight,
     mask,
     draw_image_kwargs,
+    gsparams,
     optimizer,
     optimize_kwargs
 ):
@@ -94,16 +100,16 @@ def _estimate_gal_properties_with_galsim(
     pixel_scale = image_pars.pixel_scale
 
     default_guess = {
-        'x': 0.0,
-        'y': 0.0,
-        'theta': 0.0,
+        'x0': 0.0,
+        'y0': 0.0,
+        'theta_int': 0.0,
         'sini': 0.5,
         'n': 1.0
     }
     default_bounds = {
-        'x': (pixel_scale*-nx//2, pixel_scale*nx//2),
-        'y': (pixel_scale*-ny//2, pixel_scale*ny//2),
-        'theta': (0.0, np.pi),
+        'x0': (pixel_scale*-nx/2., pixel_scale*nx/2.),
+        'y0': (pixel_scale*-ny/2., pixel_scale*ny/2.),
+        'theta_int': (0.0, np.pi),
         'sini': (0.0, 1.0),
         'n': (0.8, 4.5)
     }
@@ -141,7 +147,7 @@ def _estimate_gal_properties_with_galsim(
         result = minimize(
             _gal_residual,
             x0=param_guess,
-            args=(keys, image, image_pars, psf, mask, weight, loss, draw_image_kwargs, sersic_n),
+            args=(keys, image, image_pars, psf, mask, weight, loss, draw_image_kwargs, gsparams, sersic_n),
             bounds=param_bounds,
             **optimize_kwargs
         )
@@ -149,7 +155,7 @@ def _estimate_gal_properties_with_galsim(
         result = differential_evolution(
             func=_gal_residual,
             bounds=param_bounds,
-            args=(keys, image, image_pars, psf, mask, weight, loss, draw_image_kwargs, sersic_n),
+            args=(keys, image, image_pars, psf, mask, weight, loss, draw_image_kwargs, gsparams, sersic_n),
             polish=True,
             **optimize_kwargs
         )
@@ -160,6 +166,7 @@ def _estimate_gal_properties_with_galsim(
         image_pars,
         psf,
         draw_image_kwargs,
+        gsparams,
         sersic_n
         )
 
@@ -180,6 +187,7 @@ def _gal_residual(
         weight,
         loss,
         draw_image_kwargs,
+        gsparams,
         sersic_n
         ):
 
@@ -188,7 +196,7 @@ def _gal_residual(
         return np.inf
 
     model_image = _render_model_image(
-        params, image_pars, psf, draw_image_kwargs, sersic_n
+        params, image_pars, psf, draw_image_kwargs, gsparams, sersic_n
         )
 
     diff = image - model_image
@@ -209,7 +217,12 @@ def _gal_residual(
         raise ValueError(f'Unknown loss: {loss}')
 
 def _render_model_image(
-        pars, image_pars, psf=None, draw_image_kwargs=None, sersic_n=None
+        pars,
+        image_pars,
+        psf=None,
+        draw_image_kwargs=None,
+        gsparams=None,
+        sersic_n=None
         ):
 
     if (pars['sini'] < 0) or (pars['sini'] > 1):
@@ -221,26 +234,37 @@ def _render_model_image(
       gal = gs.InclinedExponential(
         inclination=inclination*gs.radians,
         scale_radius=pars['scale_radius'],
-        flux=pars['flux']
+        flux=pars['flux'],
+        gsparams=gsparams
       )
     else:
       gal = gs.InclinedSersic(
         n=sersic_n if sersic_n is not None else pars['n'],
         inclination=inclination,
         scale_radius=pars['scale_radius'],
-        flux=pars['flux']
+        flux=pars['flux'],
+        gsparams=gsparams
       )
 
-    gal = gal.rotate(pars['theta']*gs.radians)
+    gal = gal.rotate(pars['theta_int']*gs.radians)
     if psf is not None:
         gal = gs.Convolve([gal, psf])
 
+    # galsim expects the offsets in pixel coords
+    offset_pixels = [
+        pars['x0'] / image_pars.pixel_scale,
+        pars['y0'] / image_pars.pixel_scale
+    ]
+
+    if draw_image_kwargs is None:
+        draw_image_kwargs = {}
+
     model = gal.drawImage(
-        offset=gs.PositionD(pars['x'], pars['y']),
+        offset=gs.PositionD(offset_pixels),
         scale=image_pars.pixel_scale,
         nx=image_pars.Nx,
         ny=image_pars.Ny,
-        **(draw_image_kwargs or {})
+        **draw_image_kwargs
     ).array
 
     return model

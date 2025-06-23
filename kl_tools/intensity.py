@@ -275,25 +275,41 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, flux, hlr, continuum=None):
+    def __init__(self, flux, hlr=None, scale_radius=None, continuum=None):
         '''
         flux: float
             Object flux
         hlr: float
-            Object half-light radius (in pixels)
+            Object half-light radius (in arcsec). Can only pass one of
+            hlr or scale_radius, not both
+        scale_radius: float; default None
+            Object scale radius (in pixels). Can only pass one of hlr or
+            scale_radius, not both
         continuum: np.ndarray | callable | None
             The continuum image to set, or a callable function
         '''
 
         super(InclinedExponential, self).__init__('inclined_exp')
 
-        pars = {'flux': flux, 'hlr': hlr}
+        if hlr is None and scale_radius is None:
+            raise ValueError(
+                'Must pass either hlr or scale_radius to InclinedExponential!'
+                )
+        if hlr is not None and scale_radius is not None:
+            raise ValueError(
+                'Cannot pass both hlr and scale_radius to InclinedExponential!'
+                )
+
+        pars = {'flux': flux, 'hlr': hlr, 'scale_radius': scale_radius}
         for name, val in pars.items():
+            if val is None:
+                continue
             if not isinstance(val, (float, int)):
                 raise TypeError(f'{name} must be a float or int!')
 
         self.flux = flux
         self.hlr = hlr
+        self.scale_radius = scale_radius
 
         # same as default, but to make it explicit
         self.is_static = False
@@ -328,9 +344,14 @@ class InclinedExponential(IntensityMap):
 
         inc = Angle(np.arcsin(theta_pars['sini']), radians)
 
-        gal = gs.InclinedExponential(
-            inc, flux=self.flux, half_light_radius=self.hlr
-        )
+        if self.hlr is not None:
+            gal = gs.InclinedExponential(
+                inc, flux=self.flux, half_light_radius=self.hlr
+            )
+        else:
+            gal = gs.InclinedExponential(
+                inc, flux=self.flux, scale_radius=self.scale_radius
+            )
 
         # Only add knots if a psf is provided
         # NOTE: no longer workds due to psf conovlution
@@ -354,18 +375,40 @@ class InclinedExponential(IntensityMap):
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
 
+        if (pars is not None) and ('psf' in pars):
+            psf = pars['psf']
+            if psf is not None:
+                if not isinstance(psf, gs.GSObject):
+                    raise TypeError('PSF must be a galsim.GSObject!')
+                gal = gs.Convolve([gal, psf])
+
         # now for image rendering
         # galsim uses (x,y) for Image-level coordinates
         Nx = image_pars.Nx
         Ny = image_pars.Ny
-        pix_scale = image_pars.pixel_scale
+        pixel_scale = image_pars.pixel_scale
+
+        # assumes all theta_par lengths are in arcsec
+        offset = gs.PositionD(
+            theta_pars['x0'] / pixel_scale,
+            theta_pars['y0'] / pixel_scale
+            )
 
         try:
-            image = gal.drawImage(nx=Nx, ny=Ny, scale=pix_scale).array
+            image = gal.drawImage(
+                nx=Nx,
+                ny=Ny,
+                scale=pixel_scale,
+                offset=offset,
+                ).array
         except:
             # Can fail if no PSF & very inclined
             image = gal.drawImage(
-                nx=Nx, ny=Ny, scale=pix_scale, method='real'
+                nx=Nx,
+                ny=Ny,
+                scale=pixel_scale,
+                offset=offset,
+                method='real'
                 ).array
 
         # NOTE: no support for sample-dependent continuum images at this time
@@ -620,6 +663,7 @@ class IntensityMapFitter(object):
         self.basis_plane = basis_plane
         self.basis_kwargs = basis_kwargs
 
+        self.image_pars = image_pars
         Nrow, Ncol = image_pars.Nrow, image_pars.Ncol
         self.image_shape = (Nrow, Ncol)
         self.image_pixel_scale = image_pars.pixel_scale
@@ -732,7 +776,14 @@ class IntensityMapFitter(object):
             self.design_mat = np.zeros((Npseudo, Nbasis))
 
         for n in range(self.basis.N):
-            self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
+            self.design_mat[:,n] = self.basis.get_basis_func(
+                n,
+                x,
+                y,
+                nx=self.image_pars.Nx,
+                ny=self.image_pars.Ny,
+                pixel_scale=self.image_pars.pixel_scale,
+                )
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -744,7 +795,6 @@ class IntensityMapFitter(object):
             self.design_mat[:,-1] = template
 
         # TODO: Undersand why there are nans!
-        # import pudb; pudb.set_trace()
         self.design_mat = np.nan_to_num(self.design_mat)
 
         return

@@ -1293,7 +1293,7 @@ class GrismLikelihood(LogLikelihood):
                 #img, _ = fc.observe(None, gal, sed)
                 img, _ = fc.observe(gal_phot=gal_phot, datavector=dv)
             mask = dv.get_mask(i)
-            temp = fc.conf.get('TEMP', 1.0)
+            temp = fc.conf['TEMP']
             #if mask:
             #    mask = np.ones_like(img)
             #axes[i].imshow(img, origin='lower')

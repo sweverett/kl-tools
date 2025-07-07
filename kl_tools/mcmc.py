@@ -12,7 +12,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import pickle
 import zeus
 import emcee
-#import pocomc as pc
+import pocomc as pc
 
 import kl_tools.utils as utils
 import kl_tools.priors as priors
@@ -756,117 +756,117 @@ class KLensEmceeRunner(KLensZeusRunner):
         #         pickle.dump(self.pfunc, f)
         return sampler
 
-#class PocoRunner(MCMCRunner):
+class PocoRunner(MCMCRunner):
 
-#    def _initialize_sampler(self, pool=None):
-#        sampler = pc.Sampler(
-#            self.nparticles, self.ndim,
-#            log_likelihood=self.loglike,
-#            log_prior=self.logprior,
-#            log_likelihood_args=self.loglike_args,
-#            log_likelihood_kwargs=self.loglike_kwargs,
-#            log_prior_args=self.logprior_args,
-#            log_prior_kwargs=self.logprior_kwargs,
-#            pool=pool,
-#            infer_vectorization=False
-            # NOTE: wes bounds as we implement this in our priors
-            #bounds=bounds
-#            )
+    def _initialize_sampler(self, pool=None):
+       sampler = pc.Sampler(
+            self.nparticles, self.ndim,
+            log_likelihood=self.loglike,
+            log_prior=self.logprior,
+            log_likelihood_args=self.loglike_args,
+            log_likelihood_kwargs=self.loglike_kwargs,
+            log_prior_args=self.logprior_args,
+            log_prior_kwargs=self.logprior_kwargs,
+            pool=pool,
+            infer_vectorization=False
+           # NOTE: wes bounds as we implement this in our priors
+           #bounds=bounds
+            )
 
-#        return sampler
+        return sampler
 
-#class KLensPocoRunner(PocoRunner):
-#    '''
-#    See https://pocomc.readthedocs.io/en/latest/
-#    '''
+class KLensPocoRunner(PocoRunner):
+    '''
+    See https://pocomc.readthedocs.io/en/latest/
+    '''
 
-#    def __init__(self, nparticles, ndim, loglike, logprior,
-#                 datacube, pars,
-#                 loglike_args=None, loglike_kwargs=None,
-#                 logprior_args=None, logprior_kwargs=None):
-#        '''
-#        nparticles: int
-#            Number of MCMC particles. Recommended to be at least 100
-#            for complex posteriors
-#        ndim: int
-#            Number of sampled dimensions
-#        loglike: function / callable
-#            Log likelihood function to sample from
-#        logprior: function / callable
-#            Log prior function to sample from
-#        datacube: DataCube
-#            A datacube object to fit a model to
-#        pars: A Pars object containing the sampled pars and meta pars
-#              needed to evaluate posterior, such as
-#              covariance matrix, SED definition, etc.
-#        loglike_args: list
-#            List of additional args needed to evaluate log likelihood,
-#            such as the data vector, covariance matrix, etc.
-#        loglike_kwargs: dict
-#            List of additional kwargs needed to evaluate log likelihood,
-#            such as meta parameters, etc.
-#        logprior_args: list
-#            List of additional args needed to evaluate log prior,
-#            such as the data vector, covariance matrix, etc.
-#        logprior_kwargs: dict
-#            List of additional kwargs needed to evaluate log prior,
-#            such as meta parameters, etc.
-#
-#        NOTE: to make this consistent w/ the other mcmc runner classes,
-#        you must pass datacube & pars separately from the rest of the
-#        args/kwargs!
-#        '''
+    def __init__(self, nparticles, ndim, loglike, logprior,
+                 datacube, pars,
+                 loglike_args=None, loglike_kwargs=None,
+                 logprior_args=None, logprior_kwargs=None):
+        '''
+        nparticles: int
+            Number of MCMC particles. Recommended to be at least 100
+            for complex posteriors
+        ndim: int
+            Number of sampled dimensions
+        loglike: function / callable
+            Log likelihood function to sample from
+        logprior: function / callable
+            Log prior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
+              covariance matrix, SED definition, etc.
+        loglike_args: list
+            List of additional args needed to evaluate log likelihood,
+            such as the data vector, covariance matrix, etc.
+        loglike_kwargs: dict
+            List of additional kwargs needed to evaluate log likelihood,
+            such as meta parameters, etc.
+        logprior_args: list
+            List of additional args needed to evaluate log prior,
+            such as the data vector, covariance matrix, etc.
+        logprior_kwargs: dict
+            List of additional kwargs needed to evaluate log prior,
+            such as meta parameters, etc.
 
-#       if loglike_args is not None:
-#           loglike_args = [datacube] + loglike_args
-#       else:
-#           loglike_args = [datacube]
+        NOTE: to make this consistent w/ the other mcmc runner classes,
+        you must pass datacube & pars separately from the rest of the
+        args/kwargs!
+        '''
 
-#       super(KLensPocoRunner, self).__init__(
-#           nparticles, ndim,
-#           loglike=loglike, logprior=logprior,
-#           loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
-#           logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
-#           )
+       if loglike_args is not None:
+           loglike_args = [datacube] + loglike_args
+       else:
+           loglike_args = [datacube]
 
-#        self.datacube = datacube
-#        self.pars = pars
+       super(KLensPocoRunner, self).__init__(
+           nparticles, ndim,
+           loglike=loglike, logprior=logprior,
+           loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
+           logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+           )
 
-#        self.pars_order = self.pars.sampled.pars_order
+        self.datacube = datacube
+        self.pars = pars
 
-#        self.MAP_vmap = None
+        self.pars_order = self.pars.sampled.pars_order
 
-        #...
+        self.MAP_vmap = None
 
-#    @property
-#    def nparticles(self):
-#        return self.nwalkers
+       #...
 
-#    @property
-#    def args(self):
-#        return self.loglike_args
+    @property
+    def nparticles(self):
+        return self.nwalkers
 
-#    @property
-#    def kwargs(self):
-#        return self.loglike_kwargs
+    @property
+    def args(self):
+        return self.loglike_args
 
-#    @property
-#    def meta(self):
-#        return self.pars.meta.pars
+    @property
+    def kwargs(self):
+        return self.loglike_kwargs
 
-#    def _run_sampler(self, start, nsteps=None, progress=True):
-#        '''
-#        The poco-specific way to run the sampler object
-#        '''
+    @property
+    def meta(self):
+        return self.pars.meta.pars
 
-#        if self.sampler is None:
-#            raise AttributeError('sampler has not yet been initialized!')
+    def _run_sampler(self, start, nsteps=None, progress=True):
+        '''
+        The poco-specific way to run the sampler object
+        '''
 
-#        self.sampler.run(
-#            start, progress=progress
-#            )
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
 
-#        return
+        self.sampler.run(
+            start, progress=progress
+            )
+
+        return
 
 def get_runner_types():
     return RUNNER_TYPES

@@ -91,7 +91,7 @@ def main(args):
 
     ### Step 1: load JWST data and figure out source information
     data_root = "../data/jwst"
-    data_file = os.path.join(data_root, "data_compile_short_withmask_GDS_ID%d_emlonly.fits"%objID)
+    data_file = os.path.join(data_root, mcmc_dict["data_filename_fmt"]%objID)
     if rank==0:
         print("Reading JWST observation ID-%d"%(objID))
     data_hdul = fits.open(data_file)
@@ -114,10 +114,7 @@ def main(args):
     cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
 
     ### Loading data vector
-    data_root = "/home/u17/jiachuanxu/kl-tools/data/jwst/"
-    #data_root = "/Users/jiachuanxu/Workspace/KL_measurement/kl-tools_spencer/data/jwst/"
-    datafile = data_root + "data_compile_short_withmask_GDS_ID%d_emlonly_test.fits"%(objID)
-    datavector = GrismDataVector(file=datafile)
+    datavector = GrismDataVector(file=data_file)
 
     #-----------------------------------------------------------------
     # Setup sampled posterior
@@ -162,6 +159,14 @@ def main(args):
             runner = KLensEmceeRunner(
                 nwalkers, ndims, log_posterior, None, pars
             )
+    elif args.sampler == 'pocomc':
+        if rank==0:
+            print('Setting up KLensPocoRunner')
+        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
+        runner = KLensPocoRunner(nwalkers, ndims, log_posterior, None, pars)
+    else:
+        print(f'sampler {args.sampler} is not supported!')
+        exit(-1)
 
     pool = schwimmbad.choose_pool(
         mpi=args.mpi, processes=args.ncores

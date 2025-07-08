@@ -86,8 +86,6 @@ def main(args):
     mpi = args.mpi
     run_name = args.run_name
     show = args.show
-    outdir = os.path.join(utils.TEST_DIR, 'jwst-mcmc-run', run_name)
-    utils.make_dir(outdir)
 
     ### Step 1: load JWST data and figure out source information
     data_root = "../data/jwst"
@@ -95,6 +93,8 @@ def main(args):
     if rank==0:
         print("Reading JWST observation ID-%d"%(objID))
     data_hdul = fits.open(data_file)
+    outdir = mcmc_dict["output"]
+    utils.make_dir(outdir)
 
     ''' read important information from fits file and overwrite YAML file
     Information to be overwrite
@@ -125,8 +125,8 @@ def main(args):
 
     log_posterior = LogPosterior(pars, datavector, likelihood='grism')
     # test pickle dump to see the size of the posterior function
-    with open("test_JWST_post_func.pkl", 'wb') as f:
-            pickle.dump(log_posterior, f)
+    # with open("test_JWST_post_func.pkl", 'wb') as f:
+    #         pickle.dump(log_posterior, f)
 
     #-----------------------------------------------------------------
     # Setup sampler
@@ -137,7 +137,7 @@ def main(args):
     if args.sampler == 'zeus':
         if rank==0:
             print('Setting up KLensZeusRunner')
-        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
+        outfile = os.path.join(outdir, f'zeus-mcmc-runner.pkl')
         if os.path.exists(outfile) and args.not_overwrite:
             print(f'Continue from {outfile}')
             with open(outfile, mode='rb') as fp:
@@ -150,7 +150,7 @@ def main(args):
     elif args.sampler == 'emcee':
         if rank==0:
             print('Setting up KLensEmceeRunner')
-        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
+        outfile = os.path.join(outdir, f'emcee-mcmc-runner.pkl')
         if os.path.exists(outfile) and args.not_overwrite:
             print(f'Continue from {outfile}')
             with open(outfile, mode='rb') as fp:
@@ -162,8 +162,20 @@ def main(args):
     elif args.sampler == 'pocomc':
         if rank==0:
             print('Setting up KLensPocoRunner')
-        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
-        runner = KLensPocoRunner(nwalkers, ndims, log_posterior, None, pars)
+        outfile = os.path.join(outdir, f'poco-mcmc-runner.pkl')
+        if os.path.exists(outfile) and args.not_overwrite:
+            print(f'Continue from {outfile}')
+            with open(outfile, mode='rb') as fp:
+                runner = pickle.load(fp)
+        else:
+            runner = KLensPocoRunner(
+                nwalkers, ndims, 
+                log_posterior.log_likelihood, log_posterior.log_prior,
+                None, pars,
+                loglike_kwargs={'return_derived_lglike': True},
+                loglike_args=[pars],
+                output_dir=outdir, output_label="poco_checkpoint",
+            )
     else:
         print(f'sampler {args.sampler} is not supported!')
         exit(-1)
@@ -178,29 +190,36 @@ def main(args):
     #         sys.exit(0)
     # with open("test_JWST_runner_class.pkl", 'wb') as f:
     #         pickle.dump(runner, f)
+
+    #-----------------------------------------------------------------
+    # Run sampler
+
     print('>>>>>>>>>> Starting mcmc run <<<<<<<<<<')
+    # get initial starting points
     p0_mean = np.array([ball_mean[_key] for _key in sampled_pars])
     p0_std = np.array([ball_std[_key] for _key in sampled_pars])
     p0 = p0_mean + np.random.randn(nwalkers, ndims)*p0_std
+    
+    ### run sampler
     runner.run(pool, nsteps, start=p0, vb=True)
-    #runner.set_burn_in(nsteps // 2)
     runner.burn_in = nsteps // 2
 
-    if (args.sampler == 'zeus') and ((ncores > 1) or (mpi == True)):
+    ### save results
+    if (args.sampler == 'zeus'):
         # The sampler isn't pickleable for some reason in this scenario
         # Save whole chain
-        outfile = os.path.join(outdir, f'test-mcmc-chain_{objID}.pkl')
+        outfile = os.path.join(outdir, f'zeus-mcmc-chain.pkl')
         chain = runner.sampler.get_chain(flat=True)
         print(f'pickling chain to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(chain, f)
-    else:
-        outfile = os.path.join(outdir, f'test-mcmc-sampler_{objID}.pkl')
+    elif (args.sampler == 'emcee'):
+        outfile = os.path.join(outdir, f'emcee-mcmc-sampler.pkl')
         print(f'Pickling sampler to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner.sampler, f)
 
-        outfile = os.path.join(outdir, f'test-mcmc-runner_{objID}.pkl')
+        outfile = os.path.join(outdir, f'emcee-mcmc-runner.pkl')
         print(f'Pickling runner to {outfile}')
         with open(outfile, 'wb') as f:
             pickle.dump(runner, f)
@@ -211,10 +230,37 @@ def main(args):
         blobs_name = ['logprior', 'loglike', ]
         if pars.derived.keys() is not None:
             blobs_name += pars.derived.keys()
-        np.savetxt(mcmc_dict["output"], 
+        np.savetxt(os.path.join(outdir, "emcee_chain.txt"), 
             np.hstack([chain, post[:,np.newaxis], blobs]), 
                   header = "# " + " ".join(sampled_pars) + " logprob " + " ".join(blobs_name), 
                   comments="")
+    elif (args.sampler == 'pocomc'):
+        outfile = os.path.join(outdir, f'poco-mcmc-sampler.pkl')
+        print(f'Pickling sampler to {outfile}')
+        with open(outfile, 'wb') as f:
+            pickle.dump(runner.sampler, f)
+
+        outfile = os.path.join(outdir, f'poco-mcmc-runner.pkl')
+        print(f'Pickling runner to {outfile}')
+        with open(outfile, 'wb') as f:
+            pickle.dump(runner, f)
+
+        ### retrieve MCMC samples, weights, lglikes, lgposts, blobs
+        results = runner.sampler.posterior(return_blobs=True)
+        data_block = [results[0], 
+                    results[1][:,np.newaxis],
+                    results[2][:,np.newaxis],
+                    results[3][:,np.newaxis]]
+        header = "# " + " ".join(sampled_pars) + " weight loglike logpost"
+        # blobs: derived parameters
+        if pars.derived.keys() is not None:
+            for dev_par in pars.derived.keys():
+                header = header + " " + dev_par
+                data_block.append(results[4][dev_par][:,np.newaxis])
+        data_block = np.hstack(data_block)
+        # save chain
+        np.savetxt(os.path.join(outdir, "poco_chain.txt"), data_block, 
+                  header = header, comments="")
 
     return 0
 

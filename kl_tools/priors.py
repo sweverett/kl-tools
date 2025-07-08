@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import numpy as np
+from scipy.stats import truncnorm
 
 # def log_prior(theta):
 #     '''
@@ -43,6 +44,8 @@ class UniformPrior(Prior):
         self.peak = None
         self.cen = np.mean([left, right])
         self.scale = None
+        # Boundary
+        self.bound = [left, right]
 
         return
 
@@ -67,6 +70,10 @@ class UniformPrior(Prior):
                 return -np.inf
             else:
                 return np.log(val)
+
+    def rvs(self, size=1):
+        ''' Generate random sample from prior '''
+        return np.random.uniform(low=self.left, high=self.right, size=size)
 
 class GaussPrior(Prior):
     def __init__(self, mu, sigma, clip_sigmas=None, zero_boundary=None):
@@ -106,7 +113,15 @@ class GaussPrior(Prior):
         self.peak = mu
         self.cen = mu
         self.scale = self.sigma
-
+        # Boundary
+        if self.clip_sigmas is not None:
+            self.bound = [mu-clip_sigmas*sigma, mu-clip_sigmas*sigma]
+        else: 
+            self.bound = [-np.inf, np.inf]
+        if zero_boundary=="positive":
+            self.bound = [max(0, self.bound[0]), max(0, self.bound[1])]
+        elif zero_boundary=="negative":
+            self.bound = [min(0, self.bound[0]), min(0, self.bound[1])]
         return
 
     def __call__(self, x, log=False):
@@ -134,6 +149,13 @@ class GaussPrior(Prior):
             return np.log(self.norm) + base
         else:
             return norm * np.exp(base)
+
+    def rvs(self, size=1):
+        ''' Generate random sample from prior '''
+        rand = truncnorm((self.bound[0]-self.mu)/self.sigma, 
+                         (self.bound[1]-self.mu)/self.sigma, 
+                         loc=self.mu, scale=self.sigma)
+        return rand.rvs(size)
 
 class LognormalPrior(Prior):
     def __init__(self, mu, dex, clip_sigmas=None):
@@ -164,6 +186,16 @@ class LognormalPrior(Prior):
         self.peak = np.log10(mu)
         self.cen = np.log10(mu)
         self.scale = self.dex
+        # Boundary
+        if self.clip_sigmas is not None:
+            self.bound = [self.cen-clip_sigmas*self.scale, self.cen+clip_sigmas*self.scale]
+            self.bound = [10**self.bound[0], 10**self.bound[1]]
+        else: 
+            self.bound = [0, np.inf]
+        if zero_boundary=="positive":
+            self.bound = [max(0, self.bound[0]), max(0, self.bound[1])]
+        elif zero_boundary=="negative":
+            self.bound = [min(0, self.bound[0]), min(0, self.bound[1])]
 
         return
 
@@ -184,3 +216,10 @@ class LognormalPrior(Prior):
             return np.log(self.norm) + base
         else:
             return norm * np.exp(base)
+
+    def rvs(self, size=1):
+        ''' Generate random sample from prior '''
+        rand = truncnorm((np.log10(self.bound[0])-self.cen)/self.scale, 
+                         (np.log10(self.bound[1])-self.cen)/self.scale, 
+                         loc=self.cen, scale=self.scale)
+        return 10**(rand.rvs(size))

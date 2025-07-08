@@ -215,13 +215,7 @@ class LogPosterior(LogBase):
         logprior = self.log_prior(theta)
         theta_pars = self.theta2pars(theta)
         _dp_ = [self.derived.eval(p, **theta_pars) for p in self.derived.keys()]
-        # ad hoc prior on g1/g2/eint1/eint2
-        if ('g1' in theta_pars.keys()) and ('g2' in theta_pars.keys()):
-            if np.abs(theta_pars['g1'] + 1j*theta_pars['g2'])>1.:
-                logprior = -np.inf
-        if ('eint1' in theta_pars.keys()) and ('eint2' in theta_pars.keys()):
-            if np.abs(theta_pars['eint1'] + 1j*theta_pars['eint2'])>1.:
-                logprior = -np.inf
+
         if logprior == -np.inf:
             return -np.inf, self.blob(-np.inf, -np.inf, _dp_)
 
@@ -247,6 +241,24 @@ class LogPrior(LogBase):
         self.parameters = parameters
 
         self.priors = parameters.meta['priors']
+
+        # attributes required by pocoMC `Prior` class
+        pars_order = self.parameters.sampled.pars_order
+        # dim only counts the number of sampled parameters
+        self.dim = len(pars_order)
+        self.bounds = np.zeros([self.dim, 2])
+        for name, prior in self.priors.items():
+            # if the parameter is sampled
+            if name in pars_order.keys():
+                indx = pars_order[name]
+                self.bounds[indx] = np.array(prior.bound)
+            # if the parameter is derived
+            elif name in derived_params:
+                continue
+            # unknown parameter
+            else:
+                raise ValueError(f'{name} in meta.priors is not recognized!')
+                exit(-1)
 
         return
 
@@ -277,6 +289,29 @@ class LogPrior(LogBase):
                 exit(-1)
 
         return logprior
+
+    def logpdf(self, theta):
+        ''' wrapper of the __call__ method, required by pocoMC `Prior` class
+        '''
+        return self.__call__(theta)
+
+    def rvs(self, size=1):
+        ''' random variance sampling method, required by pocoMC `Prior` class
+        '''
+        random_sample = np.zeros([size, self.dim])
+        for name, prior in self.priors.items():
+            # if the parameter is sampled
+            if name in pars_order.keys():
+                indx = pars_order[name]
+                random_sample[:, indx] = prior.rvs(size)
+            # if the parameter is derived
+            elif name in derived_params:
+                continue
+            # unknown parameter
+            else:
+                raise ValueError(f'{name} in meta.priors is not recognized!')
+                exit(-1)
+        return random_sample
 
 class LogLikelihood(LogBase):
 
@@ -325,7 +360,7 @@ class LogLikelihood(LogBase):
 
         return
 
-    def __call__(self, theta, datavector):
+    def __call__(self, theta, datavector, return_derived_lglike=False):
         '''
         Do setup and type / sanity checking here
         before calling the abstract method _loglikelihood,
@@ -352,9 +387,18 @@ class LogLikelihood(LogBase):
         else:
             log_det = 1.
 
-        return (-0.5 * log_det) + self._log_likelihood(
-            theta, datavector, model
-            )
+        # if we want to evaluate and return derived parameters here
+        # generally, derived parameters are evaluated & returned in posterior
+        # however, in some cases, we might want here (e.g. pocoMC)
+        if return_derived_lglike:
+            _dp_ = [self.derived.eval(p, **theta_pars) for p in self.derived.keys()]
+            return (-0.5 * log_det) + self._log_likelihood(
+                theta, datavector, model
+                ), _dp_
+        else:
+            return (-0.5 * log_det) + self._log_likelihood(
+                theta, datavector, model
+                )
 
     def _compute_log_det(self, imap):
         # TODO: Adapt this to work w/ new DataCube's w/ weight maps!

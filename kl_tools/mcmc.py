@@ -759,31 +759,60 @@ class KLensEmceeRunner(KLensZeusRunner):
 class PocoRunner(MCMCRunner):
 
     def _initialize_sampler(self, pool=None):
-       sampler = pc.Sampler(
-            self.nparticles, self.ndim,
-            log_likelihood=self.loglike,
-            log_prior=self.logprior,
-            log_likelihood_args=self.loglike_args,
-            log_likelihood_kwargs=self.loglike_kwargs,
+        # version 1.2.6 API
+        # TODO: periodic
+
+        # determine derived parameter blob dtype
+        blobs_dtype = []
+        for k in self.loglike.derived.keys():
+            blobs_dtype.append((k, float))
+        if len(blobs_dtype)==0:
+            blobs_dtype = None
+
+        sampler = pc.Sampler(
+            n_dim=self.ndim,
+            n_effective=self.nparticles,
+            n_active = self.nparticles//2,
+            prior=self.logprior, # 
             log_prior_args=self.logprior_args,
             log_prior_kwargs=self.logprior_kwargs,
+            likelihood=self.loglike,
+            likelihood_args = self.loglike_args,
+            likelihood_kwargs = self.loglike_kwargs,
+            vectorize=False,
+            blobs_dtype=blobs_dtype,
+            output_dir=self.output_dir,
+            output_label=self.output_label,
             pool=pool,
-            infer_vectorization=False
-           # NOTE: wes bounds as we implement this in our priors
-           #bounds=bounds
             )
+        # sampler = pc.Sampler(
+        #     self.nparticles, self.ndim,
+        #     log_likelihood=self.loglike,
+        #     log_prior=self.logprior,
+        #     log_likelihood_args=self.loglike_args,
+        #     log_likelihood_kwargs=self.loglike_kwargs,
+        #     log_prior_args=self.logprior_args,
+        #     log_prior_kwargs=self.logprior_kwargs,
+        #     pool=pool,
+        #     infer_vectorization=False
+        #    # NOTE: wes bounds as we implement this in our priors
+        #    #bounds=bounds
+        #     )
 
         return sampler
 
 class KLensPocoRunner(PocoRunner):
     '''
     See https://pocomc.readthedocs.io/en/latest/
+
+    emcee and zeus interface: (nwalkers, ndim, pfunc, datacube, pars)
     '''
 
     def __init__(self, nparticles, ndim, loglike, logprior,
                  datacube, pars,
                  loglike_args=None, loglike_kwargs=None,
-                 logprior_args=None, logprior_kwargs=None):
+                 logprior_args=None, logprior_kwargs=None,
+                 output_dir=None, output_label=None):
         '''
         nparticles: int
             Number of MCMC particles. Recommended to be at least 100
@@ -822,7 +851,7 @@ class KLensPocoRunner(PocoRunner):
        else:
            loglike_args = [datacube]
 
-       super(KLensPocoRunner, self).__init__(
+        super(KLensPocoRunner, self).__init__(
            nparticles, ndim,
            loglike=loglike, logprior=logprior,
            loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
@@ -836,7 +865,9 @@ class KLensPocoRunner(PocoRunner):
 
         self.MAP_vmap = None
 
-       #...
+        self.output_label = output_label
+        self.output_dir   = output_dir
+        return
 
     @property
     def nparticles(self):
@@ -862,9 +893,11 @@ class KLensPocoRunner(PocoRunner):
         if self.sampler is None:
             raise AttributeError('sampler has not yet been initialized!')
 
-        self.sampler.run(
-            start, progress=progress
-            )
+        # version 1.2.6 API
+        self.sampler.run(save_every=10, progress=progress)
+        # self.sampler.run(
+        #     start, progress=progress
+        #     )
 
         return
 
@@ -876,7 +909,7 @@ RUNNER_TYPES = {
     'default': None,
     'emcee': KLensEmceeRunner,
     'zeus': KLensZeusRunner,
-    #'poco': KLensPocoRunner,
+    'poco': KLensPocoRunner,
     }
 
 def build_mcmc_runner(name, args, kwargs):

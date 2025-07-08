@@ -1,0 +1,344 @@
+# Configuration YAML file for JWST KL measurement
+
+# parameters control the MCMC simulation settings
+mcmc:
+  nsteps: 30000
+  #nsteps: 10
+  monitor_autocorr: True
+  data_filename_fmt: data_compile_short_withmask_GDS_ID%d_emlonly_smooth6.fits
+  objid: 181661
+  output: /xdisk/timeifler/jiachuanxu/kltools_jwst_chains/obj181661_shear_TFR_T1_smooth6
+
+# (Might be) sampled parameters in simulation
+params:
+  g1: 
+#    value: 0.0
+    prior: 
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 1.0e-4
+      proposal: 1.0e-4
+    latex: g_1
+  g2:
+#    value: 0.0
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 1.0e-4
+      proposal: 1.0e-4
+    latex: g_2
+#  eint1:
+#    prior:
+#      min: -1.0
+#      max: 1.0
+#    ref:
+#      dist: norm
+#      loc: 0.0
+#      scale: 0.1
+#      proposal: 1.0e-4
+#    latex: e^\mathrm{int}_1
+#  eint2:
+#    prior:
+#      min: -1.0
+#      max: 1.0
+#    ref:
+#      dist: norm
+#      loc: 0.0
+#      scale: 0.1
+#      proposal: 1.0e-4
+#    latex: e^\mathrm{int}_2
+  theta_int:
+    prior:
+      min: -1.5708
+      max: 1.5708
+    ref:
+      dist: norm
+      loc: 0.936227
+      scale: 1.0e-4
+      proposal: 1.0e-3
+#    derived: 'lambda eint1, eint2: np.angle(eint1+1j*eint2)/2.'
+    latex: \theta_\mathrm{int}
+  sini:
+    prior:
+      min: -0.999
+      max: 0.999
+    ref:
+      dist: norm
+      loc: -0.785
+      scale: 0.001
+      proposal: 0.001
+#    derived: 'lambda eint1, eint2: np.sin(2*np.arctan((eint1*eint1+eint2*eint2)**0.5))'
+    latex: \mathrm{sin}(i)
+  dx_disk:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.01
+      proposal: 0.05
+    latex: \Deltax_\mathrm{disk}
+  dy_disk:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.01
+      proposal: 0.05
+    latex: \Deltay_\mathrm{disk}
+  dy_spec:
+    prior:
+      min: -0.3
+      max: 0.3
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.01
+      proposal: 0.05
+    latex: \Deltay_\mathrm{spec}
+  v0:
+    prior:
+      min: -100.0
+      max: 100.0
+    ref:
+      dist: norm
+      loc: 0.0
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: v_0
+  vcirc:
+    prior:
+      #dist: lognorm
+      #mu: 225.23
+      #dex: 0.0749
+      min: 80
+      max: 800
+    ref:
+      dist: norm
+      loc: 225.23
+      scale: 1.0e-2
+      proposal: 1.0e-4
+    latex: v_\mathrm{circ}
+  rscale:
+    prior:
+      min: 0.001
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.05
+      scale: 1.0e-4
+      proposal: 1.0e-4
+    latex: R_\mathrm{vscale}
+  v22:
+    derived: "lambda vcirc, hlr, rscale: vcirc/(np.pi/2.)*np.arctan(1.3*hlr/rscale)"
+    prior:
+      dist: lognorm
+      mu: 225.23
+      dex: 0.0749
+      clip_sigmas: 3
+    latex: V_{2.2}
+  dx_kin:
+    # prior:
+    #   min: -0.3
+    #   max: 0.3
+    # ref:
+    #   dist: norm
+    #   loc: 0.0
+    #   scale: 0.05
+    #   proposal: 0.05
+    value: 0.0
+    latex: \Deltax_\mathrm{kin}
+  dy_kin:
+    # prior:
+    #   min: -0.3
+    #   max: 0.3
+    # ref:
+    #   dist: norm
+    #   loc: 0.0
+    #   scale: 0.05
+    #   proposal: 0.05
+    value: 0.0
+    latex: \Deltay_\mathrm{kin}
+  hlr:
+    prior:
+      min: 0.01
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.232 # measurement from JADES catalog, F444W
+      scale: 1.0e-4
+      proposal: 1.0e-4
+    latex: R_h
+  em_PaA_flux:
+    prior:
+      min: 2.8e-18
+      max: 2.8e-16
+    ref:
+      dist: norm
+      loc: 2.8e-17
+      scale: 1.0e-19
+      proposal: 1.0e-19
+    latex: F_\mathrm{H\alpha}
+  em_PaA_hlr:
+    prior:
+      min: 0.01
+      max: 1.0
+    ref:
+      dist: norm
+      loc: 0.232
+      scale: 0.01
+      proposal: 1.0e-4
+    latex: R_h^{Pa\alpha}
+  em_PaA_sigma:
+    prior:
+      min: 0.065
+      max: 6.5
+    ref:
+      dist: norm
+      loc: 0.65
+      scale: 1.0e-4
+      proposal: 1.0e-4
+#    value: 0.65
+    latex: \sigma_{Pa\alpha}
+  # cont_PaA_hlr:
+  #   prior:
+  #     min: 0.01
+  #     max: 5.0
+  #   ref:
+  #     dist: norm
+  #     loc: 1.0
+  #     scale: 0.1
+  #     proposal: 1.0e-4
+  #   latex: R_h^{Pa\alpha-cont}
+  flux:
+    prior:
+      min: 7.0e+1
+      max: 7.0e+3
+    ref:
+      dist: norm
+      loc: 768
+      scale: 0.1
+      proposal: 1.0e-4
+    latex: F_\mathrm{phot}
+  # obs_cont_norm_flam:
+  #   #value: 3.0e-17
+  #   value: 0.0
+  #   # prior:
+  #   #   min: 1.0e-14
+  #   #   max: 1.0e+14
+  #   # ref:
+  #   #   dist: norm
+  #   #   loc: 1.0
+  #   #   scale: 0.1
+  #   #   proposal: 1.0e-4
+  #   latex: F_\mathrm{cont}
+
+### Meta parameters used in simulation
+meta:
+  g1: param
+  g2: param
+#  g1: 0.0
+#  g2: 0.0
+#  eint1: param
+#  eint2: param
+  theta_int: param
+  sini: param
+
+  velocity:
+    model: offset # default
+    v0: param
+    vcirc: param
+    rscale: param
+    dx_kin: param
+    dy_kin: param
+
+  intensity:
+    type: inclined_exp
+    flux: param
+    hlr: param
+    em_PaA_hlr: param
+    #cont_PaA_hlr: param
+    dx_disk: param
+    dy_disk: param
+    dx_spec: 0.0
+    dy_spec: param
+
+  psf: from_data
+
+  units:
+    v_unit: km/s
+    r_unit: arcsec
+
+  run_options:
+    run_mode: FLUX # ETC or FLUX
+    imap_return_gal: True
+    use_numba: False
+    alignment_params: sini_pa # eint, sini_pa, inc_pa, eint_eigen
+
+  model_dimension:
+    Nx: 100
+    Ny: 100
+    scale: 0.02
+    lblue: 3800
+    lred: 5200
+    resolution: 5000
+    #lambda_range: [[4886.499999999879, 4917.499999999875]]
+    lambda_range: [[4871.0, 4933.0]]
+    lambda_res: 0.25
+    super_sampling: 2
+    lambda_unit: nm
+
+  sed:
+    z: 0.3
+    continuum_type: func # `temp` for template, `func` for function
+    continuum_func: "1.0 + wave * 0.0"
+    #restframe_temp: ../data/Simulation/GSB2.spec
+    temp_wave_type: Ang
+    temp_flux_type: flambda
+    cont_norm_method: flux
+    obs_cont_norm_wave: 4440
+    #obs_cont_norm_flam: param
+    obs_cont_norm_flam: 0.0
+    em_PaA_flux: param
+    em_PaA_sigma: param # 0.65
+
+  obs_conf:
+    - INSTNAME: JWST
+      OBSTYPE: grism
+      BANDPASS: ../data/Bandpass/DESI/z.dat?
+      SEDBLKID: 0
+      PSFTYPE: data
+      # if in ETC mode
+      RDNOISE: 2.6
+      SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      DIAMETER: 332.42
+      EXPTIME: 180
+      GAIN: 1.0
+      NOISETYP: ccd
+      ADDNOISE: False
+    - INSTNAME: JWST
+      OBSTYPE: image
+      BANDPASS: ../data/Bandpass/CTIO/DECam.r.dat
+      PSFTYPE: data
+      # if in ETC mode
+      SKYLEVEL: 44.54
+      EXPTIME: 4000
+      NAXIS: 2
+      NAXIS1: 32
+      NAXIS2: 30
+      PIXSCALE: 0.003
+      PSFFWHM: 1.0
+      DIAMETER: 378.2856
+      GAIN: 4.0
+      NOISETYP: ccd
+      RDNOISE: 7
+      ADDNOISE: False

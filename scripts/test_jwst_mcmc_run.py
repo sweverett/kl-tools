@@ -47,7 +47,7 @@ parser = ArgumentParser()
 
 parser.add_argument('yaml', type=str, help='Input YAML file')
 parser.add_argument('-ID', type=int, default=181661, help='ID of the object to fit')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee'],
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'pocomc'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
 parser.add_argument('-run_name', type=str, default='',
@@ -58,6 +58,8 @@ parser.add_argument('--not_overwrite', action='store_true', default=False,
                     help='Not Overwrite existing outputs')
 parser.add_argument('-nsteps', type=int, default=-1,
                     help='Number of mcmc iterations per walker')
+parser.add_argument('-nparticles', type=int, default=-1,
+                    help='Number of particles for pocomc')
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-ncores', default=1, type=int,
@@ -132,7 +134,10 @@ def main(args):
     # Setup sampler
 
     ndims = log_posterior.ndims
-    nwalkers = 2*ndims
+    if args.sampler != 'pocomc':
+        nwalkers = 2*ndims
+    else:
+        nwalkers = args.nparticles
 
     if args.sampler == 'zeus':
         if rank==0:

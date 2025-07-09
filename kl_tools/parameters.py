@@ -103,7 +103,7 @@ class SampledPars(object):
         uses pars_order to convert list of sampled params to dict
         '''
 
-        assert len(theta) == len(self.pars_order)
+        assert len(theta) == len(self.pars_order), f'Invalid theta: {len(theta)} elements in theta, while we expect {len(self.pars_order)} elements.\nInvalid theta = {theta}'
 
         pars = {}
         for key, indx in self.pars_order.items():

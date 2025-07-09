@@ -297,14 +297,41 @@ class InclinedExponential(IntensityMap):
         # pars has higher priority than theta_pas, such that when
         # we want to fix parameters of g1,g2,sini,theta_int, we can
         # set key:fixed_val in the pars.
-        sini = pars.get('sini', theta_pars['sini'])
-        g1 = pars.get('g1', theta_pars['g1'])
-        g2 = pars.get('g2', theta_pars['g2'])
-        theta_int = pars.get('theta_int', theta_pars['theta_int'])
-        dx_disk = pars.get("dx_disk", theta_pars['dx_disk']) * self.pars["hlr"]
-        dy_disk = pars.get("dy_disk", theta_pars['dy_disk']) * self.pars["hlr"]
-        dx_spec = pars.get("dx_spec", theta_pars['dx_spec']) * self.pars["hlr"]
-        dy_spec = pars.get("dy_spec", theta_pars['dy_spec']) * self.pars["hlr"]
+        #print(theta_pars)
+        #print(pars["intensity"])
+        #if 'sini' in pars:
+        #    sini = pars["sini"]
+        #else:
+        #    sini = theta_pars['sini']
+        #if "g1" in pars:
+        #    g1 = pars["g1"]
+        #else:
+        #    g1 = theta_pars['g1']
+        #if "g2" in pars:
+        #    g2 = pars["g1"]
+        #else:
+        #    g2 = theta_pars["g2"]
+        #if "theta_int" in pars:
+        #    theta_int = pars["theta_int"]
+        #else:
+        #    theta_int = theta_pars["theta_int"]
+        #sini = pars.get('sini', theta_pars['sini'])
+        #g1 = pars.get('g1', theta_pars['g1'])
+        #g2 = pars.get('g2', theta_pars['g2'])
+        #theta_int = pars.get('theta_int', theta_pars['theta_int'])
+        #dx_disk = pars["intensity"].get("dx_disk", theta_pars['dx_disk']) * self.pars["hlr"]
+        #dy_disk = pars["intensity"].get("dy_disk", theta_pars['dy_disk']) * self.pars["hlr"]
+        #dx_spec = pars["intensity"].get("dx_spec", theta_pars['dx_spec']) * self.pars["hlr"]
+        #dy_spec = pars["intensity"].get("dy_spec", theta_pars['dy_spec']) * self.pars["hlr"]
+        sini = pars['sini']
+        g1 = pars['g1']
+        g2 = pars['g2']
+        theta_int = pars['theta_int']
+        dx_disk = pars["intensity"]["dx_disk"] * self.pars["hlr"]
+        dy_disk = pars["intensity"]["dy_disk"] * self.pars["hlr"]
+        dx_spec = pars["intensity"]["dx_spec"] * self.pars["hlr"]
+        dy_spec = pars["intensity"]["dy_spec"] * self.pars["hlr"]
+
 
         inc = Angle(np.arcsin(sini), radians)
         rot_angle = Angle(theta_int, radians)

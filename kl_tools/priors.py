@@ -192,11 +192,6 @@ class LognormalPrior(Prior):
             self.bound = [10**self.bound[0], 10**self.bound[1]]
         else: 
             self.bound = [0, np.inf]
-        if zero_boundary=="positive":
-            self.bound = [max(0, self.bound[0]), max(0, self.bound[1])]
-        elif zero_boundary=="negative":
-            self.bound = [min(0, self.bound[0]), min(0, self.bound[1])]
-
         return
 
     def __call__(self, x, log=False):

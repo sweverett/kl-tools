@@ -7,7 +7,7 @@ mcmc:
   monitor_autocorr: True
   data_filename_fmt: mockdata_compile_short_withmask_GDS_ID%d_emlonly.fits
   objid: 181661
-  output: /xdisk/timeifler/jiachuanxu/kltools_jwst_chains/mockobj181661_shear_TFR_T1
+  output: /xdisk/timeifler/jiachuanxu/kltools_jwst_chains/mockobj181661_shear_TFR_T1_testpoco
 
 # (Might be) sampled parameters in simulation
 params:
@@ -55,8 +55,10 @@ params:
 #    latex: e^\mathrm{int}_2
   theta_int:
     prior:
-      min: -1.5708
-      max: 1.5708
+      min: 0.5
+      max: 1.5
+      #min: -1.5708
+      #max: 1.5708
     ref:
       dist: norm
       loc: 0.936227
@@ -66,8 +68,10 @@ params:
     latex: \theta_\mathrm{int}
   sini:
     prior:
-      min: -0.999
-      max: 0.999
+      min: -0.99
+      max: -0.6
+      #min: -0.999
+      #max: 0.999
     ref:
       dist: norm
       loc: -0.785
@@ -77,8 +81,10 @@ params:
     latex: \mathrm{sin}(i)
   dx_disk:
     prior:
-      min: -0.3
-      max: 0.3
+      #min: -0.3
+      #max: 0.3
+      min: -0.02
+      max: 0.02
     ref:
       dist: norm
       loc: 0.0
@@ -87,8 +93,10 @@ params:
     latex: \Deltax_\mathrm{disk}
   dy_disk:
     prior:
-      min: -0.3
-      max: 0.3
+      #min: -0.3
+      #max: 0.3
+      min: -0.02
+      max: 0.02
     ref:
       dist: norm
       loc: 0.0
@@ -107,8 +115,10 @@ params:
     latex: \Deltay_\mathrm{spec}
   v0:
     prior:
-      min: -100.0
-      max: 100.0
+      #min: -100.0
+      #max: 100.0
+      min: 20
+      max: 80
     ref:
       dist: norm
       loc: 0.0
@@ -120,8 +130,10 @@ params:
       #dist: lognorm
       #mu: 225.23
       #dex: 0.0749
-      min: 80
-      max: 800
+      min: 200
+      max: 400
+      #min: 80
+      #max: 800
     ref:
       dist: norm
       loc: 225.23
@@ -131,7 +143,8 @@ params:
   rscale:
     prior:
       min: 0.001
-      max: 1.0
+      #max: 1.0
+      max: 0.1
     ref:
       dist: norm
       loc: 0.05
@@ -171,7 +184,8 @@ params:
   hlr:
     prior:
       min: 0.01
-      max: 1.0
+      #max: 1.0
+      max: 0.3
     ref:
       dist: norm
       loc: 0.232 # measurement from JADES catalog, F444W
@@ -180,8 +194,10 @@ params:
     latex: R_h
   em_PaA_flux:
     prior:
-      min: 2.8e-18
-      max: 2.8e-16
+      #min: 2.8e-18
+      #max: 2.8e-16
+      min: 3.5e-17
+      max: 5.0e-17
     ref:
       dist: norm
       loc: 2.8e-17
@@ -190,8 +206,10 @@ params:
     latex: F_\mathrm{H\alpha}
   em_PaA_hlr:
     prior:
-      min: 0.01
-      max: 1.0
+      #min: 0.01
+      #max: 1.0
+      min: 0.1
+      max: 0.3
     ref:
       dist: norm
       loc: 0.232
@@ -201,7 +219,8 @@ params:
   em_PaA_sigma:
     prior:
       min: 0.065
-      max: 6.5
+      #max: 6.5
+      max: 0.8
     ref:
       dist: norm
       loc: 0.65
@@ -221,8 +240,10 @@ params:
   #   latex: R_h^{Pa\alpha-cont}
   flux:
     prior:
-      min: 7.0e+1
-      max: 7.0e+3
+      #min: 7.0e+1
+      #max: 7.0e+3
+      min: 740
+      max: 800
     ref:
       dist: norm
       loc: 768

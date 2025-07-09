@@ -773,9 +773,7 @@ class PocoRunner(MCMCRunner):
             n_dim=self.ndim,
             n_effective=self.nparticles,
             n_active = self.nparticles//2,
-            prior=self.logprior, # 
-            log_prior_args=self.logprior_args,
-            log_prior_kwargs=self.logprior_kwargs,
+            prior=self.logprior,
             likelihood=self.loglike,
             likelihood_args = self.loglike_args,
             likelihood_kwargs = self.loglike_kwargs,
@@ -783,6 +781,7 @@ class PocoRunner(MCMCRunner):
             blobs_dtype=blobs_dtype,
             output_dir=self.output_dir,
             output_label=self.output_label,
+            n_steps=2*self.ndim,
             pool=pool,
             )
         # sampler = pc.Sampler(
@@ -812,7 +811,8 @@ class KLensPocoRunner(PocoRunner):
                  datacube, pars,
                  loglike_args=None, loglike_kwargs=None,
                  logprior_args=None, logprior_kwargs=None,
-                 output_dir=None, output_label=None):
+                 output_dir=None, output_label=None,
+                 resume_state_path=None):
         '''
         nparticles: int
             Number of MCMC particles. Recommended to be at least 100
@@ -846,10 +846,10 @@ class KLensPocoRunner(PocoRunner):
         args/kwargs!
         '''
 
-       if loglike_args is not None:
-           loglike_args = [datacube] + loglike_args
-       else:
-           loglike_args = [datacube]
+        if loglike_args is not None:
+            loglike_args = [datacube] + loglike_args
+        else:
+            loglike_args = [datacube]
 
         super(KLensPocoRunner, self).__init__(
            nparticles, ndim,
@@ -867,6 +867,7 @@ class KLensPocoRunner(PocoRunner):
 
         self.output_label = output_label
         self.output_dir   = output_dir
+        self.resume_state_path = resume_state_path
         return
 
     @property
@@ -885,7 +886,7 @@ class KLensPocoRunner(PocoRunner):
     def meta(self):
         return self.pars.meta.pars
 
-    def _run_sampler(self, start, nsteps=None, progress=True):
+    def _run_sampler(self, start, nsteps=4096, progress=True):
         '''
         The poco-specific way to run the sampler object
         '''
@@ -894,7 +895,8 @@ class KLensPocoRunner(PocoRunner):
             raise AttributeError('sampler has not yet been initialized!')
 
         # version 1.2.6 API
-        self.sampler.run(save_every=10, progress=progress)
+        self.sampler.run(n_total=nsteps, save_every=10, progress=progress,
+                         resume_state_path=self.resume_state_path)
         # self.sampler.run(
         #     start, progress=progress
         #     )

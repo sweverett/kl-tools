@@ -247,6 +247,7 @@ class LogPrior(LogBase):
         # dim only counts the number of sampled parameters
         self.dim = len(pars_order)
         self.bounds = np.zeros([self.dim, 2])
+        derived_params = self.parameters.derived.keys()
         for name, prior in self.priors.items():
             # if the parameter is sampled
             if name in pars_order.keys():
@@ -293,11 +294,14 @@ class LogPrior(LogBase):
     def logpdf(self, theta):
         ''' wrapper of the __call__ method, required by pocoMC `Prior` class
         '''
-        return self.__call__(theta)
+        logprior_list = np.array(list(map(self.__call__, theta)))
+        return logprior_list
 
     def rvs(self, size=1):
         ''' random variance sampling method, required by pocoMC `Prior` class
         '''
+        pars_order = self.parameters.sampled.pars_order
+        derived_params = self.parameters.derived.keys()
         random_sample = np.zeros([size, self.dim])
         for name, prior in self.priors.items():
             # if the parameter is sampled
@@ -394,7 +398,7 @@ class LogLikelihood(LogBase):
             _dp_ = [self.derived.eval(p, **theta_pars) for p in self.derived.keys()]
             return (-0.5 * log_det) + self._log_likelihood(
                 theta, datavector, model
-                ), _dp_
+                ), *_dp_
         else:
             return (-0.5 * log_det) + self._log_likelihood(
                 theta, datavector, model

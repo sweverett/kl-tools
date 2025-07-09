@@ -6,7 +6,7 @@ os.environ['NUMEXPR_NUM_THREADS'] = '1'
 os.environ['OMP_NUM_THREADS'] = '1'
 
 import numpy as np
-import sys, copy, os
+import sys, copy, os, glob, re
 sys.path.insert(0, './grism_modules')
 import pickle
 try:
@@ -32,7 +32,7 @@ import astropy.io.fits as fits
 import astropy.units as u
 
 import kl_tools.utils as utils
-from kl_tools.mcmc import KLensZeusRunner, KLensEmceeRunner
+from kl_tools.mcmc import KLensZeusRunner, KLensEmceeRunner, KLensPocoRunner
 import kl_tools.priors as priors
 import kl_tools.likelihood as likelihood
 from kl_tools.parameters import Pars
@@ -58,8 +58,10 @@ parser.add_argument('--not_overwrite', action='store_true', default=False,
                     help='Not Overwrite existing outputs')
 parser.add_argument('-nsteps', type=int, default=-1,
                     help='Number of mcmc iterations per walker')
-parser.add_argument('-nparticles', type=int, default=-1,
-                    help='Number of particles for pocomc')
+parser.add_argument('-nparticles', type=int, default=512,
+                    help='[pocoMC] Number of effective particles')
+parser.add_argument('-n_total', type=int, default=4096,
+                    help='[pocoMC] Total number of effectively independent samples')
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-ncores', default=1, type=int,
@@ -126,19 +128,31 @@ def main(args):
         print(pars_order)
 
     log_posterior = LogPosterior(pars, datavector, likelihood='grism')
+    if rank==0:
+        print("---------------------------------------------")
+        print("Example likelihood evaluation: ")
+        example_theta = np.array([fidvals[key] for key in sampled_pars])
+        print("Evaluated at: ", example_theta)
+        loglike_test = log_posterior.log_likelihood(example_theta, None)
+        logpost_test = log_posterior(example_theta, None, pars)
+        print(f'log likelihood = {loglike_test}')
+        print(f'log posterior  = {logpost_test}')
+        print("---------------------------------------------")
     # test pickle dump to see the size of the posterior function
     # with open("test_JWST_post_func.pkl", 'wb') as f:
     #         pickle.dump(log_posterior, f)
 
     #-----------------------------------------------------------------
     # Setup sampler
-
+    #-----------------------------------------------------------------
     ndims = log_posterior.ndims
     if args.sampler != 'pocomc':
         nwalkers = 2*ndims
     else:
         nwalkers = args.nparticles
-
+        nsteps = args.n_total
+    ### zeus
+    ### ====
     if args.sampler == 'zeus':
         if rank==0:
             print('Setting up KLensZeusRunner')
@@ -151,7 +165,8 @@ def main(args):
             runner = KLensZeusRunner(
                 nwalkers, ndims, log_posterior, None, pars
             )
-
+    ### emcee
+    ### =====
     elif args.sampler == 'emcee':
         if rank==0:
             print('Setting up KLensEmceeRunner')
@@ -164,22 +179,40 @@ def main(args):
             runner = KLensEmceeRunner(
                 nwalkers, ndims, log_posterior, None, pars
             )
+    ### pocoMC
+    ### ======
     elif args.sampler == 'pocomc':
         if rank==0:
             print('Setting up KLensPocoRunner')
-        outfile = os.path.join(outdir, f'poco-mcmc-runner.pkl')
-        if os.path.exists(outfile) and args.not_overwrite:
-            print(f'Continue from {outfile}')
-            with open(outfile, mode='rb') as fp:
-                runner = pickle.load(fp)
+        ### resume pocoMC run from previous state
+        checkpoint_root = os.path.join(outdir, "poco_checkpoint")
+        statefiles = glob.glob(checkpoint_root + "_*.state")
+        max_checkpoint = 0
+        for statefile in statefiles:
+            match = re.match(checkpoint_root + "_(\S*).state", statefile)
+            pattern = match.groups(0)[0]
+            if pattern=='final':
+                max_checkpoint = 'final'
+                break
+            else:
+                max_checkpoint = max(max_checkpoint, int(pattern))
+        if max_checkpoint==0:
+            resume_state_path = None
+            if rank==0:
+                print(f'Start new pocoMC run...')
         else:
-            runner = KLensPocoRunner(
+            resume_state_path = os.path.join(outdir, 
+                            f'poco_checkpoint_{max_checkpoint}.state')
+            if rank==0:
+                print(f'Resume pocoMC from {resume_state_path}!')
+        ### init PocoMC runner
+        runner = KLensPocoRunner(
                 nwalkers, ndims, 
                 log_posterior.log_likelihood, log_posterior.log_prior,
                 None, pars,
                 loglike_kwargs={'return_derived_lglike': True},
-                loglike_args=[pars],
                 output_dir=outdir, output_label="poco_checkpoint",
+                resume_state_path=resume_state_path,
             )
     else:
         print(f'sampler {args.sampler} is not supported!')
@@ -189,16 +222,9 @@ def main(args):
         mpi=args.mpi, processes=args.ncores
         )
 
-    # if isinstance(pool, MPIPool):
-    #     if not pool.is_master():
-    #         pool.wait(callback=_callback_)
-    #         sys.exit(0)
-    # with open("test_JWST_runner_class.pkl", 'wb') as f:
-    #         pickle.dump(runner, f)
-
     #-----------------------------------------------------------------
     # Run sampler
-
+    #-----------------------------------------------------------------
     print('>>>>>>>>>> Starting mcmc run <<<<<<<<<<')
     # get initial starting points
     p0_mean = np.array([ball_mean[_key] for _key in sampled_pars])
@@ -209,7 +235,9 @@ def main(args):
     runner.run(pool, nsteps, start=p0, vb=True)
     runner.burn_in = nsteps // 2
 
-    ### save results
+    #-----------------------------------------------------------------
+    # Save chains
+    #-----------------------------------------------------------------
     if (args.sampler == 'zeus'):
         # The sampler isn't pickleable for some reason in this scenario
         # Save whole chain
@@ -240,23 +268,25 @@ def main(args):
                   header = "# " + " ".join(sampled_pars) + " logprob " + " ".join(blobs_name), 
                   comments="")
     elif (args.sampler == 'pocomc'):
-        outfile = os.path.join(outdir, f'poco-mcmc-sampler.pkl')
-        print(f'Pickling sampler to {outfile}')
-        with open(outfile, 'wb') as f:
-            pickle.dump(runner.sampler, f)
+        #outfile = os.path.join(outdir, f'poco-mcmc-sampler.pkl')
+        #print(f'Pickling sampler to {outfile}')
+        #with open(outfile, 'wb') as f:
+        #    pickle.dump(runner.sampler, f)
 
-        outfile = os.path.join(outdir, f'poco-mcmc-runner.pkl')
-        print(f'Pickling runner to {outfile}')
-        with open(outfile, 'wb') as f:
-            pickle.dump(runner, f)
+        #outfile = os.path.join(outdir, f'poco-mcmc-runner.pkl')
+        #print(f'Pickling runner to {outfile}')
+        #with open(outfile, 'wb') as f:
+        #    pickle.dump(runner, f)
 
         ### retrieve MCMC samples, weights, lglikes, lgposts, blobs
-        results = runner.sampler.posterior(return_blobs=True)
+        results = runner.sampler.posterior(return_blobs=True, resample=False)
+        logZ, logZerr = runner.sampler.evidence()
         data_block = [results[0], 
                     results[1][:,np.newaxis],
                     results[2][:,np.newaxis],
                     results[3][:,np.newaxis]]
-        header = "# " + " ".join(sampled_pars) + " weight loglike logpost"
+        header = f'# logZ {logZ}\n# logZerr {logZerr}'
+        header += "\n# " + " ".join(sampled_pars) + " weight loglike logpost"
         # blobs: derived parameters
         if pars.derived.keys() is not None:
             for dev_par in pars.derived.keys():
@@ -274,15 +304,6 @@ def _callback_():
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    # pool = schwimmbad.choose_pool(
-    #     mpi=args.mpi, processes=args.ncores
-    #     )
-
-    # if isinstance(pool, MPIPool):
-    #     if not pool.is_master():
-    #         pool.wait(callback=_callback_)
-    #         sys.exit(0)
-    # rc = main(args, pool)
     rc = main(args)
 
     if rc == 0:

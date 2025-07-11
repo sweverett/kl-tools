@@ -62,6 +62,8 @@ parser.add_argument('-nparticles', type=int, default=512,
                     help='[pocoMC] Number of effective particles')
 parser.add_argument('-n_total', type=int, default=4096,
                     help='[pocoMC] Total number of effectively independent samples')
+parser.add_argument('--run_from_params', action='store_true', default=False,
+                    help='Run mock analysis from fiducial parameters rather than from data file')
 
 group = parser.add_mutually_exclusive_group()
 group.add_argument('-ncores', default=1, type=int,
@@ -69,10 +71,42 @@ group.add_argument('-ncores', default=1, type=int,
 group.add_argument('--mpi', dest='mpi', default=False, action='store_true',
                    help='Run with MPI.')
 
+def get_dummy_data_vector(sampled_theta_fid, meta_dict):
+    ''' Get a placeholder datavector object from obs_conf '''
+    dummy_header = {k:v for k,v in sampled_theta_fid.items()}
+    dummy_header["z_spec"] = meta_dict["sed"]["z"]
+    Nobs = len(meta_dict["obs_conf"])
+    dummy_header["OBSNUM"] = Nobs
+    dummy_data = []
+    dummy_data_header = []
+    dummy_noise = []
+    dummy_psf = []
+    dummy_mask = []
+    for i in range(Nobs):
+        _conf = meta_dict["obs_conf"][i]
+        data_shape = [_conf["NAXIS2"], _conf["NAXIS1"]]
+        dummy_data.append(np.zeros(data_shape))
+        dummy_noise.append(np.ones(data_shape))
+        dummy_data_header.append(copy.deepcopy(_conf))
+        if _conf["PSFTYPE"] == "data":
+            with fits.open(_conf["PSFDATA"]) as hdul:
+                psf_data = gs.Image(hdul[1].data, 
+                    scale=hdul[1].header["PIXELSCL"], copy=True)
+            dummy_psf.append(gs.InterpolatedImage(psf_data, flux=1))
+        else:
+            dummy_psf.append(None)
+        if "MASKDATA" in _conf:
+            with fits.open(_conf["MASKDATA"]) as hdul:
+                dummy_mask.append(hdul[1].data)
+        else:
+            dummy_mask.append(np.ones(data_shape))
+    dummy_datavector = GrismDataVector(header=dummy_header,
+        data_header=dummy_data_header, data=dummy_data, 
+        noise=dummy_noise, psf=dummy_psf, mask=dummy_mask)
+    return dummy_datavector
+
 def main(args):
     ''' Fit KL model for JWST objects
-    # TODO: Try making datacube a global variable, as it may significantly
-    # decrease execution time due to pickling only once vs. every model eval
     '''
     # read arguments
     global rank, size
@@ -90,44 +124,50 @@ def main(args):
     mpi = args.mpi
     run_name = args.run_name
     show = args.show
-
-    ### Step 1: load JWST data and figure out source information
-    data_root = "../data/jwst"
-    data_file = os.path.join(data_root, mcmc_dict["data_filename_fmt"]%objID)
-    if rank==0:
-        print("Reading JWST observation ID-%d"%(objID))
-    data_hdul = fits.open(data_file)
     outdir = mcmc_dict["output"]
     utils.make_dir(outdir)
 
-    ''' read important information from fits file and overwrite YAML file
-    Information to be overwrite
-        - redshift
-        - image hlr
-        - image flux
-        - emission line flux
-        - continuum flux?
-        -
-    '''
-    eml_name = data_hdul[0].header["name_line_exp"] # emission line name
-    src_z = data_hdul[0].header["fit_center_um"]*u.um/LINE_LAMBDAS[eml_name]-1
-    meta_dict['sed']['z'] = src_z.to('1').value
-
+    ######################### Build Data Vector ################################
+    if args.run_from_params:
+        #-----------------------------------------------------------------
+        # Build data vector from fiducial parameters
+        #-----------------------------------------------------------------
+        # fiducial parameter of the evaluation
+        sampled_theta_fid = mcmc_dict["sampled_theta_fid"]
+        # prepare a dummy data vector, to read real PSF and image mask
+        datavector = get_dummy_data_vector(sampled_theta_fid, meta_dict)
+    else:
+        #-----------------------------------------------------------------
+        # Load data vector from existing data
+        #-----------------------------------------------------------------
+        ### Step 1: load JWST data and figure out source information
+        data_file = os.path.join("../data/jwst", 
+                        mcmc_dict["data_filename_fmt"]%objID)
+        if rank==0:
+            print("Reading JWST observation ID-%d"%(objID))
+        data_hdul = fits.open(data_file)
+        # read redshift from FITS data file and overwrite the default z
+        eml_name = data_hdul[0].header["name_line_exp"] # emission line name
+        eml_obscen = data_hdul[0].header["fit_center_um"]*u.um
+        data_hdul.close()
+        src_z = eml_obscen/LINE_LAMBDAS[eml_name] - 1
+        meta_dict['sed']['z'] = src_z.to('1').value
+        ### Loading data vector
+        datavector = GrismDataVector(file=data_file)
+    # Then, initialize Pars object
     pars = Pars(sampled_pars, meta_dict, derived)
-
-    cube_dir = os.path.join(utils.TEST_DIR, 'test_data')
-
-    ### Loading data vector
-    datavector = GrismDataVector(file=data_file)
-
-    #-----------------------------------------------------------------
-    # Setup sampled posterior
-
     pars_order = pars.sampled.pars_order
     if rank==0:
         print(pars_order)
 
-    log_posterior = LogPosterior(pars, datavector, likelihood='grism')
+    ########################### Setup Posterior ################################
+    if args.run_from_params:
+        log_posterior = LogPosterior(pars, datavector, likelihood='grism', 
+            sampled_theta_fid=sampled_theta_fid,
+            write_mock_data_to=mcmc_dict["mockdata_output"])
+    else:
+        log_posterior = LogPosterior(pars, datavector, likelihood='grism')
+    # Example posterior evaluation
     if rank==0:
         print("---------------------------------------------")
         print("Example likelihood evaluation: ")
@@ -142,17 +182,16 @@ def main(args):
     # with open("test_JWST_post_func.pkl", 'wb') as f:
     #         pickle.dump(log_posterior, f)
 
-    #-----------------------------------------------------------------
-    # Setup sampler
-    #-----------------------------------------------------------------
+    ############################## Setup Runner ################################
     ndims = log_posterior.ndims
     if args.sampler != 'pocomc':
         nwalkers = 2*ndims
     else:
         nwalkers = args.nparticles
         nsteps = args.n_total
-    ### zeus
-    ### ====
+    #-----------------------------------------------------------------
+    # zeus
+    #-----------------------------------------------------------------
     if args.sampler == 'zeus':
         if rank==0:
             print('Setting up KLensZeusRunner')
@@ -165,8 +204,9 @@ def main(args):
             runner = KLensZeusRunner(
                 nwalkers, ndims, log_posterior, None, pars
             )
-    ### emcee
-    ### =====
+    #-----------------------------------------------------------------
+    # emcee
+    #-----------------------------------------------------------------
     elif args.sampler == 'emcee':
         if rank==0:
             print('Setting up KLensEmceeRunner')
@@ -179,8 +219,9 @@ def main(args):
             runner = KLensEmceeRunner(
                 nwalkers, ndims, log_posterior, None, pars
             )
-    ### pocoMC
-    ### ======
+    #-----------------------------------------------------------------
+    # pocoMC
+    #-----------------------------------------------------------------
     elif args.sampler == 'pocomc':
         if rank==0:
             print('Setting up KLensPocoRunner')
@@ -222,16 +263,16 @@ def main(args):
         mpi=args.mpi, processes=args.ncores
         )
 
-    #-----------------------------------------------------------------
-    # Run sampler
-    #-----------------------------------------------------------------
+    ############################### Run Sampler ################################
     print('>>>>>>>>>> Starting mcmc run <<<<<<<<<<')
     # get initial starting points
     p0_mean = np.array([ball_mean[_key] for _key in sampled_pars])
     p0_std = np.array([ball_std[_key] for _key in sampled_pars])
     p0 = p0_mean + np.random.randn(nwalkers, ndims)*p0_std
     
-    ### run sampler
+    #-----------------------------------------------------------------
+    # Run sampler
+    #-----------------------------------------------------------------
     runner.run(pool, nsteps, start=p0, vb=True)
     runner.burn_in = nsteps // 2
 
@@ -268,16 +309,6 @@ def main(args):
                   header = "# " + " ".join(sampled_pars) + " logprob " + " ".join(blobs_name), 
                   comments="")
     elif (args.sampler == 'pocomc'):
-        #outfile = os.path.join(outdir, f'poco-mcmc-sampler.pkl')
-        #print(f'Pickling sampler to {outfile}')
-        #with open(outfile, 'wb') as f:
-        #    pickle.dump(runner.sampler, f)
-
-        #outfile = os.path.join(outdir, f'poco-mcmc-runner.pkl')
-        #print(f'Pickling runner to {outfile}')
-        #with open(outfile, 'wb') as f:
-        #    pickle.dump(runner, f)
-
         ### retrieve MCMC samples, weights, lglikes, lgposts, blobs
         results = runner.sampler.posterior(return_blobs=True, resample=False)
         logZ, logZerr = runner.sampler.evidence()
@@ -296,6 +327,9 @@ def main(args):
         # save chain
         np.savetxt(os.path.join(outdir, "poco_chain.txt"), data_block, 
                   header = header, comments="")
+
+    ############################### Produce MAP ################################
+
 
     return 0
 

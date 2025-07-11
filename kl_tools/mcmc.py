@@ -781,7 +781,7 @@ class PocoRunner(MCMCRunner):
             blobs_dtype=blobs_dtype,
             output_dir=self.output_dir,
             output_label=self.output_label,
-            n_steps=2*self.ndim,
+            #n_steps=2*self.ndim,
             pool=pool,
             )
         # sampler = pc.Sampler(

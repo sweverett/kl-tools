@@ -117,7 +117,7 @@ def main(args):
         print(f'Sampled parameters: {sampled_pars}')
         for i in range(len(sampled_pars)):
             key = sampled_pars[i]
-            print(f'- {key}: fiducial = {fidvals[key]:.2e}; init = {ball_mean[key]:.2e} +- {ball_std[key]:.2e}')
+            print(f'- {key}: ref = {fidvals[key]:.2e}; init = {ball_mean[key]:.2e} +- {ball_std[key]:.2e}')
     nsteps = mcmc_dict["nsteps"] if args.nsteps==-1 else args.nsteps
     objID = mcmc_dict["objid"] if args.ID == -1 else args.ID
     ncores = args.ncores
@@ -134,8 +134,21 @@ def main(args):
         #-----------------------------------------------------------------
         # fiducial parameter of the evaluation
         sampled_theta_fid = mcmc_dict["sampled_theta_fid"]
-        # prepare a dummy data vector, to read real PSF and image mask
-        datavector = get_dummy_data_vector(sampled_theta_fid, meta_dict)
+        # generate mock data and write into disk ONLY IN THE MAIN PROCESS
+        # such that all the processes share the same noise
+        if rank==0:
+            # prepare a dummy data vector, to read real PSF and image mask
+            datavector = get_dummy_data_vector(sampled_theta_fid, meta_dict)
+            pars = Pars(sampled_pars, meta_dict, derived)
+            log_posterior = LogPosterior(pars, datavector, likelihood='grism', 
+                sampled_theta_fid=sampled_theta_fid,
+                write_mock_data_to=mcmc_dict["mockdata_output"])
+            if size>1:
+                comm.Barrier()
+        else:
+            if size>1:
+                comm.Barrier()
+        datavector = GrismDataVector(file=mcmc_dict["mockdata_output"])
     else:
         #-----------------------------------------------------------------
         # Load data vector from existing data
@@ -161,23 +174,27 @@ def main(args):
         print(pars_order)
 
     ########################### Setup Posterior ################################
-    if args.run_from_params:
-        log_posterior = LogPosterior(pars, datavector, likelihood='grism', 
-            sampled_theta_fid=sampled_theta_fid,
-            write_mock_data_to=mcmc_dict["mockdata_output"])
-    else:
-        log_posterior = LogPosterior(pars, datavector, likelihood='grism')
+    #if args.run_from_params:
+    #    log_posterior = LogPosterior(pars, datavector, likelihood='grism', 
+    #        sampled_theta_fid=sampled_theta_fid,
+    #        write_mock_data_to=mcmc_dict["mockdata_output"])
+    #else:
+    log_posterior = LogPosterior(pars, datavector, likelihood='grism')
     # Example posterior evaluation
     if rank==0:
+        #ipdb.set_trace()
         print("---------------------------------------------")
         print("Example likelihood evaluation: ")
         example_theta = np.array([fidvals[key] for key in sampled_pars])
-        print("Evaluated at: ", example_theta)
+        print("Evaluated at: ", fidvals)
         loglike_test = log_posterior.log_likelihood(example_theta, None)
         logpost_test = log_posterior(example_theta, None, pars)
         print(f'log likelihood = {loglike_test}')
         print(f'log posterior  = {logpost_test}')
         print("---------------------------------------------")
+        comm.Barrier()
+    else:
+        comm.Barrier()
     # test pickle dump to see the size of the posterior function
     # with open("test_JWST_post_func.pkl", 'wb') as f:
     #         pickle.dump(log_posterior, f)

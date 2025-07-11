@@ -474,6 +474,7 @@ class GrismDataVector(DataVector):
     def __init__(self,
         file=None,
         header = None, data_header = None, data = None, noise = None,
+        psf = None, mask = None
         ):
         ''' Initialize the `GrismDataVector` class object
         either from a fits file, or from a series of input parameters
@@ -492,6 +493,16 @@ class GrismDataVector(DataVector):
             self.data_header = data_header
             self.noise = noise
         self.Nobs = self.header['OBSNUM']
+        if psf is None:
+            self.psf = [None,] * self.Nobs
+        else:
+            self.psf = psf
+        if mask is None:
+            self.mask = []
+            for i in range(self.Nobs):
+                self.mask.append(np.ones(self.data[i].shape))
+        else:
+            self.mask = mask
 
         return
 

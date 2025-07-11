@@ -285,16 +285,20 @@ class GrismModelCube(DataVector):
             noise = self._getNoise(self.conf)
             img_withNoise = img.copy()
             img_withNoise.addNoise(noise)
-            noise_img = img_withNoise - img
+            ### the noise image is the std estimate of background noise
+            ### For real data, this is estimated from a background aperture
+            ### For mock data, this comes from the noise model
+            #noise_img = img_withNoise - img
+            noise_array = np.ones_like(img.array) * np.sqrt(noise.getVariance())
             assert (img_withNoise.array is not None), "Null data"
             assert (img.array is not None), "Null data"
             #print("----- %s seconds -----" % (time() - start_time))
             if self.conf['ADDNOISE']:
                 #print("[GrismGenerator][debug]: add noise")
-                return img_withNoise.array, noise_img.array
+                return img_withNoise.array, noise_array
             else:
                 #print("[GrismGenerator][debug]: noise free")
-                return img.array, noise_img.array
+                return img.array, noise_array
 
     def _build_PSF_model(self, config, **kwargs):
         ''' Generate PSF model

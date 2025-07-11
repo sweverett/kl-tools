@@ -36,7 +36,7 @@ MPIRUN=/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.4/bin/mpirun
 #YAML=../yaml/example_jwst_noshear_freekine.yaml
 #YAML=../yaml/example_jwst_shear_TFR_short.yaml
 #YAML=../yaml/example_jwst_noshear_TFR_short.yaml
-YAML=../yaml/example_jwst_shear_TFR_full_D2.yaml
+YAML=../yaml/example_jwst_noshear_TFR_full.yaml
 
 ### Mock data
 #YAML=../yaml/mock_jwst_shear_TFR_smooth8.yaml
@@ -44,10 +44,10 @@ YAML=../yaml/example_jwst_shear_TFR_full_D2.yaml
 #YAML=../yaml/mock_jwst_shear_TFR_full.yaml
 
 ### pocoMC config
-#N_EFFECTIVE=512
-#N_TOTAL=4096
-N_EFFECTIVE=2048
-N_TOTAL=16384
+N_EFFECTIVE=512
+N_TOTAL=4096
+#N_EFFECTIVE=2048
+#N_TOTAL=16384
 
 MPI_PML="--mca pml ob1"
 MPI_BTL="--mca btl tcp,self"

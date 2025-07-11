@@ -487,22 +487,23 @@ class GrismDataVector(DataVector):
                 exit(-1)
             else:
                 self.from_fits(file)
+            self.Nobs = self.header['OBSNUM']
         else:
             self.header = header
             self.data = data
             self.data_header = data_header
             self.noise = noise
-        self.Nobs = self.header['OBSNUM']
-        if psf is None:
-            self.psf = [None,] * self.Nobs
-        else:
-            self.psf = psf
-        if mask is None:
-            self.mask = []
-            for i in range(self.Nobs):
-                self.mask.append(np.ones(self.data[i].shape))
-        else:
-            self.mask = mask
+            self.Nobs = self.header['OBSNUM']
+            if psf is None:
+                self.PSF = [None,] * self.Nobs
+            else:
+                self.PSF = psf
+            if mask is None:
+                self.mask = []
+                for i in range(self.Nobs):
+                    self.mask.append(np.ones(self.data[i].shape))
+            else:
+                self.mask = mask
 
         return
 
@@ -527,11 +528,15 @@ class GrismDataVector(DataVector):
         ''' Return the idx PSF model in the data set
         '''
         return self.PSF[idx]
+    def get_PSF_list(self):
+        return self.PSF
 
     def get_mask(self, idx=0):
         ''' Return the idx mask in the data set
         '''
         return self.mask[idx]
+    def get_mask_list(self):
+        return self.mask
 
     def from_fits(self, file=None):
         ''' Read `GrismDataVector` from a fits file
@@ -579,11 +584,11 @@ class GrismDataVector(DataVector):
         for i in range(self.Nobs):
             # Compulsory: data image and noise
             hdu_primary.header["IMG%d"%(i+1)] = "IMAGE%d"%(i+1)
-            hdu_list.append(fits.ImageHDU(self.data[i], name="IMAGE%d"%(i+1)),
-                header=fits.Header(self.data_header[i]))
+            hdu_list.append(fits.ImageHDU(self.data[i], name="IMAGE%d"%(i+1),
+                header=fits.Header(self.data_header[i])))
             hdu_primary.header["NOISE%d"%(i+1)] = "NOISE%d"%(i+1)
-            hdu_list.append(fits.ImageHDU(self.noise[i], name="NOISE%d"%(i+1)),
-                header=fits.Header(self.data_header[i]))
+            hdu_list.append(fits.ImageHDU(self.noise[i], name="NOISE%d"%(i+1),
+                header=fits.Header(self.data_header[i])))
             # Optional: PSF and mask
             if self.PSF[i] is not None:
                 hdu_primary.header["PSF%d"%(i+1)] = "PSF%d"%(i+1)
@@ -599,7 +604,8 @@ class GrismDataVector(DataVector):
                 hdu_list.append(_psf_hdu_)
             if self.mask[i] is not None:
                 hdu_primary.header["MASK%d"%(i+1)] = "MASK%d"%(i+1)
-                hdu_list.append(fits.ImageHDU(self.mask[i],name="MASK%d"%(i+1)), header=fits.Header(self.data_header[i]))
+                hdu_list.append(fits.ImageHDU(self.mask[i],name="MASK%d"%(i+1), header=fits.Header(self.data_header[i])))
+        hdu_list.insert(0, hdu_primary)
         hdul = fits.HDUList(hdu_list)
         hdul.writeto(file, overwrite=overwrite)
 

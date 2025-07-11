@@ -6,8 +6,25 @@ mcmc:
   #nsteps: 10
   monitor_autocorr: True
   data_filename_fmt: mockdata_compile_short_withmask_GDS_ID%d_emlonly.fits
+  mockdata_output: /xdisk/timeifler/jiachuanxu/kltools_jwst_chains/mockdata_test.fits
   objid: 181661
   output: /xdisk/timeifler/jiachuanxu/kltools_jwst_chains/mockobj181661_shear_TFR_T1_testpoco
+  sampled_theta_fid:
+    g1: 0.0
+    g2: 0.0
+    theta_int: 0.0
+    sini: 0.05
+    dx_disk: 0.0
+    dy_disk: 0.0
+    dy_spec: 0.0
+    v0: 0.0
+    vcirc: 251.538
+    rscale: 0.05
+    hlr: 0.232
+    em_PaA_flux: 4.4e-17
+    em_PaA_hlr: 0.232
+    em_PaA_sigma: 0.6
+    flux: 768
 
 # (Might be) sampled parameters in simulation
 params:
@@ -33,26 +50,6 @@ params:
       scale: 0.1
       proposal: 1.0e-4
     latex: g_2
-#  eint1:
-#    prior:
-#      min: -1.0
-#      max: 1.0
-#    ref:
-#      dist: norm
-#      loc: 0.0
-#      scale: 0.1
-#      proposal: 1.0e-4
-#    latex: e^\mathrm{int}_1
-#  eint2:
-#    prior:
-#      min: -1.0
-#      max: 1.0
-#    ref:
-#      dist: norm
-#      loc: 0.0
-#      scale: 0.1
-#      proposal: 1.0e-4
-#    latex: e^\mathrm{int}_2
   theta_int:
     prior:
       min: 0.5
@@ -64,7 +61,6 @@ params:
       loc: 0.936227
       scale: 1.0e-3
       proposal: 1.0e-3
-#    derived: 'lambda eint1, eint2: np.angle(eint1+1j*eint2)/2.'
     latex: \theta_\mathrm{int}
   sini:
     prior:
@@ -77,8 +73,19 @@ params:
       loc: -0.785
       scale: 0.001
       proposal: 0.001
-#    derived: 'lambda eint1, eint2: np.sin(2*np.arctan((eint1*eint1+eint2*eint2)**0.5))'
     latex: \mathrm{sin}(i)
+  g: 
+    derived: "lambda g1, g2: np.sqrt(g1*g1 + g2*g2)"
+    prior:
+      min: 0.0
+      max: 1.0
+    latex: g
+  eint1:
+    derived: "lambda sini, theta_int: np.tan(0.5*np.arcsin(sini)) * np.cos(2*theta_int)"
+    latex: e^\mathrm{int}_1
+  eint2:
+    derived: "lambda sini, theta_int: np.tan(0.5*np.arcsin(sini)) * np.sin(2*theta_int)"
+    latex: e^\mathrm{int}_2
   dx_disk:
     prior:
       #min: -0.3
@@ -319,7 +326,7 @@ meta:
     lambda_unit: nm
 
   sed:
-    z: 0.3
+    z: 1.6145
     continuum_type: func # `temp` for template, `func` for function
     continuum_func: "1.0 + wave * 0.0"
     #restframe_temp: ../data/Simulation/GSB2.spec
@@ -333,33 +340,66 @@ meta:
     em_PaA_sigma: param # 0.65
 
   obs_conf:
-    - INSTNAME: JWST
+    - NAXIS: 2
+      NAXIS1: 31
+      NAXIS2: 31
+      EXTNAME: SPECCUTA
+      # wavelength grid
+      WAVE_1: 4.886499999999879
+      D_WAVE: 0.000999999999999889
+      OFFSET: -4902.1100000005445
+      COMMENTS: "wave = wave_1 + np.arange(0, NAXIS1, 1) * d_wave"
+      PIXSCALE: 0.0629
+      APERTURE: 31
+      EMISSION: PaA
+      BUNIT: DN/s
+      DISPANG: -0.00253000059467512
+      OBSINDEX: 0
+      INSTNAME: JWST/NIRCam
       OBSTYPE: grism
-      BANDPASS: ../data/Bandpass/DESI/z.dat?
+      # sensitivity if not in ETC mode
+      BANDPASS: ../data/Bandpass/JWST/NIRCam_WFSS_F444W_modA_grismR_sensitivity.dat
       SEDBLKID: 0
+      RSPEC: 500.0
       PSFTYPE: data
-      # if in ETC mode
-      RDNOISE: 2.6
-      SKYMODEL: ../data/Skyspectra/spec-sky.dat
-      DIAMETER: 332.42
-      EXPTIME: 180
-      GAIN: 1.0
+      PSFDATA: ../data/psf/JWST_NIRCam_WFSS_modA_PSF.fits
       NOISETYP: ccd
-      ADDNOISE: False
-    - INSTNAME: JWST
+      ADDNOISE: True
+      TEMP: 1.0
+      ### if in ETC mode
+      # RDNOISE: 2.6
+      # SKYMODEL: ../data/Skyspectra/spec-sky.dat
+      # DIAMETER: 332.42
+      # EXPTIME: 180
+      # GAIN: 1.0
+      # NOISETYP: ccd
+      # ADDNOISE: False
+    - NAXIS: 2
+      NAXIS1: 62
+      NAXIS2: 62
+      EXTNAME: F444WIMG
+      BUNIT: MJy/sr
+      PIXAR_SR: 2.11465740855697E-14
+      PIXAR_A2: 0.000899684595650763
+      PIXSCALE: 0.029994742800210222
+      OBSINDEX: 1
+      INSTNAME: JWST/NIRCam
       OBSTYPE: image
-      BANDPASS: ../data/Bandpass/CTIO/DECam.r.dat
       PSFTYPE: data
-      # if in ETC mode
-      SKYLEVEL: 44.54
-      EXPTIME: 4000
-      NAXIS: 2
-      NAXIS1: 32
-      NAXIS2: 30
-      PIXSCALE: 0.003
-      PSFFWHM: 1.0
-      DIAMETER: 378.2856
-      GAIN: 4.0
+      PSFDATA: ../data/psf/JWST_NIRCam_F444W_modA_PSF.fits
+      MASKDATA: ../data/mask/JWST_NIRCam_F444W_modA_mask.fits
       NOISETYP: ccd
-      RDNOISE: 7
-      ADDNOISE: False
+      ADDNOISE: True
+      TEMP: 1
+      # do not need bandpass in flux mode
+      #BANDPASS:
+      ### if in ETC mode
+      # SKYLEVEL: 44.54
+      # EXPTIME: 4000
+      # PIXSCALE: 0.003
+      # PSFFWHM: 1.0
+      # DIAMETER: 378.2856
+      # GAIN: 4.0
+      # NOISETYP: ccd
+      # RDNOISE: 7
+      # ADDNOISE: False

@@ -13,12 +13,14 @@ import galsim as gs
 from galsim.angle import Angle, radians
 import matplotlib.pyplot as plt
 from numba import njit
-#from mpi4py import MPI
-#_mpi = MPI
-#_mpi_comm = _mpi.COMM_WORLD
-#_mpi_size = _mpi_comm.Get_size()
-#_mpi_rank = _mpi_comm.Get_rank()
-
+try:
+    from mpi4py import MPI
+    _mpi_comm = MPI.COMM_WORLD
+    size = _mpi_comm.Get_size()
+    rank = _mpi_comm.Get_rank()
+except:
+    rank = 0
+    size = 1
 import kl_tools.utils as utils
 import kl_tools.priors as priors
 import kl_tools.intensity as intensity
@@ -853,8 +855,9 @@ class GrismLikelihood(LogLikelihood):
         self._set_model_dimension()
         ### Case 1: Build data vector from input fiducial parameters
         if ("sampled_theta_fid" in kwargs):
-            print("GrismLikelihood: Generating data vector from fid pars...")
-            _conf = _meta.pop('obs_conf')
+            print("[%d/%d] GrismLikelihood: Generating data vector from fid pars..."%(rank,size))
+            #_conf = _meta.pop('obs_conf')
+            _conf = datavector.get_config_list()
             _fid = kwargs["sampled_theta_fid"]
             self.Nobs = len(_conf)
             # self._set_model_dimension()
@@ -862,9 +865,10 @@ class GrismLikelihood(LogLikelihood):
             GrismPars_list = [grism.GrismPars(_meta.pars, _conf[i]) for i in range(self.Nobs)]
             GrismModelCube_list = [grism.GrismModelCube(p) for p in GrismPars_list]
             # initialize C++ routine without setting data vector
-            print("debug: Nlam = %d/%d"%(GrismPars_list[0].lambdas.shape,
-                GrismPars_list[0].bp_array.shape[0]))
-            grism.initialize_observations(self.Nobs, GrismPars_list)
+            print("debug: Nlam = ", GrismPars_list[0].lambdas.shape,
+                GrismPars_list[0].bp_array.shape[0])
+            grism.initialize_observations(self.Nobs, GrismPars_list, 
+                datavector, overwrite=True)
             init_Cube_lists(GrismModelCube_list)
             init_CubePars_lists(GrismPars_list)
             # generate fiducial images and DataVector object
@@ -873,13 +877,14 @@ class GrismLikelihood(LogLikelihood):
             dv = grism.GrismDataVector(header={'OBSNUM': self.Nobs, 
                 'z_spec': _meta["sed"]["z"], **_fid}, data_header=_conf,
                 data=fid_img_list, noise=fid_noise_list,
-                psf=datavector.PSF, mask=datavector.mask)
+                psf=datavector.get_PSF_list(), 
+                mask=datavector.get_mask_list())
             init_GlobalDataVector([dv])
-            if write_mock_data_to in kwargs:
+            if "write_mock_data_to" in kwargs:
                 print(f'Writing mock data to {kwargs["write_mock_data_to"]}')
                 dv.to_fits(kwargs["write_mock_data_to"], overwrite=True)
             # set the fiducial images to C++ routine
-            print("GrismLikelihood: Caching the (fiducial) data vector...")
+            print("[%d/%d] GrismLikelihood: Caching the (fiducial) data vector..."%(rank, size))
             grism.initialize_observations(self.Nobs, GrismPars_list, 
                 datavector=dv, overwrite=True)
         ### Case 2: Build data vector from input GrismDataVector object
@@ -888,7 +893,7 @@ class GrismLikelihood(LogLikelihood):
             # self._set_model_dimension()
             # ignore the obs_conf from yaml file if we are using existing data
             if _meta.get('obs_conf', None) is not None:
-                print(f'Use obs_conf from datavector not parameters')
+                print(f'[%d/%d] GrismLikelihood: Use obs_conf from datavector not parameters'%(rank, size))
                 _meta.pop('obs_conf')
             _conf = datavector.get_config_list()
             self.Nobs = datavector.Nobs
@@ -903,7 +908,8 @@ class GrismLikelihood(LogLikelihood):
             # initialize C++ routine with setting data vector
             init_Cube_lists(GrismModelCube_list)
             init_CubePars_lists(GrismPars_list)
-            grism.initialize_observations(self.Nobs, GrismPars_list, datavector)
+            grism.initialize_observations(self.Nobs, GrismPars_list, datavector, 
+                overwrite=True)
         return
 
     def _set_model_dimension(self):
@@ -944,10 +950,13 @@ class GrismLikelihood(LogLikelihood):
     def get_images(self, theta, force_noise_free=True, return_noise=False):
         ''' Get simulated images given parameter values
         '''
+        if type(theta)==dict:
+            theta_pars = theta
+        else:
+            theta_pars = self.theta2pars(theta)
         image_list = []
         noise_list = []
         dv = get_GlobalDataVector(0)
-        theta_pars = self.theta2pars(theta)
         dc_array, gal_phot, sed = self._setup_model(theta_pars, None)
         for i in range(self.Nobs):
             fc = get_Cube(i)
@@ -1244,7 +1253,8 @@ class FiberLikelihood(LogLikelihood):
             init_Cube_lists([cube.FiberModelCube(_mdim, c) for c in _conf])
             self._set_model_dimension()
             ### generate fiducial images and DataVector object
-            _d, _n = self.get_images(_fid, force_noise_free=False, return_noise=True)
+            _d, _n = self.get_images(_fid, 
+                                     force_noise_free=False, return_noise=True)
             _header = {'NEXTEN': 2*self.Nobs, 'OBSNUM': self.Nobs}
             init_GlobalDataVector([FiberDataVector(
                  header=_header, data_header=_conf,

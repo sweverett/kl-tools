@@ -355,7 +355,9 @@ class ImagePars(object):
                     )
 
             self.wcs = wcs
-            self.pixel_scale = self._estimate_pixel_scale()
+            self.pixel_scale = float(np.mean(
+                self._estimate_pixel_scale()
+            )) * 3600 # convert to arcsec/pixel
 
         return
 

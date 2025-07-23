@@ -484,6 +484,10 @@ class BasisIntensityMap(IntensityMap):
         of the same shape as the image. NOTE: In this subclass,
         the continuum is interpreted as a template, and will be
         fit to the image along with the chosen basis functions.
+    skip_ground_state: bool; default False
+        If True, skip the ground state basis function. This is useful
+        for cases where the ground state is not needed, such as when
+        fitting a basis to residuals after subtracting a model.
     '''
 
     def __init__(
@@ -491,7 +495,8 @@ class BasisIntensityMap(IntensityMap):
             basis_type,
             basis_kwargs=None,
             basis_plane='obs',
-            continuum=None
+            continuum=None,
+            skip_ground_state=False
             ):
 
         super(BasisIntensityMap, self).__init__('basis', continuum=continuum)
@@ -515,6 +520,10 @@ class BasisIntensityMap(IntensityMap):
             self.psf = None
 
         self.basis_kwargs = basis_kwargs
+
+        if not isinstance(skip_ground_state, bool):
+            raise TypeError('skip_ground_state must be a bool!')
+        self.skip_ground_state = skip_ground_state
 
         # cannot setup the fitter until we know the image parameters
         # such as shape and pixel scale, passed at render time
@@ -578,6 +587,7 @@ class BasisIntensityMap(IntensityMap):
             self.basis_plane,
             image_pars,
             continuum_template=self.continuum,
+            skip_ground_state=self.skip_ground_state,
             psf=self.psf,
             weights=weights,
             mask=mask,
@@ -637,6 +647,10 @@ class IntensityMapFitter(object):
         The image parameters, including the shape & pixel scale
     continuum_template: numpy.ndarray
         A template array for the object continuum
+    skip_ground_state: bool; default False
+        If True, skip the ground state basis function. This is useful
+        for cases where the ground state is not needed, such as when
+        fitting a basis to residuals after subtracting a model.
     psf: galsim.GSObject
         A galsim object representing a PSF to convolve the
         basis functions by
@@ -654,6 +668,7 @@ class IntensityMapFitter(object):
             basis_plane,
             image_pars, 
             continuum_template=None,
+            skip_ground_state=False,
             psf=None,
             weights=None,
             mask=None
@@ -672,6 +687,7 @@ class IntensityMapFitter(object):
         assert self.image_shape == image_pars.shape
 
         self.continuum_template = continuum_template
+        self.skip_ground_state = skip_ground_state
 
         for k, v in {'weights': weights, 'mask': mask}.items():
             if (v is not None) and (v.shape != (Nrow, Ncol)):
@@ -784,6 +800,13 @@ class IntensityMapFitter(object):
                 ny=self.image_pars.Ny,
                 pixel_scale=self.image_pars.pixel_scale,
                 )
+
+        # if skip_ground_state is True, we skip the first basis function
+        if self.skip_ground_state is True:
+            # remove the first column of the design matrix
+            self.design_mat = self.design_mat[:,1:]
+            # update the number of basis functions
+            self.Nbasis -= 1
 
         # handle continuum template separately
         if self.continuum_template is not None:
@@ -946,6 +969,11 @@ class IntensityMapFitter(object):
 
         assert len(mle_coeff) == self.Nbasis
         self.mle_coefficients = mle_coeff
+
+        if self.skip_ground_state is True:
+            # if we skipped the ground state, we need to add it back in
+            # as the first coefficient
+            mle_coeff = np.insert(mle_coeff, 0, 0)
 
         # Now create MLE intensity map
         if self.continuum_template is None:

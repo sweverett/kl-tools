@@ -240,7 +240,7 @@ def _render_model_image(
     else:
       gal = gs.InclinedSersic(
         n=sersic_n if sersic_n is not None else pars['n'],
-        inclination=inclination,
+        inclination=inclination*gs.radians,
         scale_radius=pars['scale_radius'],
         flux=pars['flux'],
         gsparams=gsparams

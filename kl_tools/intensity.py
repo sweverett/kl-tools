@@ -823,7 +823,7 @@ class IntensityMapFitter(object):
         return
 
     # TODO: Add @njit when ready
-    def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):
+    def _initialize_pseudo_inv(self, theta_pars, max_fail=50, redo=True):
         '''
         Setup Moore-Penrose pseudo inverse given basis
 

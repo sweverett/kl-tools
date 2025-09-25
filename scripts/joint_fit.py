@@ -31,9 +31,51 @@ import ipdb
 #kid = 137
 #kid = 11
 #kid = 116
-kid = 63
+#kid = 63
 #kid = 38
-#kid = 122
+#kid = 122 # our favorite face-on.
+#kid = 52
+#kid = 112
+#kid = 135 # fails due to galsim FFT size too large
+#kid = 71
+#kid = 49
+#kid = 89
+#kid = 35 nearly face-on (sini = 0.7)
+#kid = 86
+#kid = 44
+#kid = 165
+#kid = 15
+#kid = 132
+#kid = 143 # fails due to galsim FFT size too large
+#kid = 76
+#kid = 117
+#kid = 152
+#kid = 25
+#kid = 47 # fails due to galsim FFT size too large
+#kid = 28 # fails due to galsim FFT size too large
+#kid = 155
+#kid = 104 # fails due to galsim FFT size too large
+#kid = 83
+#kid = 45
+#kid = 170
+#kid = 23 # bad fit, hits parameter prior boundary.
+#kid = 66
+#kid = 94 
+#kid = 108 
+#kid = 101 # looks face on, sini = 0.1
+#kid = 124
+#kid = 139
+#kid = 74 # fails due to galsim FFT size too large
+#kid = 136
+#kid = 72
+#kid = 134
+#kid = 69
+#kid = 32 # Looks _extremely_ face on, but sini=0.62
+#kid = 118 # fails due to galsim FFT size too large
+#kid = 92
+#kid = 33
+kid = 53
+
 
 cube = KROSSDataCube(kid)
 
@@ -105,6 +147,7 @@ bounds = {
     'flux': (0, 2*image_flux),
     'scale_radius': (hst_pixel_scale * 5, hst_pixel_scale * 100),
     'theta_int': tuple(theta_int + np.radians([-15, 15])),
+    'n': (0.5, 4.5)
 }
 
 psf = None
@@ -140,7 +183,8 @@ plt.gcf().set_size_inches(4, 3)
 
 Nmax = 25
 basis_plane = 'disk'
-# basis_plane = 'cen'
+#basis_plane = 'obs'
+#basis_plane = 'cen'
 print(f'Using a beta of {fit_pars["scale_radius"]:.3f} arcsec')
 print(f'Using a basis plane of {basis_plane}')
 print(f'Using a Nmax of {Nmax}')
@@ -148,7 +192,7 @@ print(f'Using a Nmax of {Nmax}')
 exp_shapelet_pars = {
     'basis_type': 'exp_shapelets',
     'basis_plane': basis_plane,
-    'skip_ground_state': True,  # skip the ground state basis function
+    'skip_ground_state': False,  # skip the ground state basis function
     'basis_kwargs': {
         'nmax': Nmax,  # Max order of the polar basis
         # 'beta': fit_pars['scale_radius'],
@@ -186,7 +230,7 @@ basis_image = exp_shapelet_imap.render(
     mask=im_mask,
 )
 basis_image[im_mask] = np.nan
-
+ipdb.set_trace()
 ## Now for plotting
 
 data_vmin = 0.8*min(np.nanmin(basis_image), np.nanmin(fitted_image))

@@ -1,4 +1,4 @@
-name: kltools-testenv
+name: kltools
 channels:
   - conda-forge
 dependencies:

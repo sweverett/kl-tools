@@ -631,6 +631,104 @@ def build_intensity_map(name, kwargs):
 
     return intensity
 
+class CompositeIntensityMap(IntensityMap):
+    '''
+    Composite imap = InclinedExponential + BasisIntensity (prefit).
+
+    Assumes the basis part is already fit and its coefficients are available.
+    Renders both parts on the *passed* image_pars (so no resampling).
+
+    This class is largely useful for handling the PSF convolution of a model
+    VelocityMap whose corresponding IntensityMap is a composite of an
+    inclined exponential + basis fit to the residuals.
+
+    NOTE: The structure of this class is somewhat specific to the use case described
+    above, and could be generalized if needed.
+    '''
+
+    def __init__(
+            self,
+            exp_imap: InclinedExponential,
+            basis_imap: BasisIntensityMap
+            ):
+
+        super().__init__(name='composite')
+
+        if not isinstance(exp_imap, InclinedExponential):
+            raise TypeError('exp_imap must be an InclinedExponential')
+
+        if not isinstance(basis_imap, BasisIntensityMap):
+            raise TypeError('basis_imap must be a BasisIntensityMap')
+
+        self.exp_imap = exp_imap
+        self.basis_imap = basis_imap
+
+        # composite is generally *not* static because theta_pars change exp
+        self.is_static = False
+
+        return
+
+    def _render(
+            self, image_pars, theta_pars, pars, weights=None, mask=None, image=None
+            ):
+        '''
+        Returns (composite_emission, continuum).
+
+        NOTE: continuum is currently set to None, but could be extended to
+        include a composite continuum if needed.
+
+        - exp component: rendered analytically from theta_pars on image_pars
+        - basis component: rendered from stored coefficients on image_pars
+          (no refit here; we assume coeffs already exist)
+        '''
+
+        # remove any psf from pars to avoid double convolution
+        pars_no_psf = {k: v for k, v in (pars or {}).items() if k != 'psf'}
+
+        # 1) exponential component (intrinsic; no PSF here)
+        I_exp, _ = self.exp_imap._render(
+            image_pars=image_pars,
+            theta_pars=theta_pars,
+            pars=pars_no_psf,
+            weights=weights,
+            mask=mask,
+            image=image,
+        )
+
+        # 2) basis component (prefit); use stored coeffs to render on *this* image grid
+        fitter = self.basis_imap.fitter
+        if fitter is None or getattr(fitter, 'mle_coefficients', None) is None:
+            raise ValueError(
+                'basis_imap has no fitted coefficients; fit it first or pass a prefit instance.'
+            )
+
+        # determine which coefficients are "emission" vs "continuum"
+        coeff = fitter.mle_coefficients
+        if self.basis_imap.continuum is None:
+            used_coeff = coeff
+            basis_cont = None
+        else:
+            used_coeff = coeff[:-1]
+            basis_cont = coeff[-1] * self.basis_imap.continuum
+
+        # render basis on the *target* grid directly (respect plane & transforms)
+        I_basis = fitter.basis.render_im(
+            used_coeff,
+            image_pars,
+            plane=self.basis_imap.basis_plane,
+            transformation_pars=theta_pars,
+        )
+        if fitter.basis.is_complex:
+            I_basis = I_basis.real
+
+        I_comp = I_exp + I_basis
+
+        # NOTE/TODO: keep composite continuum out for now (can extend later)
+        continuum = None
+
+        return I_comp, continuum
+
+
 class IntensityMapFitter(object):
     '''
     This base class represents an intensity map defined

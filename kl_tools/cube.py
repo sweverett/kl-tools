@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse import identity, dia_matrix
-import fitsio
+#import fitsio
 from astropy.io import fits
 import astropy.units as u
 import galsim
@@ -196,7 +196,8 @@ class DataCube(DataVector):
 
         cubefile = cubefile
 
-        data = fitsio.read(cubefile)
+        #data = fitsio.read(cubefile)
+        data = fits.open(cubefile)
 
         datacube = DataCube(data, **kwargs)
 

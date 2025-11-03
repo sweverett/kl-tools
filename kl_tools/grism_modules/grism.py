@@ -4,7 +4,7 @@ from astropy.table import Table, join, hstack
 import os
 import sys
 import pickle
-import fitsio
+#import fitsio
 from copy import deepcopy
 from astropy.table import Table
 from scipy.sparse import identity, dia_matrix
@@ -337,7 +337,9 @@ class GrismModelCube(DataVector):
                 fwhm = config.get('PSFFWHM', 0.5)
                 return gs.Moffat(beta=beta, fwhm=fwhm)
             elif _type == 'data':
-                return kwargs["datavector"].get_PSF(self.conf["OBSINDEX"])
+                psf = kwargs["datavector"].get_PSF(self.conf["OBSINDEX"])
+                #print(f'Load PSF from data: ', psf)
+                return psf
             else:
                 raise ValueError(f'{psf_type} has not been implemented yet!')
         else:
@@ -566,7 +568,8 @@ class GrismDataVector(DataVector):
             # optional: PSF, mask
             if "PSF%d"%(i+1) in self.header:
                 _hdu_ = hdul[self.header["PSF%d"%(i+1)]]
-                _psf_img_ = gs.Image(_hdu_.data, scale=_hdu_.header["PIXELSCL"], copy=True)
+                _psf_img_ = gs.Image(_hdu_.data/(_hdu_.data.sum()), 
+                                     scale=_hdu_.header["PIXELSCL"], copy=True)
                 self.PSF.append(gs.InterpolatedImage(_psf_img_, flux=1))
             else:
                 self.PSF.append(None)
@@ -596,10 +599,14 @@ class GrismDataVector(DataVector):
             # Optional: PSF and mask
             if self.PSF[i] is not None:
                 hdu_primary.header["PSF%d"%(i+1)] = "PSF%d"%(i+1)
-                _pixelscl_ = self.data_header[i]["PIXSCALE"]/4.
-                _NAXIS_ = self.data_header[i]["NAXIS1"]*4.
-                _psf_img_ = self.PSF[i].drawImage(nx=_NAXIS_, ny=_NAXIS_, scale=_pixelscl_)
-                _psf_hdu_ = fits.ImageHDU(_psf_img_.array, name="PSF%d"%(i+1),
+                #_pixelscl_ = self.data_header[i]["PIXSCALE"]/4.
+                _pixelscl_ = self.PSF[i].image.scale
+                #_NAXIS_ = self.data_header[i]["NAXIS1"]*4.
+                _NAXIS_ = self.PSF[i].image.array.shape[0]
+                #_psf_img_ = self.PSF[i].drawImage(nx=_NAXIS_, ny=_NAXIS_, scale=_pixelscl_)
+                _psf_img_ = self.PSF[i].image
+                _psf_hdu_ = fits.ImageHDU(_psf_img_.array/(_psf_img_.array.sum()), 
+                    name="PSF%d"%(i+1),
                     header=fits.Header(self.data_header[i]))
                 _psf_hdu_.header["PIXELSCL"] = _pixelscl_
                 _psf_hdu_.header["OVERSAMP"] = 4.

@@ -13,6 +13,7 @@ import pickle
 import zeus
 import emcee
 import pocomc as pc
+import ultranest
 
 import kl_tools.utils as utils
 import kl_tools.priors as priors
@@ -152,11 +153,25 @@ class MCMCRunner(object):
     def meta(self):
         pass
 
+    ''' New features imported from Spencer's new interface '''
+    def get_blobs(self):
+        return self.runner.sampler.blobs
+    
+    def get_logprior(self):
+        blobs = self.get_blobs()
+        return blobs[:,:,0]
+
+    def get_loglike(self):
+        blobs = self.get_blobs()
+        return blobs[:,:,1]
+    
+    ''' End new features '''
+
     @abstractmethod
     def _initialize_sampler(self, pool=None):
         pass
 
-    def _initialize_walkers(self, scale=0.1):
+    def _initialize_walkers(self, init_scale=0.001):
         ''''
         TODO: Not obvious that this scale factor is reasonable
         for our problem, should experiment & test further
@@ -166,6 +181,10 @@ class MCMCRunner(object):
 
         Might want to base this as some fractional scale for the width of
         each prior, centered at the max of the prior
+
+        init_scale: float
+            The initialization scale for the prior ball to sample from,
+            multiplied by the prior.scale
         '''
 
         if 'priors' in self.meta:
@@ -179,11 +198,11 @@ class MCMCRunner(object):
                 base = peak if peak is not None else cen
 
                 if prior.scale is not None:
-                    radius = prior.scale
+                    radius = init_scale * prior.scale
                 elif base != 0:
-                    radius = base*scale
+                    radius = base * init_scale
                 else:
-                    radius = scale
+                    radius = init_scale
 
                 # random ball about base value
                 ball = radius * np.random.randn(self.nwalkers)
@@ -204,7 +223,7 @@ class MCMCRunner(object):
 
         else:
             # don't have much to go on
-            self.start = scale * np.random.rand(self.nwalkers, self.ndim)
+            self.start = init_scale * np.random.rand(self.nwalkers, self.ndim)
 
         return
 
@@ -230,8 +249,8 @@ class MCMCRunner(object):
 
         return outliers, Noutliers
 
-    def run(self, pool, nsteps=None, start=None, return_sampler=False,
-            vb=True):
+    def run(self, pool=None, nsteps=None, start=None, return_sampler=False,
+            vb=True, **kwargs):
         '''
         pool: Pool
             A pool object returned from schwimmbad. Can be SerialPool,
@@ -267,7 +286,7 @@ class MCMCRunner(object):
         if pool is not None:
             with pool:
                 pt = type(pool)
-                #print(f'Pool: {pool}')
+                print(f'Pool: {pool}')
 
                 if isinstance(pool, schwimmbad.MPIPool):
                     if not pool.is_master():
@@ -276,11 +295,11 @@ class MCMCRunner(object):
 
                 self.sampler = self._initialize_sampler(pool=pool)
 
-                self._run_sampler(start, nsteps=nsteps, progress=progress)
+                self._run_sampler(start, nsteps=nsteps, progress=progress, **kwargs)
         else:
             self.sampler = self._initialize_sampler()
 
-            self._run_sampler(start, nsteps=nsteps, progress=progress)
+            self._run_sampler(start, nsteps=nsteps, progress=progress, **kwargs)
 
         self.has_run = True
 
@@ -312,6 +331,9 @@ class MCMCRunner(object):
         self.burn_in = burn_in
 
         return
+    
+    def get_chain(self, *args, **kwargs):
+        return self.sampler.get_chain(*args, **kwargs)
 
     def compute_MAP(self, loglike=None, discard=None, thin=1, recompute=False):
         '''
@@ -325,6 +347,9 @@ class MCMCRunner(object):
             The factor by which to thin out the samples by; i.e.
             thin=2 will only use every-other sample
         '''
+
+        if loglike is None:
+            loglike = self.get_loglike()
 
         if self.has_run is not True:
             print('Warning: Cannot compute MAP until the mcmc has been run!')
@@ -342,8 +367,7 @@ class MCMCRunner(object):
             if self.burn_in is not None:
                 discard = self.burn_in
             else:
-                raise ValueError('Must passs a value for discard if ' +\
-                                 'burn_in is not set!')
+                discard = 0
 
         if loglike is None:
             # don't know actual min of loglikelihood, so do best we can
@@ -358,7 +382,7 @@ class MCMCRunner(object):
             for i in range(self.ndim):
                 self.MAP_sigmas.append(np.percentile(chain[:, i], [16, 84]))
         else:
-            chain = self.sampler.get_chain()
+            chain = self.get_chain()
             self.MAP_indx = np.unravel_index(loglike.argmax(), loglike.shape)
             self.MAP_true = chain[self.MAP_indx]
 
@@ -383,7 +407,7 @@ class MCMCRunner(object):
             print('Warning: Cannot plot chains until mcmc has been run!')
             return
 
-        chain = self.sampler.get_chain()
+        chain = self.get_chain()
 
         ndim = self.ndim
         if size is None:
@@ -410,6 +434,15 @@ class MCMCRunner(object):
         if close is True:
             plt.close()
 
+        return
+    
+    @staticmethod
+    def _plot_single_chain(chain, indx, burn_in=0):
+        '''
+        Needs to be separate as nested samplers have different
+        chain access
+        '''
+        plt.plot(chain[burn_in:,:,indx], alpha=0.5)
         return
 
     def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
@@ -439,10 +472,9 @@ class MCMCRunner(object):
             if self.burn_in is not None:
                 discard = self.burn_in
             else:
-                raise ValueError('Must passs a value for discard if ' +\
-                                 'burn_in is not set!')
+                discard = 0
 
-        chain = self.sampler.get_chain(flat=True, discard=discard, thin=thin)
+        chain = self.get_chain(flat=True, discard=discard, thin=thin)
 
         if use_derived is True:
             # add derived quantity sini*vcirc
@@ -781,7 +813,7 @@ class PocoRunner(MCMCRunner):
             blobs_dtype=blobs_dtype,
             output_dir=self.output_dir,
             output_label=self.output_label,
-            #n_steps=2*self.ndim,
+            n_steps=1*self.ndim,
             pool=pool,
             )
         # sampler = pc.Sampler(
@@ -903,6 +935,257 @@ class KLensPocoRunner(PocoRunner):
 
         return
 
+class UltranestRunner(MCMCRunner):
+
+    def __init__(self, *args, **kwargs):
+
+        try:
+            self.resume = kwargs['resume']
+            kwargs.pop('resume')
+        except KeyError:
+            self.resume = False
+
+        try:
+            # first, look for explicit setting
+            wrapped_pars = kwargs['wrapped_pars']
+            kwargs.pop('wrapped_pars')
+        except KeyError:
+            try:
+                # next, ask the pars object
+                wrapped_pars = self.pars.sampled.get_wrapped_pars()
+            except AttributeError:
+                # finally, don't set
+                wrapped_pars = None
+
+        super(UltranestRunner, self).__init__(*args, **kwargs)
+
+        return
+
+    def _initialize_sampler(self, pool=None):
+        #import pudb
+        #pudb.set_trace()
+        sampler = ultranest.ReactiveNestedSampler(
+            self.pars.sampled.names,
+            self.loglike,
+            transform=self.logprior,
+            log_dir=self.log_dir,
+            resume=self.resume,
+            wrapped_params=self.wrapped_pars
+            )
+
+        return sampler
+
+    def get_blobs(self):
+        return None
+
+    def get_logprior(self):
+        raise NotImplementedError('not yet implemented!')
+
+    def get_loglike(self):
+        '''
+        TODO: return actual likelihood of chain values, instead of weights
+        (propto loglike)
+        '''
+
+        weighted_chain = self.get_chain(equal_weight=False)
+        return weighted_chain[0]
+
+    @property
+    def args(self):
+        return self.loglike_args
+
+    @property
+    def kwargs(self):
+        return self.loglike_kwargs
+
+    @property
+    def pfunc(self):
+        return self.loglike
+
+    @property
+    def meta(self):
+        return self.pars.meta.pars     
+
+class KLensUltranestRunner(UltranestRunner):
+    '''
+    TODO
+    '''
+
+    def __init__(self, nwalkers, ndims, loglike, logprior,
+                 datacube, pars,
+                 loglike_args=None, loglike_kwargs=None,
+                 logprior_args=None, logprior_kwargs=None,
+                 out_dir='temp_ultranest', resume=False):
+        '''
+        loglike: function / callable
+            Log likelihood function to sample from
+        logprior: function / callable
+            Log prior function to sample from
+        datacube: DataCube
+            A datacube object to fit a model to
+        pars: A Pars object containing the sampled pars and meta pars
+              needed to evaluate posterior, such as
+              covariance matrix, SED definition, etc.
+        loglike_args: list
+            List of additional args needed to evaluate log likelihood,
+            such as the data vector, covariance matrix, etc.
+        loglike_kwargs: dict
+            List of additional kwargs needed to evaluate log likelihood,
+            such as meta parameters, etc.
+        logprior_args: list
+            List of additional args needed to evaluate log prior,
+            such as the data vector, covariance matrix, etc.
+        logprior_kwargs: dict
+            List of additional kwargs needed to evaluate log prior,
+            such as meta parameters, etc.
+        out_dir: str
+            Where to store intermediate & final outputs
+        resume: bool
+            Whether to resume the previous run in the same directory
+
+        NOTE: to make this consistent w/ the other mcmc runner classes,
+        you must pass datacube & pars separately from the rest of the
+        args/kwargs!
+        '''
+
+        if loglike_args is not None:
+            loglike_args = [datacube] + loglike_args
+        else:
+            loglike_args = [datacube]
+
+        super(KLensUltranestRunner, self).__init__(
+            nwalkers, ndims,
+            loglike=loglike, logprior=logprior,
+            loglike_args=loglike_args, loglike_kwargs=loglike_kwargs,
+            logprior_args=logprior_args, logprior_kwargs=logprior_kwargs,
+            resume=resume
+            )
+
+        self.datacube = datacube
+        self.pars = pars
+
+        self.pars_order = self.pars.sampled.pars_order
+
+        self.MAP_vmap = None
+
+        # ultranest calls this the log_dir
+        self.log_dir = out_dir
+
+        #...
+
+        self.set_wrapped_pars()
+
+        return
+
+    def set_wrapped_pars(self) -> None:
+        '''
+        Set which sampled parameters have a wrapped parameter space (e.g. a circle)
+        '''
+
+        wrapped_pars = self.pars.sampled.get_wrapped_pars()
+
+        len_wrapped = len(wrapped_pars)
+        len_sampled = len(self.pars.sampled)
+
+        if len_wrapped != len_sampled:
+            raise ValueError(f'wrapped_pars has len {len_wrapped} while pars.sampled has len {len_sampled}')
+
+        self.wrapped_pars = wrapped_pars
+
+        return
+
+    def _run_sampler(self, start, nsteps=None, progress=True,
+                     print_results=True, make_plots=True):
+        '''
+        The ultranest-specific way to run the sampler object. Here,
+        we treat nsteps as the max number of likelihood evaluations
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        if progress is True:
+            viz_callback = 'auto'
+            show_status = True
+        else:
+            viz_callback = False
+            show_status = False
+        print(f'viz_callback = {viz_callback}, show_status = {show_status}')
+        self.sampler.run(
+            min_num_live_points=self.nwalkers, max_ncalls=nsteps,
+            viz_callback=viz_callback, show_status=show_status
+            )
+
+        if print_results is True:
+            self.sampler.print_results()
+
+        if make_plots is True:
+            self.sampler.plot_run()
+            self.sampler.plot_trace()
+            self.sampler.plot_corner()
+
+        return
+
+    def plot_corner(self, *args, **kwargs):
+        '''
+        See parent function for possible args & kwargs
+        '''
+
+        # discard & thin kwargs don't make sense for nested sampling
+        kwargs['discard'] = None
+        kwargs['thin'] = None
+
+        assert (self.burn_in == 0) or (self.burn_in is None)
+
+        super(KLensUltranestRunner, self).plot_corner(*args, **kwargs)
+
+        return
+
+    def get_chain(self, equal_weighted=True, **kwargs):
+        '''
+        ignore most kwargs used for other samplers
+        '''
+        chain_dir = os.path.join(self.sampler.logs['run_dir'], 'chains/')
+
+        if equal_weighted is True:
+            fname = 'equal_weighted_post.txt'
+        else:
+            # must account for differently weighted samples of posterior
+            fname = 'weighted_post.txt'
+
+        chain_file = os.path.join(chain_dir, fname)
+
+        chain_rec = Table.read(chain_file, format='ascii')
+
+        # need to convert rec array to np array
+        chain = np.zeros((len(chain_rec), len(chain_rec.colnames)))
+
+        for i, col in enumerate(chain_rec.colnames):
+            chain[:,i] = chain_rec[col]
+
+        return chain
+
+    def set_burn_in(self, index):
+        '''
+        Nested samplers don't need a burn-in, so ignore
+        '''
+
+        print('Warning: requested to set a burn-in for a nested ' +\
+              'sampler; ignoring')
+
+        return
+
+    @staticmethod
+    def _plot_single_chain(chain, indx, burn_in=0):
+        '''
+        Needs to be separate as nested samplers have different
+        chain access
+
+        No burn-in is used for nested sampling, so we ignore
+        '''
+        plt.plot(chain[:,indx], alpha=0.5)
+        return
+
 def get_runner_types():
     return RUNNER_TYPES
 
@@ -912,6 +1195,7 @@ RUNNER_TYPES = {
     'emcee': KLensEmceeRunner,
     'zeus': KLensZeusRunner,
     'poco': KLensPocoRunner,
+    'ultranest': KLensUltranestRunner,
     }
 
 def build_mcmc_runner(name, args, kwargs):

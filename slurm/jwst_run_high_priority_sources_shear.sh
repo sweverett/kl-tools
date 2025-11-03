@@ -1,10 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name=JWSTKL
-#SBATCH --output=/xdisk/timeifler/jiachuanxu/job_logs/JWSTKL-%A_%a.out
+#SBATCH --job-name=KLS_high
+#SBATCH --output=/xdisk/timeifler/jiachuanxu/job_logs/JWSTKL_shear_highpri_%A_%a.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=28
 #SBATCH --cpus-per-task=1
+### there are 69 sources in the high priority sample
+#SBATCH --array=1-69
+###SBATCH --array=24
 
 ### >>> High priority purchase-in time
 ###SBATCH --partition=high_priority
@@ -15,7 +18,7 @@
 
 #SBATCH --account=timeifler
 
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=jiachuanxu@arizona.edu
 
@@ -30,22 +33,21 @@ source ~/.bashrc
 cd /home/u17/jiachuanxu/kl-tools/scripts
 conda activate kltools
 #MPIRUN=/opt/ohpc/pub/mpi/openmpi5-gnu13/5.0.5/bin/mpirun
-MPIRUN=/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.4/bin/mpirun
+#MPIRUN=/opt/ohpc/pub/mpi/openmpi3-gnu8/3.1.4/bin/mpirun
+MPIRUN=/groups/timeifler/jiachuanxu/python_envs/envs/kltools/bin/mpirun
 
-### Real data
-#YAML=../yaml/example_jwst_noshear_freekine.yaml
-#YAML=../yaml/example_jwst_shear_TFR_short.yaml
-#YAML=../yaml/example_jwst_noshear_TFR_short.yaml
-YAML=../yaml/example_jwst_noshear_TFR_full.yaml
-
-### Mock data
-#YAML=../yaml/mock_jwst_shear_TFR_smooth8.yaml
-#YAML=../yaml/mock_jwst_shear_TFR.yaml
-#YAML=../yaml/mock_jwst_shear_TFR_full.yaml
+### Real data (high priority sources)
+#YAML_LIST=(../yaml/high_priority/obj*_shear_TFR_full.yaml)
+YAML_LIST=(../yaml/high_priority/shear_Gauss_stdp1_3sigma/equalT/obj*_TFR_full.yaml)
+IDX=$((SLURM_ARRAY_TASK_ID - 1))
+YAML="${YAML_LIST[$IDX]}"
+echo "Running with file $YAML"
 
 ### pocoMC config
+### Low-resolution run
 N_EFFECTIVE=512
 N_TOTAL=4096
+### High-resolution run
 #N_EFFECTIVE=2048
 #N_TOTAL=16384
 
@@ -56,8 +58,8 @@ MPI_BTL="--mca btl tcp,self"
 #### ${MPIRUN} -n ${SLURM_NTASKS} ${MPI_BTL} python test_jwst_mcmc_run.py ${YAML} --mpi
 
 ### pocoMC
-#${MPIRUN} -n ${SLURM_NTASKS} ${MPI_BTL} python test_jwst_mcmc_run.py ${YAML} --mpi -sampler=pocomc -nparticles=${N_EFFECTIVE} -n_total=${N_TOTAL} --mpi
+${MPIRUN} -n ${SLURM_NTASKS} python test_jwst_mcmc_run.py ${YAML} -sampler=poco -ID=-1 -nparticles=${N_EFFECTIVE} -n_total=${N_TOTAL} --mpi
 
 ### ultranest
-mpirun -n ${SLURM_NTASKS} python test_jwst_mcmc_run.py ${YAML} -sampler=ultranest -nparticles=${N_EFFECTIVE} -n_total=100 --mpi
+#mpirun -n ${SLURM_NTASKS} python test_jwst_mcmc_run.py ${YAML} -sampler=ultranest -nparticles=${N_EFFECTIVE} -n_total=100 --mpi
 

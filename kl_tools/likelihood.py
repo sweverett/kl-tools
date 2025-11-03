@@ -169,7 +169,7 @@ class LogPosterior(LogBase):
     the passed sampled & meta parameters
     '''
 
-    def __init__(self, parameters, datavector, likelihood='default', **kwargs):
+    def __init__(self, parameters, datavector, likelihood='default', prior='default',**kwargs):
         '''
         parameters: `parameters.Pars` object
             Pars instance that holds all parameters needed for MCMC
@@ -180,7 +180,9 @@ class LogPosterior(LogBase):
         # set self.parameters and self.datavector (to Null)
         super(LogPosterior, self).__init__(parameters, DataVector())
 
-        self.log_prior = LogPrior(parameters)
+        self.log_prior = build_prior_model(
+            prior, parameters
+            )
         self.log_likelihood = build_likelihood_model(
             likelihood, parameters, datavector, **kwargs
             )
@@ -318,6 +320,42 @@ class LogPrior(LogBase):
                 raise ValueError(f'{name} in meta.priors is not recognized!')
                 exit(-1)
         return random_sample
+    
+class LogCDFPrior(LogPrior):
+    '''
+    A prior class that returns the sampled value given defined
+    cumulative probability distributions for each sampled parameter
+    '''
+
+    def __call__(self, quantile_cube):
+        '''
+        quantile_cube: np.ndarray
+            An array of CDF quantile values for each parameter. See:
+            https://johannesbuchner.github.io/UltraNest/priors.html?highlight=prior
+        '''
+
+        # prepare the output array, which has the same shape
+        transformed_pars = np.empty_like(quantile_cube)
+
+        pars_order = self.parameters.sampled.pars_order
+        derived_params = self.parameters.derived.keys()
+
+        for name, prior in self.priors.items():
+            # if the parameter is sampled
+            if name in pars_order.keys():
+                indx = pars_order[name]
+                transformed_pars[indx] = prior(
+                    quantile_cube[indx], log=True, quantile=True
+                    )
+            # if the parameter is derived
+            # TODO: figure out how to add prior on derived parameter in UltraNest
+            elif name in derived_params:
+                continue
+            # unknown parameter
+            else:
+                raise ValueError(f'{name} in meta.priors is not recognized!')
+                exit(-1)
+        return transformed_pars
 
 class LogLikelihood(LogBase):
 
@@ -405,6 +443,15 @@ class LogLikelihood(LogBase):
             return (-0.5 * log_det) + self._log_likelihood(
                 theta, datavector, model
                 )
+
+    def _call_no_args(self, theta):
+        '''
+        TODO: A hack to make ultranest work. Will document later if it
+        is successful
+        '''
+
+        return self(theta, None)
+
 
     def _compute_log_det(self, imap):
         # TODO: Adapt this to work w/ new DataCube's w/ weight maps!
@@ -860,13 +907,12 @@ class GrismLikelihood(LogLikelihood):
             _conf = datavector.get_config_list()
             _fid = kwargs["sampled_theta_fid"]
             self.Nobs = len(_conf)
-            # self._set_model_dimension()
             # set GrismPars and GrismModelCube list
             GrismPars_list = [grism.GrismPars(_meta.pars, _conf[i]) for i in range(self.Nobs)]
             GrismModelCube_list = [grism.GrismModelCube(p) for p in GrismPars_list]
             # initialize C++ routine without setting data vector
-            print("debug: Nlam = ", GrismPars_list[0].lambdas.shape,
-                GrismPars_list[0].bp_array.shape[0])
+            #print("debug: Nlam = ", GrismPars_list[0].lambdas.shape,
+            #    GrismPars_list[0].bp_array.shape[0])
             grism.initialize_observations(self.Nobs, GrismPars_list, 
                 datavector, overwrite=True)
             init_Cube_lists(GrismModelCube_list)
@@ -886,18 +932,20 @@ class GrismLikelihood(LogLikelihood):
             # set the fiducial images to C++ routine
             print("[%d/%d] GrismLikelihood: Caching the (fiducial) data vector..."%(rank, size))
             grism.initialize_observations(self.Nobs, GrismPars_list, 
-                datavector=dv, overwrite=True)
+                dv, overwrite=True)
         ### Case 2: Build data vector from input GrismDataVector object
         else:
-            # init_GlobalDataVector([datavector])
-            # self._set_model_dimension()
-            # ignore the obs_conf from yaml file if we are using existing data
-            if _meta.get('obs_conf', None) is not None:
-                print(f'[%d/%d] GrismLikelihood: Use obs_conf from datavector not parameters'%(rank, size))
-                _meta.pop('obs_conf')
             _conf = datavector.get_config_list()
             self.Nobs = datavector.Nobs
-
+            # update obs conf from image with the one in YAML
+            if _meta.get('obs_conf_overwrite', None) is not None:
+                yaml_conf = _meta.pop('obs_conf_overwrite')
+                assert len(yaml_conf) == self.Nobs 
+                for i in range(self.Nobs):
+                    for k,v in yaml_conf[i].items():
+                            if rank==0:
+                                print(f'Updating Obs Config {i+1}: {k}: {_conf[i][k]} -> {v}')
+                            _conf[i][k] = v
             GrismPars_list = []
             GrismModelCube_list = []
             for i in range(self.Nobs):
@@ -1516,6 +1564,46 @@ class FiberLikelihood(LogLikelihood):
 
         return intensity.build_intensity_map(imap_type, None, imap_pars)
 
+# NOTE: This is where you must register a new prior model
+PRIOR_TYPES = {
+    'default': LogPrior,
+    'prior': LogPrior,
+    'cdf_prior': LogCDFPrior
+    }
+
+def get_prior_types():
+    return PRIOR_TYPES
+
+def get_sampler_prior_type(sampler):
+    sampler_prior = {
+        'emcee': 'prior',
+        'zeus': 'prior',
+        'poco': 'prior',
+        'metropolis': 'prior',
+        'multinest': 'cdf_prior',
+        'ultranest': 'cdf_prior'
+    }
+
+    return sampler_prior[sampler]
+
+def build_prior_model(name, parameters):
+    '''
+    name: str
+        Name of prior model type
+    parameters: Pars
+        Pars instance that holds all parameters needed for MCMC
+        run, including SampledPars and MetaPars
+    '''
+
+    name = name.lower()
+
+    if name in PRIOR_TYPES.keys():
+        # User-defined input construction
+        prior = PRIOR_TYPES[name](parameters)
+    else:
+        raise ValueError(f'{name} is not a registered prior model!')
+
+    return prior
 
 def get_likelihood_types():
     return LIKELIHOOD_TYPES

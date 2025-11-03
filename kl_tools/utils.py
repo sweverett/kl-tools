@@ -285,23 +285,24 @@ def parse_yaml(filename):
         sample_ball_std[key] = propose_std
         sample_ball_proposal[key] = proposal
     # tune the observation configuration
-    Nobs = len(config['meta']['obs_conf'])
-    for i in range(Nobs):
-        config['meta']['obs_conf'][i]['OBSINDEX'] = i
-        if config['meta']['obs_conf'][i]['OBSTYPE'] == 'fiber':
-            config['meta']['obs_conf'][i]['OBSTYPE'] = 1
-        elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'grism':
-            config['meta']['obs_conf'][i]['OBSTYPE'] = 2
-        elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'image':
-            config['meta']['obs_conf'][i]['OBSTYPE'] = 0
-        else:
-            raise ValueError("Unrecognized observation type %s!"%(config['meta']['obs_conf'][i]['OBSTYPE']))
+    # Note: YAML that runs on real data might not have obs_conf section
+    if "obs_conf" in config['meta']:
+        Nobs = len(config['meta']['obs_conf'])
+        for i in range(Nobs):
+            config['meta']['obs_conf'][i]['OBSINDEX'] = i
+            if config['meta']['obs_conf'][i]['OBSTYPE'] == 'fiber':
+                config['meta']['obs_conf'][i]['OBSTYPE'] = 1
+            elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'grism':
+                config['meta']['obs_conf'][i]['OBSTYPE'] = 2
+            elif config['meta']['obs_conf'][i]['OBSTYPE'] == 'image':
+                config['meta']['obs_conf'][i]['OBSTYPE'] = 0
+            else:
+                raise ValueError("Unrecognized observation type %s!"%(config['meta']['obs_conf'][i]['OBSTYPE']))
     meta = copy.deepcopy(config['meta'])
     mcmc = copy.deepcopy(config['mcmc'])
     return sampled_pars, fidvals, latex_labels, derived, meta, mcmc, \
         sample_ball_mean, sample_ball_std, sample_ball_proposal
-
-
+    
 BASE_DIR = get_base_dir()
 MODULE_DIR = get_module_dir()
 TEST_DIR = get_test_dir()

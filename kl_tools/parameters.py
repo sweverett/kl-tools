@@ -96,6 +96,11 @@ class SampledPars(object):
 
         self.pars_order = pars_order
 
+        self.names = [*self.pars_order]
+
+        # TODO: think about how to set this properly through the interface
+        self.wrapped_pars = None
+
         return
 
     def theta2pars(self, theta):
@@ -125,6 +130,22 @@ class SampledPars(object):
             theta[indx] = pars[name]
 
         return theta
+    
+    def set_wrapped_pars(self, wrapped_pars: list) -> None:
+        pass
+
+    # TODO: write this method!
+    def get_wrapped_pars(self) -> list:
+        '''
+        TODO: Implement!
+        '''
+        if self.wrapped_pars is None:
+            Npars = len(self.pars_order)
+            wrapped_pars = Npars * [False]
+        else:
+            wrapped_pars = self.wrapped_pars
+
+        return wrapped_pars
 
     def __repr__(self):
         return str(self.pars_order)

@@ -37,23 +37,26 @@ class UniformPrior(Prior):
             raise TypeError('inclusive must be a bool!')
         self.left = left
         self.right = right
+        self.width = right - left
         self.inclusive = inclusive
         self.norm = 1. / (right - left)
 
         # There is no defined peak for a uniform dist
         self.peak = None
         self.cen = np.mean([left, right])
-        self.scale = None
+        self.scale = abs(right - left) / 4.
         # Boundary
         self.bound = [left, right]
 
         return
 
-    def __call__(self, x, log=False):
+    def __call__(self, x, log=False, quantile=False):
         '''
         log: Set to return the log of the probability
         '''
-
+        if quantile is True:
+            return self._inv_cdf(x)
+        
         val = self.norm
 
         if self.inclusive is True:
@@ -74,6 +77,9 @@ class UniformPrior(Prior):
     def rvs(self, size=1):
         ''' Generate random sample from prior '''
         return np.random.uniform(low=self.left, high=self.right, size=size)
+    
+    def _inv_cdf(self, quantile):
+        return self.left + self.width * quantile
 
 class GaussPrior(Prior):
     def __init__(self, mu, sigma, clip_sigmas=None, zero_boundary=None):
@@ -115,7 +121,7 @@ class GaussPrior(Prior):
         self.scale = self.sigma
         # Boundary
         if self.clip_sigmas is not None:
-            self.bound = [mu-clip_sigmas*sigma, mu-clip_sigmas*sigma]
+            self.bound = [mu-clip_sigmas*sigma, mu+clip_sigmas*sigma]
         else: 
             self.bound = [-np.inf, np.inf]
         if zero_boundary=="positive":
@@ -124,11 +130,13 @@ class GaussPrior(Prior):
             self.bound = [min(0, self.bound[0]), min(0, self.bound[1])]
         return
 
-    def __call__(self, x, log=False):
+    def __call__(self, x, log=False, quantile=False):
         '''
         log: Set to return the log of the probability
         '''
-
+        if quantile is True:
+            return self._inv_cdf(x)
+        
         if self.clip_sigmas is not None:
             if (abs(x - self.mu) / self.sigma) > self.clip_sigmas:
                 # sample clipped; ignore
@@ -156,6 +164,9 @@ class GaussPrior(Prior):
                          (self.bound[1]-self.mu)/self.sigma, 
                          loc=self.mu, scale=self.sigma)
         return rand.rvs(size)
+    
+    def _inv_cdf(self, quantile):
+        return scipy.stats.norm(self.mu, self.sigma).ppf(quantile)
 
 class LognormalPrior(Prior):
     def __init__(self, mu, dex, clip_sigmas=None):

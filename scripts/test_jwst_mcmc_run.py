@@ -19,6 +19,7 @@ try:
     comm = MPI.COMM_WORLD
     size = comm.Get_size()
     rank = comm.Get_rank()
+    print(f'[{rank}/{size}] Calling MPI')
 except:
     rank = 0
     size = 1
@@ -32,7 +33,7 @@ import astropy.io.fits as fits
 import astropy.units as u
 
 import kl_tools.utils as utils
-from kl_tools.mcmc import KLensZeusRunner, KLensEmceeRunner, KLensPocoRunner
+from kl_tools.mcmc import KLensZeusRunner, KLensEmceeRunner, KLensPocoRunner, KLensUltranestRunner
 import kl_tools.priors as priors
 import kl_tools.likelihood as likelihood
 from kl_tools.parameters import Pars
@@ -46,14 +47,10 @@ import ipdb
 parser = ArgumentParser()
 
 parser.add_argument('yaml', type=str, help='Input YAML file')
-parser.add_argument('-ID', type=int, default=181661, help='ID of the object to fit')
-parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'pocomc'],
+parser.add_argument('-ID', type=int, default=-1, help='ID of the object to fit')
+parser.add_argument('-sampler', type=str, choices=['zeus', 'emcee', 'poco', 'ultranest'],
                     default='emcee',
                     help='Which sampler to use for mcmc')
-parser.add_argument('-run_name', type=str, default='',
-                    help='Name of mcmc run')
-parser.add_argument('--show', action='store_true', default=False,
-                    help='Set to show test plots')
 parser.add_argument('--not_overwrite', action='store_true', default=False,
                     help='Not Overwrite existing outputs')
 parser.add_argument('-nsteps', type=int, default=-1,
@@ -90,7 +87,7 @@ def get_dummy_data_vector(sampled_theta_fid, meta_dict):
         dummy_data_header.append(copy.deepcopy(_conf))
         if _conf["PSFTYPE"] == "data":
             with fits.open(_conf["PSFDATA"]) as hdul:
-                psf_data = gs.Image(hdul[1].data, 
+                psf_data = gs.Image(hdul[1].data/hdul[1].data.sum(), 
                     scale=hdul[1].header["PIXELSCL"], copy=True)
             dummy_psf.append(gs.InterpolatedImage(psf_data, flux=1))
         else:
@@ -122,8 +119,6 @@ def main(args):
     objID = mcmc_dict["objid"] if args.ID == -1 else args.ID
     ncores = args.ncores
     mpi = args.mpi
-    run_name = args.run_name
-    show = args.show
     outdir = mcmc_dict["output"]
     utils.make_dir(outdir)
 
@@ -138,9 +133,9 @@ def main(args):
         # such that all the processes share the same noise
         if rank==0:
             # prepare a dummy data vector, to read real PSF and image mask
-            datavector = get_dummy_data_vector(sampled_theta_fid, meta_dict)
+            dummyvector = get_dummy_data_vector(sampled_theta_fid, meta_dict)
             pars = Pars(sampled_pars, meta_dict, derived)
-            log_posterior = LogPosterior(pars, datavector, likelihood='grism', 
+            log_posterior = LogPosterior(pars, dummyvector, likelihood='grism', 
                 sampled_theta_fid=sampled_theta_fid,
                 write_mock_data_to=mcmc_dict["mockdata_output"])
             if size>1:
@@ -154,8 +149,12 @@ def main(args):
         # Load data vector from existing data
         #-----------------------------------------------------------------
         ### Step 1: load JWST data and figure out source information
-        data_file = os.path.join("../data/jwst", 
+        if os.path.exists(mcmc_dict["data_filename_fmt"]%objID):
+            data_file = mcmc_dict["data_filename_fmt"]%objID
+        else:
+            data_file = os.path.join("../data/jwst", 
                         mcmc_dict["data_filename_fmt"]%objID)
+        assert os.path.exists(data_file), f'Input data {data_file} not exists!'
         if rank==0:
             print("Reading JWST observation ID-%d"%(objID))
         data_hdul = fits.open(data_file)
@@ -179,19 +178,28 @@ def main(args):
     #        sampled_theta_fid=sampled_theta_fid,
     #        write_mock_data_to=mcmc_dict["mockdata_output"])
     #else:
-    log_posterior = LogPosterior(pars, datavector, likelihood='grism')
+    prior_type = likelihood.get_sampler_prior_type(args.sampler)
+    log_posterior = LogPosterior(pars, datavector, likelihood='grism', prior=prior_type)
     # Example posterior evaluation
     if rank==0:
         #ipdb.set_trace()
         print("---------------------------------------------")
         print("Example likelihood evaluation: ")
-        example_theta = np.array([fidvals[key] for key in sampled_pars])
-        print("Evaluated at: ", fidvals)
+        try:
+            example_theta = np.array([sampled_theta_fid[key] for key in sampled_pars])
+            print(f'Use `sampled_theta_fid`')
+            print("Evaluated at: ", sampled_theta_fid)
+        except:
+            example_theta = np.array([fidvals[key] for key in sampled_pars])
+            print(f'Can not find `sampled_theta_fid`, use reference dist center')
+            print("Evaluated at: ", fidvals)
         loglike_test = log_posterior.log_likelihood(example_theta, None)
-        logpost_test = log_posterior(example_theta, None, pars)
         print(f'log likelihood = {loglike_test}')
-        print(f'log posterior  = {logpost_test}')
+        if args.sampler != 'ultranest':
+            logpost_test = log_posterior(example_theta, None, pars)
+            print(f'log posterior  = {logpost_test}')
         print("---------------------------------------------")
+        #ipdb.set_trace()
         comm.Barrier()
     else:
         comm.Barrier()
@@ -201,7 +209,7 @@ def main(args):
 
     ############################## Setup Runner ################################
     ndims = log_posterior.ndims
-    if args.sampler != 'pocomc':
+    if (args.sampler != 'poco') and (args.sampler != 'ultranest'):
         nwalkers = 2*ndims
     else:
         nwalkers = args.nparticles
@@ -239,11 +247,11 @@ def main(args):
     #-----------------------------------------------------------------
     # pocoMC
     #-----------------------------------------------------------------
-    elif args.sampler == 'pocomc':
+    elif args.sampler == 'poco':
         if rank==0:
             print('Setting up KLensPocoRunner')
         ### resume pocoMC run from previous state
-        checkpoint_root = os.path.join(outdir, "poco_checkpoint")
+        checkpoint_root = os.path.join(outdir, "pmc")
         statefiles = glob.glob(checkpoint_root + "_*.state")
         max_checkpoint = 0
         for statefile in statefiles:
@@ -260,7 +268,7 @@ def main(args):
                 print(f'Start new pocoMC run...')
         else:
             resume_state_path = os.path.join(outdir, 
-                            f'poco_checkpoint_{max_checkpoint}.state')
+                            f'pmc_{max_checkpoint}.state')
             if rank==0:
                 print(f'Resume pocoMC from {resume_state_path}!')
         ### init PocoMC runner
@@ -269,13 +277,34 @@ def main(args):
                 log_posterior.log_likelihood, log_posterior.log_prior,
                 None, pars,
                 loglike_kwargs={'return_derived_lglike': True},
-                output_dir=outdir, output_label="poco_checkpoint",
+                output_dir=outdir, # output_label=None,
                 resume_state_path=resume_state_path,
+            )
+    #-----------------------------------------------------------------
+    # UltraNest
+    #-----------------------------------------------------------------
+    elif args.sampler == 'ultranest':
+        if rank==0:
+            print('Setting up KLensUltranestRunner')
+        ### init UltraNest runner
+        if args.not_overwrite:
+            resume = True
+        else:
+            resume = "subfolder"
+        runner = KLensUltranestRunner(
+                nwalkers, ndims, 
+                log_posterior.log_likelihood._call_no_args,
+                log_posterior.log_prior,
+                None, 
+                pars,
+                loglike_kwargs={'return_derived_lglike': True},
+                out_dir=outdir, 
+                resume=resume,
             )
     else:
         print(f'sampler {args.sampler} is not supported!')
         exit(-1)
-
+    print(f'[{rank}/{size}] We arrive here')
     pool = schwimmbad.choose_pool(
         mpi=args.mpi, processes=args.ncores
         )
@@ -290,6 +319,7 @@ def main(args):
     #-----------------------------------------------------------------
     # Run sampler
     #-----------------------------------------------------------------
+    #ipdb.set_trace()
     runner.run(pool, nsteps, start=p0, vb=True)
     runner.burn_in = nsteps // 2
 
@@ -325,7 +355,7 @@ def main(args):
             np.hstack([chain, post[:,np.newaxis], blobs]), 
                   header = "# " + " ".join(sampled_pars) + " logprob " + " ".join(blobs_name), 
                   comments="")
-    elif (args.sampler == 'pocomc'):
+    elif (args.sampler == 'poco'):
         ### retrieve MCMC samples, weights, lglikes, lgposts, blobs
         results = runner.sampler.posterior(return_blobs=True, resample=False)
         logZ, logZerr = runner.sampler.evidence()
@@ -344,6 +374,8 @@ def main(args):
         # save chain
         np.savetxt(os.path.join(outdir, "poco_chain.txt"), data_block, 
                   header = header, comments="")
+    elif (args.sampler == 'ultranest'):
+        pass
 
     ############################### Produce MAP ################################
 

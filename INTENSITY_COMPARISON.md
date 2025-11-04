@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document summarizes the key differences between `kl_tools/intensity.py` in the current branch (copilot/compare-intensity-files) and the tng_grism branch. The files show significant architectural differences, with the tng_grism branch representing an older, more complex implementation.
+This document summarizes the key differences between `kl_tools/intensity.py` in the current branch and the `tng_grism` branch. The files show significant architectural differences, with the `tng_grism` branch representing an older, more complex implementation.
 
 **Overall Statistics:**
 - Current branch: 1,279 lines
@@ -384,10 +384,10 @@ If moving from tng_grism to current branch, key changes needed:
 - Need composite models (exp + basis)
 - Want better testing isolation
 
-### Use tng_grism Branch If:
+### Use `tng_grism` Branch If:
 - Working with multi-line spectroscopy
 - Need per-line morphology (different hlr per line)
-- Working with existing tng_grism pipeline
+- Working with existing `tng_grism` pipeline
 - Need GMix model foundation (even if incomplete)
 - Have legacy code depending on datacube coupling
 
@@ -402,10 +402,10 @@ The current branch represents a **significant refactoring** toward:
 4. Support for composite models
 5. Better testability
 
-The tng_grism branch has:
+The `tng_grism` branch has:
 1. Built-in multi-line spectroscopy support
 2. Tighter integration with datacube structure
 3. More development/experimental code
 4. Foundation for GMix models
 
-**Overall**: Current branch is a **modernization** and **simplification** suitable for single-line analysis, while tng_grism is more **feature-rich for multi-line spectroscopy** but with more complexity and coupling.
+**Overall**: Current branch is a **modernization** and **simplification** suitable for single-line analysis, while `tng_grism` is more **feature-rich for multi-line spectroscopy** but with more complexity and coupling.

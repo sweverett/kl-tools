@@ -93,11 +93,11 @@ class IntensityMap(object):
 
         _RG_ = pars.get("run_options", {}).get("imap_return_gal", False)
         if im_type == 'emission':
-            return self.image if not _RG_ else self.image, self.gal
+            return self.image if (not _RG_) else (self.image, self.gal)
         elif im_type == 'continuum':
-            return self.continuum if not _RG_ else self.continuum, self.gal
+            return self.continuum if (not _RG_) else (self.continuum, self.gal)
         elif im_type == 'both':
-            return self.image, self.continuum if not _RG_ else self.image, self.continuum, self.gal
+            return (self.image, self.continuum) if (not _RG_) else (self.image, self.continuum, self.gal)
         else:
             raise ValueError('im_type can only be one of ' +\
                              'emission, continuum, or both!')
@@ -386,7 +386,7 @@ class InclinedExponential(IntensityMap):
         # except gs.GalSimFFTSizeError:
         #     #print(f'WARNING: FFT size too large, return -np.inf')
         #     self.image = np.zeros([self.ny, self.nx])
-        if pars['run_options']['imap_return_gal']:
+        if self.pars['imap_return_gal']:
             return self.image, self.gal
         else:
             return self.image

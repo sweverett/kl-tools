@@ -2,12 +2,15 @@
 
 ## Executive Summary
 
-This document summarizes the key differences between `kl_tools/intensity.py` in the current branch and the `tng_grism` branch. The files show significant architectural differences, with the `tng_grism` branch representing an older, more complex implementation.
+This document summarizes the key differences between `kl_tools/intensity.py` in the current branch and the `tng_grism` branch. The files show significant architectural differences, with the `tng_grism` branch representing an earlier development version with different design choices and feature focus.
 
 **Overall Statistics:**
 - Current branch: 1,279 lines
 - tng_grism branch: 1,275 lines
 - Changes: ~750 insertions, ~754 deletions (substantial refactoring)
+
+**Key Architectural Distinction:**
+The `tng_grism` branch is designed for **multi-line spectroscopy** with separate profiles per emission line, while the current branch focuses on **single-line analysis** with cleaner abstractions and better separation of concerns.
 
 ---
 
@@ -106,8 +109,6 @@ def __init__(self, datavector, kwargs):
   - Timing instrumentation (`from time import time`)
   - Error handling with `gs.GalSimFFTSizeError`
 
-**Key Insight**: tng_grism version is designed for multi-line spectroscopy with separate profiles per line.
-
 ---
 
 ### 4. **BasisIntensityMap Class**
@@ -171,7 +172,7 @@ def __init__(self, datacube, basis_type='default', basis_kwargs=None):
   - Based on NGMIX (Sheldon 2014) and Hogg & Lang (2012)
   - Projection handling: converts inclination to ellipticity
   - Shear transform with analytical solution (Bernstein & Jarvis 2002)
-- **Status**: Implementation incomplete (just `pass` in methods)
+- **Status**: Implementation incomplete (constructor and `_render()` contain only `pass` statements)
 
 ---
 

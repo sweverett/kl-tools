@@ -337,7 +337,7 @@ class Basis(object):
         method: str; default 'auto'
             The method to use for convolution. If 'auto', then use the
             default method for galsim.drawImage(). For real PSF estimates with
-            the pixel convolution already applied, use 'no_pixel'.dfk
+            the pixel convolution already applied, use 'no_pixel'.
         '''
 
         # the real/imag modes of some complex basis functions are fully zero 

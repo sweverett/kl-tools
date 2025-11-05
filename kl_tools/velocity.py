@@ -193,8 +193,16 @@ class VelocityMap(TransformableImage):
 
         return
 
-    def __call__(self, plane, x, y, speed=False, normalized=False,
-                 use_numba=False, indexing='ij', pix_scale=None):
+    def __call__(
+            self,
+            plane,
+            x,
+            y,
+            speed=False,
+            normalized=False,
+            use_numba=False, 
+            indexing='ij'
+            ):
         '''
         Evaluate the velocity map at position (x,y) in the given plane. Note
         that position must be defined in the same plane
@@ -204,8 +212,9 @@ class VelocityMap(TransformableImage):
         plane: str
             The plane to evaluate the velocity map in
         x, y: np.ndarray
-            The position coordinates in the given plane. If 2D, see `indexing`
-            arg for more info on allowed indexing conventions for these arrays
+            The position coordinates in the given plane, in the same unit as the
+            velociy model r_unit parameter. If 2D, see `indexing` arg for more info on 
+            allowed indexing conventions for these arrays
         speed: bool
             Set to True to return speed map instead of velocity
         normalized: bool
@@ -222,8 +231,6 @@ class VelocityMap(TransformableImage):
             then the 2D arrays should be of shape (N,M) if indexing='xy' and
             (M,N) if indexing='ij'. Default is 'ij'. For more info, see:
             https://numpy.org/doc/stable/reference/generated/numpy.meshgrid.html
-        pix_scale: float; optional
-            The pixel scale of the grid. Required if r_unit is 'arcsec'
         '''
 
         if x.shape != y.shape:
@@ -239,17 +246,6 @@ class VelocityMap(TransformableImage):
         if (len(x.shape) == 2) and (indexing == 'xy'):
             x = np.swapaxes(x, 0, 1)
             y = np.swapaxes(y, 0, 1)
-
-        if self.model.pars['r_unit'] == units.arcsec:
-            if pix_scale is None:
-                import ipdb; ipdb.set_trace()
-                raise ValueError('Must pass pix_scale if r_unit is arcsec!')
-            self._tmp_pix_scale = pix_scale
-        elif self.model.pars['r_unit'] == units.pixel:
-            # ok to assume 1 if in pixel units
-            self._tmp_pix_scale = 1
-        else:
-            raise ValueError('r_unit must be either arcsec or pixels!')
 
         super(VelocityMap, self).__call__(
             plane, x, y, use_numba=use_numba
@@ -268,9 +264,6 @@ class VelocityMap(TransformableImage):
         rendered_vmap = norm * self._eval_map_in_plane(
             plane, offset, x, y, speed=speed, use_numba=use_numba
             )
-
-        # reset the pixel scale for the next call
-        self._tmp_pix_scale = None
 
         return rendered_vmap
 
@@ -299,9 +292,6 @@ class VelocityMap(TransformableImage):
             pars = self.model.pars_arr
         else:
             pars = self.model.pars
-
-        # needed for disk plane evaluation
-        pars['pix_scale'] = self._tmp_pix_scale
 
         func = self._get_plane_eval_func(plane, use_numba=use_numba)
 
@@ -384,17 +374,9 @@ class VelocityMap(TransformableImage):
 
         r = np.sqrt(x**2 + y**2)
 
-        # NOTE / TODO: we should make the grid be more general and allow
-        # it to be either in pixels or physical units. For now, we assume
-        # that the grid is in pixel units
-        r_unit = pars['r_unit']
+        # NOTE: the following only works correctly if you passed your X/Y grid points
+        # in the same units as rscale!
         rscale = pars['rscale']
-        if r_unit == 'arcsec':
-            pix_scale = pars['pix_scale']
-            rscale = (rscale /  pix_scale)
-            if isinstance(rscale, units.Quantity):
-                rscale = rscale.value
-
         atan_r = np.arctan(r  / rscale)
 
         v_r = (2./ np.pi) * pars['vcirc'] * atan_r

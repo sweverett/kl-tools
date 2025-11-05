@@ -1,8 +1,3 @@
-from abc import abstractmethod
-import numpy as np
-
-import kl_tools.numba_transformation as nb
-
 '''
 This file contains transformation functions. These
 are all static functions so that numba can be used
@@ -24,6 +19,14 @@ Definition of each plane:
 
     obs:  Observed image plane. Offset version of cen plane
 '''
+
+from abc import abstractmethod
+import numpy as np
+
+import kl_tools.numba_transformation as nb
+
+SUPPORTED_PLANES = ['disk', 'gal', 'source', 'cen', 'obs']
+
 
 class TransformableImage(object):
     '''

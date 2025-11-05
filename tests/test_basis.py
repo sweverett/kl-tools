@@ -1,7 +1,9 @@
 import unittest
 import numpy as np
+import galsim as gs
 
 import kl_tools.basis as kl_basis
+from kl_tools.parameters import ImagePars
 from kl_tools.utils import get_test_dir
 
 class TestBasis(unittest.TestCase):
@@ -37,12 +39,12 @@ class TestBasis(unittest.TestCase):
         # now make sure it fails if we try to render it to an image
         coefficients = np.random.randn(10)
         nx, ny = 20, 20
+        nrow, ncol = ny, nx
         pixel_scale = 0.2 # arcsec/pixel
+        image_pars = ImagePars((nrow, ncol), pixel_scale=pixel_scale)
         plane = 'obs'
         try:
-            basis_all.render_im(
-                coefficients, nx, ny, pixel_scale, plane=plane,
-            )
+            basis_all.render_im(coefficients, image_pars, plane=plane)
         except ValueError:
             # value error because the len(coefficients) != basis.nmax, which is 
             # None
@@ -180,53 +182,43 @@ class TestBasis(unittest.TestCase):
         nmax = 3
         beta = 1
         nx, ny = 25,  25
-        pix_scale = 1
+        nrow, ncol = ny, nx
+        pix_scale = 0.5
         size = (10,6)
+
+        image_pars = ImagePars((nrow, ncol), pixel_scale=pix_scale)
 
         sersiclets = kl_basis.SersicletBasis(1, nmax=nmax, beta=beta)
         exp_shapelets = kl_basis.ExpShapeletBasis(nmax=nmax, beta=beta)
         shapelets = kl_basis.ShapeletBasis(nmax=nmax, beta=beta)
 
-        self.show = True
-
         # test the plot_basis_funcs() method
         for basis in [sersiclets, exp_shapelets, shapelets]:
             outfile = self.outdir / f'{basis.name}-basis-funcs.png'
             basis.plot_basis_funcs(
-                nx, ny, pix_scale, show=self.show, outfile=outfile, size=size
+                image_pars, show=self.show, outfile=outfile, size=size
             )
 
-        # ...
+        #-----------------------------------------------------------------
+        # Redo the above, but now with a PSF convolution on the basis
 
-        # #-----------------------------------------------------------------
-        # # Redo the above, but now with a PSF convolution on the basis
+        psf = gs.Gaussian(sigma=2*pix_scale)
 
-        # psf = gs.Gaussian(fwhm=0.8)
+        sersiclets_psf = kl_basis.SersicletBasis(
+            1, nmax=nmax, beta=beta, psf=psf
+            )
+        exp_shapelets_psf = kl_basis.ExpShapeletBasis(
+            nmax=nmax, beta=beta, psf=psf
+            )
+        shapelets_psf = kl_basis.ShapeletBasis(
+            nmax=nmax, beta=beta, psf=psf
+            )
 
-        # print('Creating a ShapeletBasis w/ PSF')
-        # shapelets = ShapeletBasis(
-        #     nx, ny, pix_scale, 'obs', Nmax=nmax, psf=psf
-        #     )
+        # test the plot_basis_funcs() method
+        for basis in [sersiclets_psf, exp_shapelets_psf, shapelets_psf]:
+            outfile = self.outdir / f'{basis.name}-basis-funcs-psf.png'
+            basis.plot_basis_funcs(
+                image_pars, show=self.show, outfile=outfile, size=size
+            )
 
-        # outfile = os.path.join(outdir, 'shapelet-basis-funcs-psf.png')
-        # print(f'Saving plot of psf shapelet basis functions to {outfile}')
-        # shapelets.plot_basis_funcs(outfile=outfile, show=show)
-
-        # print('Creating a SersicletBasis w/ PSF')
-        # index = 1
-        # sersiclets = SersicletBasis(
-        #     nx, ny, pix_scale, 'obs', index, b=1, Nmax=nmax, psf=psf
-        #     )
-
-        # outfile = os.path.join(outdir, 'sersiclet-basis-funcs-psf.png')
-        # print(f'Saving plot of psf sersiclet basis functions to {outfile}')
-        # sersiclets.plot_basis_funcs(outfile=outfile, show=show)
-
-        # print('Creating a ExpShapeletBasis w/ PSF')
-        # expShapelets = ExpShapeletBasis(
-        #     nx, ny, pix_scale, 'obs', Nmax=nmax, psf=psf
-        #     )
-
-        # outfile = os.path.join(outdir, 'expShapelet-basis-funcs-psf.png')
-        # print(f'Saving plot of psf ExpShapelet basis functions to {outfile}')
-        # expShapelets.plot_basis_funcs(outfile=outfile, show=show)
+        return

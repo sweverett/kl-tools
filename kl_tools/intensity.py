@@ -1,56 +1,67 @@
 '''
 This file contains a mix of IntensityMap classes for explicit definitions
 (e.g. an inclined exponential) and IntensityMapFitter + Basis classes for
-fitting a a chosen set of arbitrary basis functions to the stacked datacube
-image
+fitting a a chosen set of arbitrary basis functions to the 2D image
 '''
 
 import numpy as np
 from abc import abstractmethod
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from argparse import ArgumentParser
 import galsim as gs
 from galsim.angle import Angle, radians
 
 import kl_tools.utils as utils
 import kl_tools.basis as basis
 import kl_tools.likelihood as likelihood
-from kl_tools.transformation import transform_coords
-
-parser = ArgumentParser()
-
-parser.add_argument('--show', action='store_true', default=False,
-                    help='Set to show test plots')
-parser.add_argument('--test', action='store_true', default=False,
-                    help='Set to run tests')
+from kl_tools.transformation import transform_coords, SUPPORTED_PLANES
 
 class IntensityMap(object):
+    '''
+    Class that handles the management and rendering of a 2D intensity image
+    for a given set of model, transformation, and image parameters. Note that a 
+    single imap instance can render the underlying imap model repeatedly given 
+    different transformation and image parameters passed at rendering time.
 
-    def __init__(self, name, nx, ny):
-        '''
-        name: str
-            Name of intensity map type
-        nx: int
-            Size of image on x-axis
-        ny: int
-            Size of image on y-axis
-        '''
+    We make a distinction between the intensity coming from emission
+    vs the continuum. Typically the image will depend on model
+    parameters passed to render() while the continuum will be a static
+    estimate passed here, but we allow for a callable function that takes
+    as the image parameters so it can be computed on the fly.
+
+    name: str
+        Name of intensity map type
+    continuum: np.ndarray | callable | Noen
+        The continuum image to set, or a callable function
+        that takes in ImagePars and returns a numpy array
+        of the same shape as the image. If None, the continuum
+        will be made to be a zero array of the same shape as the image
+        set during the render() call
+    '''
+
+    def __init__(self, name, continuum=None):
 
         if not isinstance(name, str):
             raise TypeError('IntensityMap name must be a str!')
         self.name = name
 
-        for n in [nx, ny]:
-            if not isinstance(n, int):
-                raise TypeError('IntensityMap image size params must be ints!')
-        self.nx = nx
-        self.ny = ny
+        # while the "official" way to get an image is to call the
+        # render() method, we also store the last rendered image
+        # so that we can more efficiently handle static imaps to
+        # avoid re-rendering them, as well as for some convenience
+        # methods like plotting
+        self._image = None
+        self._continuum = None
 
-        # we make a distinction between the intensity coming from emissoin
-        # vs the continuum
-        self.image = None
-        self.continuum = None
+        # the continuum image will be set to one of the following depending
+        # on the input:
+        # 1) np.ndarray: the continuum image is a static array and will error
+        #    if you pass incompatible image parameters during render()
+        # 2) callable: the continuum image is a function that takes in
+        #    ImagePars and returns a numpy array of the same shape as the image
+        # 3) None: the continuum image is not set, and will be made to be a zero
+        #    array of the same shape as the image during the render() call
+        self.set_continuum(continuum)
 
         # some intensity maps will not change per sample, but in general
         # they might
@@ -58,44 +69,162 @@ class IntensityMap(object):
 
         return
 
-    def render(self, theta_pars, datacube, pars, redo=False,
-               im_type='emission'):
+    def set_continuum(self, continuum):
+        '''
+        continuum: np.ndarray | callable | None
+            The continuum image to set, or a callable function
+            that takes in ImagePars and returns a numpy array
+            of the same shape as the image. If None, the continuum
+            will be made to be a zero array of the same shape as the image
+            during the render() call
+        '''
+
+        if (continuum is None) or (isinstance(continuum, np.ndarray)):
+            self._continuum_callable = False
+        elif callable(continuum):
+            # we assume the callable takes in ImagePars and returns
+            # a numpy array of the same shape as the image
+            self._continuum_callable = True
+        else:
+            raise TypeError('Continuum must be a numpy array or callable!')
+
+        self.continuum = continuum
+
+        return
+
+    def render(
+            self,
+            image_pars,
+            theta_pars,
+            pars,
+            weights=None,
+            mask=None,
+            image=None,
+            redo=True,
+            im_type='emission',
+            raise_errors=True,
+            ):
         '''
         Render an image of the emission line intensity
 
+        image_pars: ImagePars
+            The image parameters, including the shape & pixel scale
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
         pars: dict
             A dictionary of any additional parameters needed
             to render the intensity map
-        redo: bool
-            Set to remake rendered image regardless of whether
-            it is already internally stored
+        weights: np.ndarray; default None
+            A 2D array of weights to apply to the image pixels, if needed
+        mask: np.ndarray; default None
+            A 2D array of bools to mask the image pixels, if needed. NOTE: we
+            assume a convention where 0 is unmasked and all else is masked
+        image: np.ndarray; default None
+            The 2D image that is being modeled, if necessary. Most intensity 
+            maps do not need this, but some may need to be fit to a specific
+            image. If None, the image will be rendered from scratch using the
+            image and theta parameters passed
+        redo: bool; default True
+            Set to remake rendered image regardless of whether it is already 
+            internally stored
         im_type: str
             Can set to either `emission`, `continuum`, or `both`
+        raise_errors: bool; default True
+            If True, raise any errors that occur during the rendering
+            process. If False, catch and print the errors instead, and pass
+            None to the caller. This is useful for debugging or for models
+            that have failure modes that need to be handled by the likelihood
+            model
 
-        return: np.ndarray, tuple
-            The rendered intensity map (emission, continuum, or both)
+        return: np.ndarray | tuple | None
+            The rendered intensity map (emission, continuum, or both). If 
+            raise_errors is False and an error occurs, None is returned instead
         '''
 
-        # only render if it has not been computed yet, or if
-        # explicitly asked
-        if (self.image is None) or (redo is True):
-            self._render(theta_pars, datacube, pars)
+        Nrow, Ncol = image_pars.Nrow, image_pars.Ncol
+
+        # if weight and mask info was passed, make sure that they are consistent
+        # with the image pars
+        if weights is not None:
+            if weights.shape != (Nrow, Ncol):
+                raise ValueError('Weights shape must match image dimensions!')
+        if mask is not None:
+            if mask.shape != (Nrow, Ncol):
+                raise ValueError('Mask shape must match image dimensions!')
+
+        # the continuum has to be handled separately, as it is not guaranteed
+        # to be set at this stage
+        if im_type in ['continuum', 'both']:
+            continuum = self.continuum
+
+            if continuum is None:
+                # if no continuum is set, we make it a zero array
+                continuum = np.zeros((Nrow, Ncol), dtype=float)
+
+            elif isinstance(continuum, np.ndarray):
+                # check the shape of the continuum image
+                if continuum.shape != (Nrow, Ncol):
+                    raise ValueError(
+                        'Stored continuum image shape does not match image_pars'
+                        )
+            elif callable(continuum):
+                # call the function with the image parameters
+                continuum = continuum(image_pars)
+
+            if im_type == 'continuum':
+                # we can skip the rest of the method
+                # NOTE: this doesn't work for sample-specific continuum images,
+                # but that case doesn't make sense with a continuum-only mode
+                return continuum
+
+        # now we handle the emission line intensity map
+
+        # skip rendering only if:
+        # 1) The imap type is static, and
+        # 2) It has already computed, and
+        # 3) We are not forcing a re-render
+        if (self.is_static is False) or (self._image is None) or (redo is True):
+            try:
+                # NOTE: while rare, some render methods can produce a 
+                # sample-specific continuum image. This is not the same as
+                # the continuum template, which is static. So we track it here
+                image, continuum = self._render(
+                    image_pars,
+                    theta_pars,
+                    pars,
+                    weights=weights,
+                    mask=mask,
+                    image=image
+                    )
+                # NOTE: We save the result to the image attribute so that static
+                # imaps can be used without having to call render() again
+                self._image = image
+                self._continuum = continuum
+
+            except Exception as e:
+                if raise_errors is True:
+                    raise e
+                else:
+                    print('Rendering failed!')
+                    print(f'Error: {e}')
+                    return None
+        else:
+            # under these conditions, we can simply load in the cached image 
+            # from the last render
+            image = self._image
+            continuum = self._continuum
 
         if im_type == 'emission':
-            return self.image
-        elif im_type == 'continuum':
-            return self.continuum
+            # return only the emission line intensity image
+            return image
         elif im_type == 'both':
-            return self.image, self.continuum
-        else:
-            raise ValueError('im_type can only be one of ' +\
-                             'emission, continuum, or both!')
+            return image, continuum
 
     @abstractmethod
-    def _render(self, theta_pars, datacube, pars):
+    def _render(
+        self, image_pars, theta_pars, pars, weights=None, mask=None, image=None
+        ):
         '''
         Each subclass should define how to render
 
@@ -103,17 +232,23 @@ class IntensityMap(object):
         '''
         pass
 
-    def plot(self, show=True, close=True, outfile=None, size=(7,7)):
-        if self.image is None:
-            raise Exception('Must render profile first! This can be ' +\
-                            'done by calling render() with relevant params')
+    def plot(self, image=None, show=True, close=True, outfile=None, size=(7,7)):
+        if image is None:
+            # see if an image was already rendered
+            if self._image is not None:
+                image = self._image
+            else:
+                raise Exception(
+                    'Must pass an image or render first! This can be done by '
+                    'calling render() with relevant params'
+                    )
 
         ax = plt.gca()
-        im = ax.imshow(self.image, origin='lower')
+        im = ax.imshow(image, origin='lower')
         divider = make_axes_locatable(ax)
         cax = divider.append_axes('right', size='5%', pad=0.05)
         plt.colorbar(im, cax=cax)
-        ax.set_title('BasisIntensityMap.render() call')
+        ax.set_title('IntensityMap.render() call')
 
         plt.gcf().set_size_inches(size)
         plt.tight_layout()
@@ -140,55 +275,83 @@ class InclinedExponential(IntensityMap):
     testing anyway
     '''
 
-    def __init__(self, datacube, flux, hlr):
+    def __init__(self, flux, hlr=None, scale_radius=None, continuum=None):
         '''
-        datacube: DataCube
-            While this implementation will not use the datacube
-            image explicitly (other than shape info), most will
         flux: float
             Object flux
         hlr: float
-            Object half-light radius (in pixels)
+            Object half-light radius (in arcsec). Can only pass one of
+            hlr or scale_radius, not both
+        scale_radius: float; default None
+            Object scale radius (in pixels). Can only pass one of hlr or
+            scale_radius, not both
+        continuum: np.ndarray | callable | None
+            The continuum image to set, or a callable function
         '''
 
-        nx, ny = datacube.Nx, datacube.Ny
-        super(InclinedExponential, self).__init__('inclined_exp', nx, ny)
+        super(InclinedExponential, self).__init__('inclined_exp')
 
-        pars = {'flux': flux, 'hlr': hlr}
+        if hlr is None and scale_radius is None:
+            raise ValueError(
+                'Must pass either hlr or scale_radius to InclinedExponential!'
+                )
+        if hlr is not None and scale_radius is not None:
+            raise ValueError(
+                'Cannot pass both hlr and scale_radius to InclinedExponential!'
+                )
+
+        pars = {'flux': flux, 'hlr': hlr, 'scale_radius': scale_radius}
         for name, val in pars.items():
+            if val is None:
+                continue
             if not isinstance(val, (float, int)):
                 raise TypeError(f'{name} must be a float or int!')
 
         self.flux = flux
         self.hlr = hlr
-
-        self.pix_scale = datacube.pix_scale
+        self.scale_radius = scale_radius
 
         # same as default, but to make it explicit
         self.is_static = False
 
         return
 
-    def _render(self, theta_pars, datacube, pars):
+    def _render(
+        self, image_pars, theta_pars, pars, weights=None, mask=None, image=None
+        ):
         '''
+        image_pars: ImagePars
+            The image parameters, including the shape & pixel scale
         theta_pars: dict
             A dict of the sampled mcmc params for both the velocity
             map and the tranformation matrices
-        datacube: DataCube
-            Truncated data cube of emission line
         pars: dict
             A dictionary of any additional parameters needed
             to render the intensity map
+        weights: np.ndarray; default None
+            Generally not needed for inclined exponential imaps
+        mask: np.ndarray; default None
+            Generally not needed for inclined exponential imaps
+        image: np.ndarray; default None
+            The 2D image that is being modeled, if necessary. Most intensity 
+            maps do not need this, but some may need to be fit to a specific
+            image. If None, the image will be rendered from scratch using the
+            image and theta parameters passed
 
-        return: np.ndarray
-            The rendered intensity map
+        return: (np.ndarray, np.ndarray))
+            The rendered intensity map and continuum imaged
         '''
 
         inc = Angle(np.arcsin(theta_pars['sini']), radians)
 
-        gal = gs.InclinedExponential(
-            inc, flux=self.flux, half_light_radius=self.hlr
-        )
+        if self.hlr is not None:
+            gal = gs.InclinedExponential(
+                inc, flux=self.flux, half_light_radius=self.hlr
+            )
+        else:
+            gal = gs.InclinedExponential(
+                inc, flux=self.flux, scale_radius=self.scale_radius
+            )
 
         # Only add knots if a psf is provided
         # NOTE: no longer workds due to psf conovlution
@@ -202,7 +365,7 @@ class InclinedExponential(IntensityMap):
         rot_angle = Angle(theta_pars['theta_int'], radians)
         gal = gal.rotate(rot_angle)
 
-        # TODO: still don't understand why this sometimes randomly fails
+        # TODO: still don't understand why this occasionally fails
         try:
             g1 = theta_pars['g1']
             g2 = theta_pars['g2']
@@ -212,37 +375,62 @@ class InclinedExponential(IntensityMap):
             print(f'Shear values used: g=({g1}, {g2})')
             raise e
 
+        if (pars is not None) and ('psf' in pars):
+            psf = pars['psf']
+            if psf is not None:
+                if not isinstance(psf, gs.GSObject):
+                    raise TypeError('PSF must be a galsim.GSObject!')
+                gal = gs.Convolve([gal, psf])
+
+        # now for image rendering
+        # galsim uses (x,y) for Image-level coordinates
+        Nx = image_pars.Nx
+        Ny = image_pars.Ny
+        pixel_scale = image_pars.pixel_scale
+
+        # assumes all theta_par lengths are in arcsec
+        offset = gs.PositionD(
+            theta_pars['x0'] / pixel_scale,
+            theta_pars['y0'] / pixel_scale
+            )
+
         try:
-            self.image = gal.drawImage(
-                nx=self.nx, ny=self.ny, scale=self.pix_scale
+            image = gal.drawImage(
+                nx=Nx,
+                ny=Ny,
+                scale=pixel_scale,
+                offset=offset,
                 ).array
         except:
             # Can fail if no PSF & very inclined
-            try:
-                self.image = gal.drawImage(
-                    nx=self.nx, ny=self.ny, scale=self.pix_scale, method='real'
+            image = gal.drawImage(
+                nx=Nx,
+                ny=Ny,
+                scale=pixel_scale,
+                offset=offset,
+                method='real'
                 ).array
-            except:
-                print('Rendering failed! Making blank image')
-                self.image = np.zeros((self.nx, self.ny))
 
-        # NOTE: this is because the returned image array is indexed by numpy, so (y,x) instead of our desired (x,y)
-        self.image = self.image.swapaxes(0,1)
+        # NOTE: no support for sample-dependent continuum images at this time
+        continuum = self.continuum
 
-        return
+        return image, continuum
 
-    def plot_fit(self, datacube, show=True, close=True, outfile=None,
+    def plot_fit(self, data, fit=None, show=True, close=True, outfile=None,
                  size=(9,9), vmin=None, vmax=None):
         '''
-        datacube: DataCube
-            Datacube that MLE fit was done on
+        data: np.ndarray
+            The 2D image to compare the fit to.
+        fit: np.ndarray | None
+            The 2D imap fit to compare to the data. If None, the
+            latest imap render will be used, if possible
         '''
 
-        data = datacube.stack()
-
-        if self.image is None:
-            raise Exception('Must fit with render() first!')
-        fit = self.image
+        if fit is None:
+            if self._image is not None:
+                fit = self._image
+            else:
+                raise Exception('Must fit with render() first!')
 
         fig, axes = plt.subplots(
             nrows=2, ncols=2, sharex=True, sharey=True, figsize=size
@@ -277,142 +465,143 @@ class InclinedExponential(IntensityMap):
 
 class BasisIntensityMap(IntensityMap):
     '''
-    This is a catch-all class for Intensity Maps made by
-    fitting arbitrary basis functions to the stacked
-    datacube image
+    This is a catch-all class for Intensity Maps made by fitting arbitrary 
+    basis functions to the stacked datacube image.
 
-    TODO: Need a better name!
+    basis_type: str
+        Name of basis type to use
+    basis_kwargs: dict
+        Dictionary of kwargs needed to construct basis
+    basis_plane: str
+        The plane where the basis functions are defined. If 'obs', the
+        basis functions are defined in the observed plane. If other (see
+        transformation.py), the basis functions are defined in a plane
+        other than the observed plane and so the fit is dependent on
+        the transformation parameters in theta_pars passed to render().
+    continuum: np.ndarray | callable | None
+        The continuum image to set, or a callable function
+        that takes in ImagePars and returns a numpy array
+        of the same shape as the image. NOTE: In this subclass,
+        the continuum is interpreted as a template, and will be
+        fit to the image along with the chosen basis functions.
+    skip_ground_state: bool; default False
+        If True, skip the ground state basis function. This is useful
+        for cases where the ground state is not needed, such as when
+        fitting a basis to residuals after subtracting a model.
     '''
 
-    def __init__(self, datacube, basis_type='default', basis_kwargs=None):
-        '''
-        basis_type: str
-            Name of basis type to use
-        datacube: DataCube
-            A truncated datacube whose stacked slices will be fit to
-        basis_kwargs: dict
-            Dictionary of kwargs needed to construct basis
-        '''
+    def __init__(
+            self,
+            basis_type,
+            basis_kwargs=None,
+            basis_plane='obs',
+            continuum=None,
+            skip_ground_state=False
+            ):
 
-        nx, ny = datacube.Nx, datacube.Ny
-        super(BasisIntensityMap, self).__init__('basis', nx, ny)
+        super(BasisIntensityMap, self).__init__('basis', continuum=continuum)
 
-        if 'pix_scale' not in basis_kwargs:
-            if datacube.pix_scale is None:
-                raise Exception('Either datacube or basis_kwargs ' +
-                                'must have pix_scale!')
-            basis_kwargs['pix_scale'] = datacube.pix_scale
+        if basis_type not in basis.BASIS_TYPES.keys():
+            raise ValueError(f'{basis_type} is not a registered basis type!')
+        self.basis_type = basis_type
+        self.basis_kwargs = basis_kwargs
 
-        # grab the datacube weights & mask for basis fitting
-        self.dc_weights = datacube.weights
-        self.dc_mask = np.sum(datacube.masks, axis=0)
+        if basis_plane not in SUPPORTED_PLANES:
+            raise ValueError(
+                f'{basis_plane} is not a supported basis plane! Supported '
+                f'planes are: {SUPPORTED_PLANES}'
+            )
+        self.basis_plane = basis_plane
 
-        # TODO: would be nice to generalize for chromatic
-        # PSFs in the future!
         if 'psf' in basis_kwargs:
             # always default an explicitly passed psf
             self.psf = basis_kwargs['psf']
         else:
-            # should return None if no PSF is stored
-            # in datacube pars
-            self.psf = datacube.get_psf()
-
-        # One way to handle the emission line continuum is to build
-        # a template function from the datacube
-        try:
-            use_cont = basis_kwargs['use_continuum_template']
-            if use_cont is True:
-                self.continuum_template = datacube.get_continuum()
-                if self.continuum_template is None:
-                    raise AttributeError('Datacube continnuum template is None!')
-            else:
-                self.continuum_template = None
-
-        except KeyError:
-            self.continuum_template = None
-
-        # often useful to have a correct basis function scale given
-        # stacked datacube image
-        # if basis_type == 'shapelets':
-        # TODO: Testing!!
-        if False:
-            pixscale = basis_kwargs['pix_scale']
-            am = gs.hsm.FindAdaptiveMom(
-                gs.Image(datacube.stack(), scale=pixscale)
-                )
-            self.am_sigma = am.moments_sigma
-            basis_kwargs['beta'] = self.am_sigma
-        else:
-            self.am_sigma = None
+            self.psf = None
 
         self.basis_kwargs = basis_kwargs
 
-        self._setup_fitter(basis_type, nx, ny, basis_kwargs=basis_kwargs)
+        if not isinstance(skip_ground_state, bool):
+            raise TypeError('skip_ground_state must be a bool!')
+        self.skip_ground_state = skip_ground_state
+
+        # cannot setup the fitter until we know the image parameters
+        # such as shape and pixel scale, passed at render time
+        self.fitter = None
+
+        return
+
+    def get_basis(self):
+        if not self.fitter is None:
+            return self.fitter.basis
+        else:
+            print('Cannot get the basis before initializing the fitter')
+        return None
+
+    @property
+    def basis(self):
+        return self.get_basis()
+
+    @property
+    def plane(self):
+        return self.basis.plane
+
+    def _render(
+            self, image_pars, theta_pars, pars, weights=None, mask=None, image=None
+            ):
+
+        if image is None:
+            raise ValueError(
+                'For BasisIntensityMap, you must pass an image to render()'
+            )
+
+        Nrow, Ncol = image_pars.Nrow, image_pars.Ncol
+        im_shape = image.shape
+
+        if im_shape != (Nrow, Ncol):
+            raise ValueError(
+                f'Image shape {im_shape} must match image_pars dimensions ({Nrow, Ncol})'
+            )
+
+        self._setup_fitter(image_pars, weights=weights, mask=mask)
 
         # at this stage we now know whether the imap will change per sample
-        if self.fitter.basis.plane == 'obs':
+        if self.basis_plane == 'obs':
             self.is_static = True
         else:
             # any other plane for the basis definition will make the fitted
             # imap depend on the sample draw
             self.is_static = False
 
-        self.image = None
+        image, continuum = self._fit_to_image(
+            image, image_pars, theta_pars, pars
+            )
 
-        return
+        return image, continuum
 
-    def _setup_fitter(self, basis_type, nx, ny, basis_kwargs=None):
+    def _setup_fitter(self, image_pars, weights=None, mask=None):
 
         self.fitter = IntensityMapFitter(
-            basis_type, nx, ny,
-            continuum_template=self.continuum_template,
+            self.basis_type,
+            self.basis_kwargs,
+            self.basis_plane,
+            image_pars,
+            continuum_template=self.continuum,
+            skip_ground_state=self.skip_ground_state,
             psf=self.psf,
-            weights=self.dc_weights,
-            mask=self.dc_mask,
-            basis_kwargs=basis_kwargs
+            weights=weights,
+            mask=mask,
             )
 
         return
 
-    def _fit_to_datacube(self, theta_pars, datacube, pars):
-        try:
-            if pars['run_options']['remove_continuum'] is True:
-                if self.continuum_template is None:
-                    print('WANRING: cannot remove continuum as a ' +\
-                          'template was not provided')
-                    remove_continuum = False
-                else:
-                    remove_continuum = True
-            else:
-                remove_continuum = False
+    def _fit_to_image(self, image, image_pars, theta_pars, pars):
 
-        except KeyError:
-            remove_continuum = False
-
-        self.image, self.continuum = self.fitter.fit(
-            theta_pars, datacube, pars, remove_continuum=remove_continuum
+        image, continuum = self.fitter.fit(
+            image, image_pars, theta_pars, pars
             )
 
-        return
-
-    def get_basis(self):
-        return self.fitter.basis
-
-    def render(self, theta_pars, datacube, pars, redo=False,
-               im_type='emission'):
-        '''
-        see IntensityMap.render()
-        '''
-
-        return super(BasisIntensityMap, self).render(
-            theta_pars, datacube, pars, redo=redo, im_type=im_type
-            )
-
-    def _render(self, theta_pars, datacube, pars):
-
-        self._fit_to_datacube(theta_pars, datacube, pars)
-
-        return
+        return image, continuum
 
 def get_intensity_types():
     return INTENSITY_TYPES
@@ -424,13 +613,10 @@ INTENSITY_TYPES = {
     'inclined_exp': InclinedExponential,
     }
 
-def build_intensity_map(name, datacube, kwargs):
+def build_intensity_map(name, kwargs):
     '''
     name: str
         Name of intensity map type
-    datacube: DataCube
-        The datacube whose stacked image the intensity map
-        will represent
     kwargs: dict
         Keyword args to pass to intensity constructor
     '''
@@ -439,11 +625,109 @@ def build_intensity_map(name, datacube, kwargs):
 
     if name in INTENSITY_TYPES.keys():
         # User-defined input construction
-        intensity = INTENSITY_TYPES[name](datacube, **kwargs)
+        intensity = INTENSITY_TYPES[name](**kwargs)
     else:
         raise ValueError(f'{name} is not a registered intensity!')
 
     return intensity
+
+class CompositeIntensityMap(IntensityMap):
+    '''
+    Composite imap = InclinedExponential + BasisIntensity (prefit).
+
+    Assumes the basis part is already fit and its coefficients are available.
+    Renders both parts on the *passed* image_pars (so no resampling).
+
+    This class is largely useful for handling the PSF convolution of a model
+    VelocityMap whose corresponding IntensityMap is a composite of an
+    inclined exponential + basis fit to the residuals.
+
+    NOTE: The structure of this class is somewhat specific to the use case described
+    above, and could be generalized if needed.
+    '''
+
+    def __init__(
+            self,
+            exp_imap: InclinedExponential,
+            basis_imap: BasisIntensityMap
+            ):
+
+        super().__init__(name='composite')
+
+        if not isinstance(exp_imap, InclinedExponential):
+            raise TypeError('exp_imap must be an InclinedExponential')
+
+        if not isinstance(basis_imap, BasisIntensityMap):
+            raise TypeError('basis_imap must be a BasisIntensityMap')
+
+        self.exp_imap = exp_imap
+        self.basis_imap = basis_imap
+
+        # composite is generally *not* static because theta_pars change exp
+        self.is_static = False
+
+        return
+
+    def _render(
+            self, image_pars, theta_pars, pars, weights=None, mask=None, image=None
+            ):
+        '''
+        Returns (composite_emission, continuum).
+
+        NOTE: continuum is currently set to None, but could be extended to
+        include a composite continuum if needed.
+
+        - exp component: rendered analytically from theta_pars on image_pars
+        - basis component: rendered from stored coefficients on image_pars
+          (no refit here; we assume coeffs already exist)
+        '''
+
+        # remove any psf from pars to avoid double convolution
+        pars_no_psf = {k: v for k, v in (pars or {}).items() if k != 'psf'}
+
+        # 1) exponential component (intrinsic; no PSF here)
+        I_exp, _ = self.exp_imap._render(
+            image_pars=image_pars,
+            theta_pars=theta_pars,
+            pars=pars_no_psf,
+            weights=weights,
+            mask=mask,
+            image=image,
+        )
+
+        # 2) basis component (prefit); use stored coeffs to render on *this* image grid
+        fitter = self.basis_imap.fitter
+        if fitter is None or getattr(fitter, 'mle_coefficients', None) is None:
+            raise ValueError(
+                'basis_imap has no fitted coefficients; fit it first or pass a prefit instance.'
+            )
+
+        # determine which coefficients are "emission" vs "continuum"
+        coeff = fitter.mle_coefficients
+        if self.basis_imap.continuum is None:
+            used_coeff = coeff
+            basis_cont = None
+        else:
+            used_coeff = coeff[:-1]
+            basis_cont = coeff[-1] * self.basis_imap.continuum
+
+        # render basis on the *target* grid directly (respect plane & transforms)
+        I_basis = fitter.basis.render_im(
+            used_coeff,
+            image_pars,
+            plane=self.basis_imap.basis_plane,
+            transformation_pars=theta_pars,
+        )
+        if fitter.basis.is_complex:
+            I_basis = I_basis.real
+
+        I_comp = I_exp + I_basis
+
+        # NOTE/TODO: keep composite continuum out for now (can extend later)
+        continuum = None
+
+        return I_comp, continuum
+
 
 class IntensityMapFitter(object):
     '''
@@ -452,48 +736,85 @@ class IntensityMapFitter(object):
 
     basis_type: str
         The name of the basis_type type used
-    nx: int
-        The number of pixels in the x-axis
-    ny: int
-        The number of pixels in the y-ayis
+    basis_kwargs: dict
+        Keyword args needed to build given basis type
+    basis_plane: str
+        The plane where the basis functions are defined. See transformation.py
+        for the supported planes.
+    image_pars: ImagePars
+        The image parameters, including the shape & pixel scale
     continuum_template: numpy.ndarray
         A template array for the object continuum
+    skip_ground_state: bool; default False
+        If True, skip the ground state basis function. This is useful
+        for cases where the ground state is not needed, such as when
+        fitting a basis to residuals after subtracting a model.
     psf: galsim.GSObject
         A galsim object representing a PSF to convolve the
         basis functions by
     weights: numpy.ndarray
         A 2D array of floats to apply to the fitted stacked image
     mask: numpy.ndarray
-        A 2D array of bools to mask the stacked image
-    basis_kwargs: dict
-        Keyword args needed to build given basis type
+        A 2D array of bools to mask the stacked image. NOTE: we assume a
+        convention where 0 is unmasked and all else is masked
     '''
 
     def __init__(
-            self, basis_type, nx, ny, continuum_template=None, psf=None,
-            weights=None, mask=None, basis_kwargs=None):
-
-        for name, n in {'nx':nx, 'ny':ny}.items():
-            if name in basis_kwargs:
-                if n != basis_kwargs[name]:
-                    raise ValueError(f'{name} must be consistent if ' +\
-                                       'also passed in basis_kwargs!')
+            self,
+            basis_type,
+            basis_kwargs,
+            basis_plane,
+            image_pars, 
+            continuum_template=None,
+            skip_ground_state=False,
+            psf=None,
+            weights=None,
+            mask=None
+            ):
 
         self.basis_type = basis_type
-        self.nx = nx
-        self.ny = ny
+        self.basis_plane = basis_plane
+        self.basis_kwargs = basis_kwargs
+
+        self.image_pars = image_pars
+        Nrow, Ncol = image_pars.Nrow, image_pars.Ncol
+        self.image_shape = (Nrow, Ncol)
+        self.image_pixel_scale = image_pars.pixel_scale
+        self.Ndata = Nrow * Ncol
+
+        assert self.image_shape == image_pars.shape
 
         self.continuum_template = continuum_template
+        self.skip_ground_state = skip_ground_state
+
+        for k, v in {'weights': weights, 'mask': mask}.items():
+            if (v is not None) and (v.shape != (Nrow, Ncol)):
+                raise ValueError(
+                    f'{k} shape {v.shape} must match image shape {self.image_shape}'
+                    )
+
+        if weights is None:
+            weights = np.ones(self.image_shape, dtype=float)
+        if mask is None:
+            mask = np.zeros(self.image_shape, dtype=bool)
         self.weights = weights
         self.mask = mask
+
         self.psf = psf
 
-        self.grid = utils.build_map_grid(nx, ny)
+        # NOTE: The coordinate grid is stored as (x,y) in Cartesian coords,
+        # not as (row,col) in numpy format due to the definition of the basis
+        # functions in basis.py
+        Nx, Ny = image_pars.Nx, image_pars.Ny
+        Xpix, Ypix = utils.build_map_grid(Nx, Ny, indexing='xy')
+        # account for pixel scale
+        X = Xpix * self.image_pixel_scale
+        Y = Ypix * self.image_pixel_scale
+        self.grid = (X, Y)
 
-        self._initialize_basis(basis_kwargs)
+        self._initialize_basis(basis_kwargs, image_pars)
 
-        # will be set once transformation params and cov
-        # are passed
+        # will be set once transformation params and cov are passed
         self.design_mat = None
         self.pseudo_inv = None
         self.marginalize_det = None
@@ -501,19 +822,7 @@ class IntensityMapFitter(object):
 
         return
 
-    def _initialize_basis(self, basis_kwargs):
-        if basis_kwargs is not None:
-            basis_kwargs['nx'] = self.nx
-            basis_kwargs['ny'] = self.ny
-        else:
-            # TODO: do we really want this to be the default?
-            basis_kwargs = {
-                'nx': self.nx,
-                'ny': self.ny,
-                'plane': 'obs',
-                'pix_scale': self.pix_scale
-                }
-
+    def _initialize_basis(self, basis_kwargs, image_pars):
         if 'use_continuum_template' in basis_kwargs:
             basis_kwargs.pop('use_continuum_template')
 
@@ -522,6 +831,15 @@ class IntensityMapFitter(object):
 
         if self.continuum_template is not None:
             self.Nbasis += 1
+
+        if self.basis.beta is None:
+            # try to guess a good scale radius given the image parameters
+            # NOTE: while the basis render_im() method can handle varying beta
+            # per call, the design matrix cannot and so we set it here
+            Nx = image_pars.Nx
+            Ny = image_pars.Ny
+            pixel_scale = image_pars.pixel_scale
+            self.basis.set_default_beta(Nx, Ny, pixel_scale)
 
         self.mle_coefficients = np.zeros(self.Nbasis)
 
@@ -537,25 +855,28 @@ class IntensityMapFitter(object):
             transformation parameters
         '''
 
-        Ndata = self.nx * self.ny
+        Ndata = self.Ndata
         Nbasis = self.Nbasis
 
         # the plane where the basis is defined
-        basis_plane = self.basis.plane
+        basis_plane = self.basis_plane
 
         # build image grid vectors in obs plane
         Xobs, Yobs = self.grid
 
         # find corresponding gird positions in the basis plane
-        X, Y = transform_coords(
-            Xobs, Yobs, 'obs', basis_plane, theta_pars
-            )
+        if basis_plane == 'obs':
+            X, Y = Xobs, Yobs
+        else:
+            X, Y = transform_coords(
+                Xobs, Yobs, 'obs', basis_plane, theta_pars
+                )
 
-        x = X.reshape(Ndata)
-        y = Y.reshape(Ndata)
+        x = X.flatten(order='C')
+        y = Y.flatten(order='C')
 
         # apply mask
-        mask = self.mask.reshape(Ndata)
+        mask = self.mask.flatten(order='C')
         select = np.where(mask == 0)
         x = x[select]
         y = y[select]
@@ -569,11 +890,25 @@ class IntensityMapFitter(object):
             self.design_mat = np.zeros((Npseudo, Nbasis))
 
         for n in range(self.basis.N):
-            self.design_mat[:,n] = self.basis.get_basis_func(n, x, y)
+            self.design_mat[:,n] = self.basis.get_basis_func(
+                n,
+                x,
+                y,
+                nx=self.image_pars.Nx,
+                ny=self.image_pars.Ny,
+                pixel_scale=self.image_pars.pixel_scale,
+                )
+
+        # if skip_ground_state is True, we skip the first basis function
+        if self.skip_ground_state is True:
+            # remove the first column of the design matrix
+            self.design_mat = self.design_mat[:,1:]
+            # update the number of basis functions
+            self.Nbasis -= 1
 
         # handle continuum template separately
         if self.continuum_template is not None:
-            template = self.continuum_template.reshape(Ndata)[select]
+            template = self.continuum_template.flatten(order='C')[select]
 
             # make sure we aren't overriding anything
             assert (self.basis.N + 1) == self.Nbasis
@@ -581,13 +916,12 @@ class IntensityMapFitter(object):
             self.design_mat[:,-1] = template
 
         # TODO: Undersand why there are nans!
-        # import pudb; pudb.set_trace()
         self.design_mat = np.nan_to_num(self.design_mat)
 
         return
 
     # TODO: Add @njit when ready
-    def _initialize_pseudo_inv(self, theta_pars, max_fail=10, redo=True):
+    def _initialize_pseudo_inv(self, theta_pars, max_fail=50, redo=True):
         '''
         Setup Moore-Penrose pseudo inverse given basis
 
@@ -623,8 +957,9 @@ class IntensityMapFitter(object):
 
         return
 
-    def compute_marginalization_det(self, inv_cov=None, pars=None, redo=True,
-                                    log=False):
+    def compute_marginalization_det(
+            self, inv_cov=None, pars=None, redo=True, log=False
+            ):
         '''
         Compute the determinant factor needed to scale the marginalized
         posterior over intensity map basis function coefficients
@@ -671,7 +1006,7 @@ class IntensityMapFitter(object):
 
         return det
 
-    def _initialize_fit(self, theta_pars, pars):
+    def _initialize_fit(self, theta_pars):
         '''
         Setup needed quantities for finding MLE combination of basis
         funcs, along with marginalization factor from the determinant
@@ -687,47 +1022,56 @@ class IntensityMapFitter(object):
 
         return
 
-    def fit(self, theta_pars, datacube, pars, cov=None, remove_continuum=True):
+    def fit(self, image, image_pars, theta_pars, pars, cov=None):
         '''
-        Fit MLE of the intensity map for a given set of datacube
-        slices
+        Fit MLE of the basis intensity map for a given 2D image
 
-        NOTE: This assumes that the datacube is truncated to be only be
-              around the relevant emission line region, though not
-              necessarily with the continuum emission subtracted
+        NOTE: For 3D datacubes, this assumes that the datacube is truncated to 
+        be only bearound the relevant emission line region, though not 
+        necessarily with the continuum emission subtracted
 
-        theta: dict
+        image: np.ndarray
+            The stacked, 2D photometric image to fit to
+        image_pars: ImagePars
+            An ImagePars instance containing parameters such as image shape
+        theta_pars: dict
             A dictionary of sampled parameters
-        datacube: DataCube
-            The truncated datacube around an emission line
-        pars: dict
-            A dictionary holding any additional parameters needed during
-            likelihood evaluation
         cov: np.ndarray
-            The covariance matrix of the datacube images.
+            The covariance matrix of the fitted image.
             NOTE: If the covariance matrix is of the form sigma*I for a
                   constant sigma, it does not contribute to the MLE. Thus
                   you should only pass cov if it is non-trivial
             TODO: This should be handled by pars in future
-        remove_continuum: bool
-            If true, remove continuum template if fitted
         '''
 
-        nx, ny = self.nx, self.ny
-        if (datacube.Nx, datacube.Ny) != (nx, ny):
-            raise ValueError('DataCube must have same dimensions ' +\
-                             'as intensity map!')
+        if image.shape != self.image_shape:
+            raise ValueError('Intensity map and image must have same shape!')
 
-        # Initialize pseudo-inverse given the transformation parameters
-        self._initialize_pseudo_inv(theta_pars)
+        if cov is None:
+            # try looking for it in pars first
+            try:
+                cov = pars['cov']
+            except (TypeError, KeyError):
+                # if not found, keep it None
+                pass
+        else:
+            if cov.shape != self.image_shape:
+                raise ValueError('Cov matrix and image must have same shape!')
 
-        data = datacube.stack().reshape(nx*ny)
+        # Initialize pseudo-inverse given the transformation parameters, plus
+        # possibly other parameters
+        self._initialize_fit(theta_pars)
 
         # Find MLE basis coefficients
-        mle_coeff = self._fit_mle_coeff(data, cov=cov)
+        mle_coeff = self._fit_mle_coeff(image, cov=cov)
 
         assert len(mle_coeff) == self.Nbasis
         self.mle_coefficients = mle_coeff
+
+        if self.skip_ground_state is True:
+            # if we skipped the ground state, we need to add it back in
+            # as the first coefficient
+            mle_coeff = np.insert(mle_coeff, 0, 0)
 
         # Now create MLE intensity map
         if self.continuum_template is None:
@@ -741,24 +1085,33 @@ class IntensityMapFitter(object):
             if self.basis.is_complex is True:
                 mle_continuum = mle_continuum.real
 
-        mle_im = self.basis.render_im(theta_pars, used_coeff)
+        mle_im = self.basis.render_im(
+            used_coeff,
+            image_pars,
+            plane=self.basis_plane,
+            transformation_pars=theta_pars
+            )
 
-        assert mle_im.shape == (nx, ny)
+        assert mle_im.shape == image.shape
         self.mle_im = mle_im
         self.mle_continuum = mle_continuum
 
         return mle_im, mle_continuum
 
-    def _fit_mle_coeff(self, data, cov=None):
+    def _fit_mle_coeff(self, image, cov=None):
         '''
-        data: np.array
-            The (nx*ny) data vector
+        image: np.array
+            The 2D image to fit to
+        cov: np.array
+            The 2D covariance matrix to use in the fit. NOTE: non-diagonal
+            covariance matrices are not yet implemented!
         '''
 
         if cov is None:
             # The solution is simply the Moore-Penrose pseudo inverse
             # acting on the data vector
-            mle_coeff = self.pseudo_inv.dot(data[self.selection])
+            image_flattened = image.flatten(order='C')
+            mle_coeff = self.pseudo_inv.dot(image_flattened[self.selection])
             # import pudb; pudb.set_trace()
 
         else:

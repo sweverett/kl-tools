@@ -19,6 +19,8 @@ then
     exec bash "$0" "$@"
 fi
 
+conda init
+
 # check if the environment already exists
 if conda info --envs | grep -q "$ENV_NAME"; then
     echo "Environment '$ENV_NAME' already exists. Removing it first..."

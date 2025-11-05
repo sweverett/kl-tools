@@ -12,7 +12,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from kl_tools.velocity import VelocityMap, dist_to_major_axis
 from kl_tools.coordinates import OrientedAngle
 from kl_tools.utils import build_map_grid, get_base_dir, make_dir, MidpointNormalize, plot
-from kl_tools.kross.kross_utils import theta2pars
+from kl_tools.kross.utils import theta2pars
 from kl_tools.plotting import plot_line_on_image
 
 def parse_args():

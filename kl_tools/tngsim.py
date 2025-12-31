@@ -5,6 +5,7 @@ from astropy.io import fits
 import astropy.units as u
 import astropy.constants as const
 from astropy import cosmology
+import galsim
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
 from scipy.stats import binned_statistic_2d, binned_statistic
@@ -19,7 +20,8 @@ import pathlib
 import sys
 sys.path.insert(0, './grism_modules')
 import kl_tools.utils as utils
-from kl_tools.cube import DataCube, CubePars
+from kl_tools.cube import DataCube
+from kl_tools.parameters import CubePars
 import kl_tools.muse as muse
 import kl_tools.grism_modules.grism as grism
 import kl_tools.emission as emission
@@ -54,9 +56,25 @@ def get(path, params=None):
     return r
 
 class TNGsimulation(object):
-    def __init__(self):
+    def __init__(self, init_from_data = False, data=None):
         self.base_url = 'http://www.tng-project.org/api/'
         self.cosmo = cosmology.Planck18
+        ### Init data by passing though initialization
+        if init_from_data:
+            if data is None:
+                raise ValueError("If init_from_data is True, must provide data dictionary.")
+            else:
+                print("Initializing TNGsimulation from data dictionary.")
+                ### NOTE: the data passed here assume physical units,
+                # e.g. ckpc/h -> kpc, 10^10 M_sun/h -> M_sun
+                self._particleData = {}
+                self._particleData["PartType0"] = data['gas']
+                self._subhalo = data['subhalo']
+                self._particleData["PartType4"] = data['stars']
+                self._particleData["PartType1"] = None
+                self._init_method = 'cache'
+        else:
+            self._init_method = 'query'
         return
 
     @property
@@ -71,59 +89,101 @@ class TNGsimulation(object):
     def dmPrtl(self):
         return self._particleData['PartType1']
 
-    def set_subhalo(self, subhaloid, redshift=0.5, simname = 'TNG50-1',
+    def set_subhalo(self, subhaloid=0, redshift=0.5, simname = 'TNG50-1',
                     move_to_redshift = None):
-        # Set the _subhalo attribute by querying the TNG catalogs.
-        # Then, pull the corresponding particle data.
-        self.redshift = redshift
+        ''' Set the subhalo to be used for generating data cubes.
+        NOTE: If init from cached data, this function only sets metadata, does not re-query data.
+        Parameters
+        ----------
+        subhaloid : int
+            The ID of the subhalo to use.
+        redshift : float
+            The redshift to use for the snapshot query.
+        simname : str
+            The name of the simulation to use.
+        move_to_redshift : float, optional
+            If provided, the galaxy will be moved to this redshift. By default, it is kept at its original redshift.
+        '''
+        self._sim_name = simname
+        # NOTE: the units here depend on whether we init from cache or query
+        if self._init_method == 'cache':
+            self.redshift = self._subhalo['Redshift']
+            # physical units as mentioned by Yan Lai (kpc, Msun)
+            self._mass_unit = u.Msun
+            self._length_unit = u.kpc
+            self._partvel_unit = u.km / u.s
+            self._subhalovel_unit = u.km / u.s
+            self._spin_unit = u.kpc / (u.km / u.s)
+        else:
+            self.redshift = redshift
+            # the default TNG units (ckpc/h, Msun/h)
+            self._mass_unit = 1e10 * u.Msun / self.cosmo.h
+            self._length_unit = u.kpc / self.cosmo.h * (1./(1.+self.redshift))
+            self._partvel_unit = (u.km / u.s) * np.sqrt(1./(1+self.redshift))
+            self._subhalovel_unit = (u.km / u.s)
+            self._spin_unit = (u.kpc / self.cosmo.h) / (u.km / u.s)
+        # If move_to_redshift is provided, we will move the galaxy to that redshift
+        # Otherwise, we will keep it at its original redshift.
         if move_to_redshift is not None:
             self.move_to_z = move_to_redshift
         else:
             self.move_to_z = self.redshift
         self.DA = self.cosmo.angular_diameter_distance(self.move_to_z)
         self.dL = self.cosmo.luminosity_distance(self.move_to_z)
-        rbase = get(self.base_url)
-        self._sim_name = simname
-        names = [sim['name'] for sim in rbase['simulations']]
-        i = names.index(simname)
-        sim = get( rbase['simulations'][i]['url'] )
-        snaps = get( sim['snapshots'] )
-        snap_redshifts = np.array([snap['redshift'] for snap in snaps])
-        self._snapshot = snaps[np.argmin(np.abs(snap_redshifts - redshift))]
-        snapurl = self._snapshot['url']
-        suburl = snapurl+f'subhalos/{subhaloid}'
-        print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")
-        self._subhalo = get(suburl)
+        
+        ### Setup subhalo and snapshot info, and request data
+        if self._init_method == "query":
+            # 1. Initialize from TNG API: from simulation name, snapshot, and subhaloID
+            rbase = get(self.base_url)
+            names = [sim['name'] for sim in rbase['simulations']]
+            i = names.index(simname)
+            sim = get( rbase['simulations'][i]['url'] )
+            snaps = get( sim['snapshots'] )
+            snap_redshifts = np.array([snap['redshift'] for snap in snaps])
+            self._snapshot = snaps[np.argmin(np.abs(snap_redshifts - redshift))]
+            snapurl = self._snapshot['url']
+            suburl = snapurl+f'subhalos/{subhaloid}'
+            print(f"closest snapshot to desired redshift {redshift:.04} is at {snapurl} ")
+            # query subhalo data
+            self._subhalo = get(suburl)
+            # calculate gas temperature
+            self._particleTemp = self._calculate_gas_temperature()
+        else:
+            # 2. Initialize from provided data dictionary
+            self._snapshot = None 
+            self._particleTemp = self.gasPrtl['Temperature'][:] # when passed through data, assume temp is provided
         self._getIllustrisTNGData()
+        ### Calculate gas line fluxes
+        #self._starFlux = self._star_particle_flux(h)
+        #mags = h['PartType4']['GFM_StellarPhotometrics'][:]
+        #starflux = 10**(-mags[:,4]/2.5)
+        self._line_flux = self._gas_line_flux() # photons rate per particle
+
         return
 
-    def _calculate_gas_temperature(self,h5data):
-        u           = h5data['PartType0']['InternalEnergy'][:]    #  the Internal Energy
-        Xe          = h5data['PartType0']['ElectronAbundance'][:]  # xe (=ne/nH)  the electron abundance
+    def _calculate_gas_temperature(self):
+        u           = self.gasPrtl['InternalEnergy'][:]    #  the Internal Energy
+        Xe          = self.gasPrtl['ElectronAbundance'][:]  # xe (=ne/nH)  the electron abundance
         XH          = 0.76             # the hydrogen mass fraction
         gamma        = 5.0/3.0          # the adiabatic index
         KB          = 1.3807e-16       # the Boltzmann constant in CGS units  [cm^2 g s^-2 K^-1]
         mp          = 1.6726e-24       # the proton mass  [g]
-        little_h    = 0.704                 # NOTE: 0.6775 for all TNG simulations
         mu          = (4*mp)/(1+3*XH+4*XH*Xe)
         # Estimate temperature
         temperature = (gamma-1)* (u/KB)* mu* 1e10
-
         return temperature
 
-    def _gas_line_flux(self, h5data):
-        T = self._calculate_gas_temperature(h5data)
-        h = self.cosmo.h # hubble parameter
-        alpha = 2.6e-13 * (T/1e4)**(-0.7)  * u.cm**3 / u.s
-        Xe = h5data['PartType0']['ElectronAbundance'][:]
+    def _gas_line_flux(self):
+        alpha = 2.6e-13 * (self._particleTemp/1e4)**(-0.7)  * u.cm**3 / u.s
+        Xe = self.gasPrtl['ElectronAbundance'][:]
         XH = 0.76
-        nH =  (h5data['PartType0']['Density'][:]*1e10 * u.M_sun / u.kpc**3 * h**2 / const.m_e).to(1/u.cm**3)
+        density = self.gasPrtl['Density'][:] * self._mass_unit / (self._length_unit)**3
+        nH =  (XH * density / const.m_p).to(1/u.cm**3)
         ne = Xe * nH
-        V = (h5data['PartType0']['Masses'][:]* 1e10 * u.M_sun/h) / ( h5data['PartType0']['Density'][:] * 1e10 * u.M_sun/h / (u.kpc / h)**3)
+        V = (self.gasPrtl['Masses'][:]*self._mass_unit)/density
         # Number of recombinations in this volume element
         nr = alpha * ne * nH * V
-
-        # What's the flux from this particle at the observer?
+        # What's the photon rate from this particle at the observer?
         photon_flux = ( nr / (4 * np.pi * self.dL**2) ).to(1/u.cm**2/u.s)
         return photon_flux
 
@@ -181,13 +241,16 @@ class TNGsimulation(object):
         '''
         self._starIDs = np.where(self.starPrtl['GFM_StellarFormationTime'][:]>0)[0]
         # get the mean star formation time, metalicity, and stellar mass
-        GFM_SFT = self.starPrtl['GFM_StellarFormationTime'][:]
-        GFM_SM  = self.starPrtl['GFM_InitialMass'][:]
-        GFM_Z   = np.log10(self.starPrtl['GFM_Metallicity'][:]/0.0127)
-        mean_SFT = np.average(GFM_SFT[self._starIDs],
-            weights=GFM_SM[self._starIDs])
-        mean_Z = np.average(GFM_Z[self._starIDs],
-            weights=GFM_SM[self._starIDs])
+        if self._init_method=="query":
+            GFM_SFT = self.starPrtl['GFM_StellarFormationTime'][:]
+            GFM_SM  = self.starPrtl['GFM_InitialMass'][:]
+            GFM_Z   = np.log10(self.starPrtl['GFM_Metallicity'][:]/0.0127)
+        else:
+            GFM_SFT = self.starPrtl['GFM_StellarFormationTime'][:]
+            GFM_SM  = np.ones(len(GFM_SFT))
+            GFM_Z   = np.log10(self.starPrtl['GFM_Metallicity'][:]/0.0127)
+        mean_SFT = np.average(GFM_SFT[self._starIDs], weights=GFM_SM[self._starIDs])
+        mean_Z = np.average(GFM_Z[self._starIDs], weights=GFM_SM[self._starIDs])
         # set up FSPS & get continuum per solar mass
         rest_spec = fsps.StellarPopulation(compute_vega_mags=False, zcontinuous=1,
                             sfh=0, logzsol=mean_Z, nebemlineinspec=False,
@@ -241,52 +304,66 @@ class TNGsimulation(object):
         The most cachefile most recently used by this object is stored in the '_cachefile' attribute.
         '''
         sub  = self._subhalo
-        cachepath = pathlib.Path(
-            f'{utils.CACHE_DIR}/{self._sim_name}_subhalo_{sub["id"]}_{self._snapshot["number"]}.hdf5'
-            )
-        if not cachepath.exists():
-            url = f'http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub["snap"]}/subhalos/{sub["id"]}/cutout.hdf5'
-            hdr = gethdr()
+        if self._init_method == 'query':
+            ### Download data from TNG API and assign to self._particleData
+            cachepath = pathlib.Path(
+                f'{utils.CACHE_DIR}/{self._sim_name}_subhalo_{sub["id"]}_{self._snapshot["number"]}.hdf5'
+                )
+            if not cachepath.exists():
+                url = f'http://www.tng-project.org/api/{self._sim_name}/snapshots/{sub["snap"]}/subhalos/{sub["id"]}/cutout.hdf5'
+                hdr = gethdr()
 
-            r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all', 'dm':'all', })
-            f = BytesIO(r.content)
-            h = h5py.File(f,mode='r')
-            with open(cachepath, 'wb') as ff:
-                ff.write(r.content)
+                r = requests.get(url,headers=hdr,params = {'stars':'all','gas':'all', 'dm':'all', })
+                f = BytesIO(r.content)
+                h = h5py.File(f,mode='r')
+                with open(cachepath, 'wb') as ff:
+                    ff.write(r.content)
+            else:
+                h = h5py.File(cachepath,mode='r')
+                self._cachefile = cachepath
+            self._particleData = h
+            ### Set internal attributes
+            self.mdm = dict(h['Header'].attrs.items())["MassTable"][1] * self._mass_unit # Dark matter particle mass
+            # ckpc/h
+            self.CoM = np.mean(self.dmPrtl['Coordinates'], axis=0) * self._length_unit
+            # (kpc/h)/(km/s)
+            self.spin = np.array([sub['spin_x'], sub['spin_y'], sub['spin_z']]) * self._spin_unit
+            # kpc
+            self.hmr = sub['halfmassrad'] * self._length_unit
+            self.hmr_stars = sub['halfmassrad_stars'] * self._length_unit
+            self.hmr_gas = sub['halfmassrad_gas'] * self._length_unit
+            # peculiar velocity of the group, km/s
+            self.vel = np.array([sub['vel_x'], sub['vel_y'], sub['vel_z']]) * self._subhalovel_unit
+            self.veldm = np.mean(self.dmPrtl['Velocities'], axis=0) * self._partvel_unit
+            # 3D peculiar velocity dispersion divided by sqrt{3}
+            self.veldisp = sub['veldisp'] * self._subhalovel_unit
+            # Maximum value of the spherically-averaged rotation curve, km/s
+            # for all particles
+            self.vmax = sub['vmax'] * self._subhalovel_unit
         else:
-            h = h5py.File(cachepath,mode='r')
-            self._cachefile = cachepath
-
-        self.header = dict(h['Header'].attrs.items())
-        self._particleData = h
-        # ckpc/h
-        self.CoM = np.array([sub['cm_x'],sub['cm_y'], sub['cm_z']])
-        self.CoMdm = np.mean(self.dmPrtl['Coordinates'], axis=0)
-        # (kpc/h)/(km/s)
-        self.spin = np.array([sub['spin_x'], sub['spin_y'], sub['spin_z']])
-        # kpc
-        self.hmr = sub['halfmassrad']
-        self.hmr_stars = sub['halfmassrad_stars']
-        self.hmr_gas = sub['halfmassrad_gas']
-        # peculiar velocity of the group, km/s
-        self.vel = np.array([sub['vel_x'], sub['vel_y'], sub['vel_z']])
-        self.veldm = np.mean(self.dmPrtl['Velocities'], axis=0)
-        # 3D peculiar velocity dispersion divided by sqrt{3}
-        self.veldisp = sub['veldisp']
-        # Maximum value of the spherically-averaged rotation curve, km/s
-        # for all particles
-        self.vmax = sub['vmax']
-        # Comoving radius of rotation curve maximum, ckpc/h
-        self.vmaxrad = sub['vmaxrad']
-        self._particleTemp = self._calculate_gas_temperature(h)
-        #self._starFlux = self._star_particle_flux(h)
-        #mags = h['PartType4']['GFM_StellarPhotometrics'][:]
-        #starflux = 10**(-mags[:,4]/2.5)
-        self._line_flux = self._gas_line_flux(h) # photons rate per particle
+            self._cachefile = None
+            ### Set internal attributes
+            self.mdm = sub["SubhaloMassType"] * self._mass_unit # Dark matter particle mass
+            # ckpc/h
+            self.CoM = sub["SubhaloPos"][:] * self._length_unit
+            # (kpc/h)/(km/s)
+            self.spin = sub["SubhaloSpin"][:] * self._spin_unit
+            # kpc
+            self.hmr = sub['SubhaloHalfmassRad'] * self._length_unit
+            self.hmr_stars = sub['SubhaloHalfmassRadStars'] * self._length_unit
+            self.hmr_gas = sub['SubhaloHalfmassRadGas'] * self._length_unit
+            # peculiar velocity of the group, km/s
+            self.vel = sub["SubhaloVel"][:] * self._subhalovel_unit
+            self.veldm = sub["SubhaloVel"][:] * self._subhalovel_unit
+            # 3D peculiar velocity dispersion divided by sqrt{3}
+            self.veldisp = sub['SubhaloVelDisp'] * self._subhalovel_unit
+            # Maximum value of the spherically-averaged rotation curve, km/s
+            # for all particles
+            self.vmax = sub['SubhaloMaxCircVel'] * self._subhalovel_unit
 
         return
 
-    def _generateCube(self, pars, rescale=.25, center=True):
+    def _generateCube(self, pars, rescale=1.0,  min_flux_threshold=1e-13, center=True):
         '''
         pars: cube.CubePars
             A CubePars instance that holds all relevant metadata about the
@@ -316,19 +393,16 @@ class TNGsimulation(object):
             psf = None
 
         print('Choosing  indices')
-        inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[
-            (self._line_flux.value > 1e-5) & (np.isfinite(self._line_flux.value))
+        inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[
+            (self._line_flux.value > min_flux_threshold) & (np.isfinite(self._line_flux.value))
             ]
         #inds = np.arange(self._particleData['PartType0']['Coordinates'][:,0].size)[(self._line_flux.value > 1e3) & (np.isfinite(self._line_flux.value))]
 
         # What is the position of the sources relative to the field center?
         print('Reading particle data.')
-        dx = rescale * (self._particleData['PartType0']['Coordinates'][:,0] -\
-                        np.mean(self._particleData['PartType0']['Coordinates'][:,0]))/self.cosmo.h
-        dy = rescale * (self._particleData['PartType0']['Coordinates'][:,1] -\
-                        np.mean(self._particleData['PartType0']['Coordinates'][:,1]))/self.cosmo.h
-        dz = rescale * (self._particleData['PartType0']['Coordinates'][:,2] -\
-                        np.mean(self._particleData['PartType0']['Coordinates'][:,2]))/self.cosmo.h
+        dx = rescale * (self.gasPrtl['Coordinates'][:,0] * self._length_unit - self.CoM[0])
+        dy = rescale * (self.gasPrtl['Coordinates'][:,1] * self._length_unit - self.CoM[1])
+        dz = rescale * (self.gasPrtl['Coordinates'][:,2] * self._length_unit - self.CoM[2])
 
         print('Subsampling particle data.')
         dx = dx[inds]
@@ -340,7 +414,7 @@ class TNGsimulation(object):
 
         print(f'Calculating velocity offsets')
         # Calculate the velocity offset of each particle.
-        deltav = self._particleData['PartType0']['Velocities'][:,2] * np.sqrt(1./(1+self.redshift)) * u.km/u.s
+        deltav = self.gasPrtl['Velocities'][:,2] * self._partvel_unit
         deltav = deltav[inds]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
@@ -355,12 +429,8 @@ class TNGsimulation(object):
 
         # Now put these on the pixel grid.
         print('Calculating position offsets')
-        du = (dx*u.kpc / self.cosmo.angular_diameter_distance(
-            pars['emission_lines'][0].line_pars['z'])
-              ).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
-        dv = (dy*u.kpc / self.cosmo.angular_diameter_distance(
-            pars['emission_lines'][0].line_pars['z'])
-              ).to(u.dimensionless_unscaled).value * 180/np.pi * 3600 / pixel_scale
+        du = (dx/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy/self.DA*u.rad).to('arcsec').value/pixel_scale
 
         # TODO: This is where we should apply a shear.
 
@@ -413,7 +483,7 @@ class TNGsimulation(object):
 
         return simcube
 
-    def generateVelocityMap(self, pars, rescale=.25):
+    def generateVelocityMap(self, pars, rescale=1.0, min_flux_threshold=1e-13):
         '''
         pars: grism.GrismPars
             A GrismPars instance that holds all relevant metadata about the
@@ -432,52 +502,46 @@ class TNGsimulation(object):
 
         # choose gas particles with flux above some threshold
         print('Selecting gas particles')
-        _crt = (self._line_flux.value > 1e-5) & \
+        _crt = (self._line_flux.value > min_flux_threshold) & \
                 (np.isfinite(self._line_flux.value))
         inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
 
-        # get the field center, weighted by line flux
-        # we'll be lazy and do not mask NaN here, see if we'll meet any
-        gas_cen = np.average(self.gasPrtl['Coordinates'], axis=0,
-                            weights=self._line_flux)
-        dpos = rescale * (self.gasPrtl['Coordinates'] - gas_cen)/self.cosmo.h
+        # Use the subhalo center as the field center
+        # gas_cen = np.average(self.gasPrtl['Coordinates'], axis=0,
+        #                     weights=self._line_flux)
+        dpos = rescale * (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
 
         print('Subsampling particle data.')
         dx = dpos[inds, 0]
         dy = dpos[inds, 1]
         print('Calculating position offsets')
         # angular position
-        du = (dx*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
-        dv = (dy*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
-        print('Discretizing positions')
-        du_int = (np.round(du)).astype(int)  + int(shape[1]/2)
-        dv_int = (np.round(dv)).astype(int)  + int(shape[2]/2)
+        du = (dx/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy/self.DA*u.rad).to('arcsec').value/pixel_scale
 
         # TODO: add an optional rotation matrix operation.
         RR = Rotation.from_euler('z',45,degrees=True)
 
         print(f'Calculating velocity offsets')
         # Calculate the velocity offset of each particle.
-        deltav = self.gasPrtl['Velocities'][:,2][inds] * \
-                    np.sqrt(1./(1+self.redshift))
-        v_sys = np.average(deltav, axis=0, weights=self._line_flux[inds])
-        print(f'Systemic velocity = {v_sys} km/s')
+        deltav = self.gasPrtl['Velocities'][:,2][inds] * self._partvel_unit - self.vel[2]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
 
         # TODO: This is where we should apply a shear.
         v_ary, x_edge, y_edge, binID = binned_statistic_2d(du, dv,
-            deltav - v_sys, statistic=np.nanmedian, bins=shape[1:],
+            deltav, statistic=np.nanmedian, bins=shape[1:],
             range=[x_range, y_range]
             )
 
         return v_ary
-    def _generateGrismCube_gas(self, pars, rescale=.25, method=2):
+    
+    def _generateGrismCube_gas(self, pars, rescale=.25, method=2, min_flux_threshold=1e-13):
         ''' Generate grism cube for gas particles
         '''
         # setup grids
-        pixel_scale = pars['pix_scale']
-        shape = pars['shape']
+        pixel_scale = pars['pix_scale'] # X-Y pixel scale in arcsec/pixel
+        shape = pars['shape'] # (lambda, y, x)
         pars['truth'] = {'subhalo':self._subhalo,'simulation':self._snapshot}
 
         # get list of slice wavelength midpoints (observer-frame)
@@ -489,23 +553,22 @@ class TNGsimulation(object):
 
         # choose gas particles with flux above some threshold
         print('Selecting gas particles')
-        _crt = (self._line_flux.value > 1e-5) & \
+        _crt = (self._line_flux.value > min_flux_threshold) & \
                 (np.isfinite(self._line_flux.value))
         inds = np.arange(self.gasPrtl['Coordinates'][:,0].size)[_crt]
 
         # get the field center
-        dpos = rescale * (self.gasPrtl['Coordinates'] - self.CoMdm)/self.cosmo.h
+        dpos = rescale * (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
 
         print('Subsampling particle data.')
         dx = dpos[inds, 0]
         dy = dpos[inds, 1]
-        dz = dpos[inds, 2]
         total_flux = np.sum(self._line_flux[inds])
-        flux_frac = self._line_flux[inds]/np.sum(self._line_flux[inds])
+        flux_frac = self._line_flux[inds]/total_flux
         print('Calculating position offsets')
         # angular position
-        du = (dx*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
-        dv = (dy*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        du = (dx/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy/self.DA*u.rad).to('arcsec').value/pixel_scale
         print('Discretizing positions')
         du_int = (np.round(du)).astype(int)  + int(shape[1]/2)
         dv_int = (np.round(dv)).astype(int)  + int(shape[2]/2)
@@ -515,12 +578,7 @@ class TNGsimulation(object):
 
         print(f'Calculating velocity offsets')
         # Calculate the velocity offset of each particle.
-        deltav = self.gasPrtl['Velocities'][:,2][inds] * \
-                    np.sqrt(1./(1+self.redshift)) * u.km/u.s
-        # get physical velocities from TNG by multiplying by sqrt(a)
-        # https://www.tng-project.org/data/docs/specifications/#parttype0
-
-        # TODO: This is where we should apply a shear.
+        deltav = self.gasPrtl['Velocities'][:,2][inds] * self._partvel_unit - self.vel[2]
 
         simcube = np.zeros(shape)
         print('Populating datacube with emission lines flux')
@@ -530,7 +588,7 @@ class TNGsimulation(object):
                 these = (du_int == i) & (dv_int == j)
                 if any(these):
                     # get the LoS-shifted SED
-                    Doppler = 1.0 - (deltav[these]/const.c).to('1').value
+                    Doppler = 1.0 + (deltav[these]/const.c).to('1').value
                     #ipdb.set_trace()
                     DopLam = lambdas*Doppler[:,np.newaxis] # [these, Nlam]
                     if method==1:
@@ -541,7 +599,7 @@ class TNGsimulation(object):
                 pbar.update(1)
         return simcube
 
-    def _generateGrismCube_star(self, pars, rescale=.25):
+    def _generateGrismCube_star(self, pars, rescale=1.0):
         ''' Generate grism cube for star particles
         '''
         # setup grids
@@ -557,21 +615,20 @@ class TNGsimulation(object):
         # stellar continuum
         _obs_sed = self.starObsSED(pars, None)
 
-        # choose gas particles with flux above some threshold
+        # remove stellar wind particles
         print('Selecting star particles')
         inds = self._starIDs
 
         # get the field center
-        dpos = rescale * (self.starPrtl['Coordinates'] - self.CoMdm)/self.cosmo.h
-        SMs = self.starPrtl['Masses'][self._starIDs]*1e10/self.cosmo.h # Msol
+        dpos = rescale * (self.starPrtl['Coordinates']*self._length_unit - self.CoM)
+        SMs = self.starPrtl['Masses'][self._starIDs]*self._mass_unit
         print('Subsampling particle data.')
         dx = dpos[inds, 0]
         dy = dpos[inds, 1]
-        dz = dpos[inds, 2]
         print('Calculating position offsets')
         # angular position
-        du = (dx*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
-        dv = (dy*u.kpc/self.DA*u.rad).to('arcsec').value/pixel_scale
+        du = (dx/self.DA*u.rad).to('arcsec').value/pixel_scale
+        dv = (dy/self.DA*u.rad).to('arcsec').value/pixel_scale
         print('Discretizing positions')
         du_int = (np.round(du)).astype(int)  + int(shape[1]/2)
         dv_int = (np.round(dv)).astype(int)  + int(shape[2]/2)
@@ -581,8 +638,7 @@ class TNGsimulation(object):
 
         print(f'Calculating velocity offsets')
         # Calculate the velocity offset of each particle.
-        deltav = self.starPrtl['Velocities'][:,2][inds] * \
-                    np.sqrt(1./(1+self.redshift)) * u.km/u.s
+        deltav = self.starPrtl['Velocities'][:,2][inds] * self._partvel_unit - self.vel[2]
         # get physical velocities from TNG by multiplying by sqrt(a)
         # https://www.tng-project.org/data/docs/specifications/#parttype0
 
@@ -596,7 +652,7 @@ class TNGsimulation(object):
                 these = (du_int == i) & (dv_int == j)
                 if any(these):
                     # get the LoS-shifted SED
-                    Doppler = 1.0 - (deltav[these]/const.c).to('1').value
+                    Doppler = 1.0 + (deltav[these]/const.c).to('1').value
                     #ipdb.set_trace()
                     DopLam = lambdas*Doppler[:,np.newaxis] # [these, Nlam]
                     continuum_spectra = SMs[these, np.newaxis] * _obs_sed(DopLam)
@@ -604,7 +660,7 @@ class TNGsimulation(object):
                 pbar.update(1)
         return simcube
 
-    def _generateGrismCube(self, pars, rescale=.25, method=2, gas_weight=1, cached=False):
+    def _generateGrismCube(self, pars, rescale=1.0, method=2, gas_weight=1, cached=False):
         '''
         pars: grism.GrismPars
             A GrismPars instance that holds all relevant metadata about the
@@ -742,7 +798,7 @@ class TNGsimulation(object):
 
         return slit_spectrum
 
-    def to_grism(self, pars, rescale=0.25, method=2, gas_weight=1, cached=False):
+    def to_grism(self, pars, rescale=1.0, method=2, gas_weight=1, cached=False):
         '''
         Generate grism spectrum given meta data
 
@@ -754,11 +810,12 @@ class TNGsimulation(object):
         '''
         # build data cube
         print('Generating 3d data cube')
-        _simcube = self._generateGrismCube(pars, rescale = rescale, method=method, gas_weight=gas_weight, cached=cached)
-        _simcube = np.transpose(_simcube, (0, 2, 1)) # follow the convention of Spencer, Nlam, Nx, Ny
-        self.simGrismCube = grism.GrismModelCube(_simcube, pars=pars)
+        _simcube = self._generateGrismCube(pars, rescale=rescale, method=method, gas_weight=gas_weight, cached=cached)
+        #_simcube = np.transpose(_simcube, (0, 2, 1)) # follow the convention of Spencer, Nlam, Nx, Ny
+        # self.simGrismCube = grism.GrismModelCube(_simcube, pars=pars)
+        self.simGrismCube = grism.GrismModelCube(pars)
         print('Generating simulated grism image')
-        image, noise = self.simGrismCube.observe(force_noise_free=False)
+        image, noise = self.simGrismCube.observe(theory_cube=_simcube, force_noise_free=False)
         # return the grism data
         return image, noise
 
@@ -789,12 +846,12 @@ class TNGsimulation(object):
         # offset_y: float
         #     y-offset of the slit mask from grid center (in arcsec)
 
-        slit_width, slit_angle
+        slit_width, slit_angle = pars['slit_width'], pars['slit_angle']
         shape = (pars['shape'][1], pars['shape'][2])
         pix_scale = pars['pixscale']
         offset_x, offset_y = pars['offset_x'], pars['offset_y']
 
-        slit_mask = np.ones((ngrid, ngrid))
+        slit_mask = np.ones(shape)
         grid_x = self.generate_grid(0, pix_scale, shape[0])
         grid_y = self.generate_grid(0, pix_scale, shape[1])
 
@@ -815,14 +872,12 @@ class TNGsimulation(object):
 
         return centers
 
-    def getzdisk(self, rmax_pkpc=30):
-        a = 1.0/(1.0+self.redshift)
-        h0 = self.cosmo.h
-        mgas = self.gasPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
-        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
-        vgas = (self.gasPrtl['Velocities']-self.veldm)*a**0.5*u.Unit('km s-1')
+    def getzdisk(self, rmax_pkpc=30, min_flux_threshold=1e-13):
+        mgas = self.gasPrtl['Masses'][:]*self._mass_unit
+        rgas = (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
+        vgas = (self.gasPrtl['Velocities']*self._partvel_unit - self.vel)
         Rgas = np.sum(rgas*rgas, axis=1)**0.5
-        gasIDs = np.where(np.logical_and(self._line_flux.value>1e-5,
+        gasIDs = np.where(np.logical_and(self._line_flux.value>min_flux_threshold,
             Rgas<rmax_pkpc*u.kpc))[0]
         ### Angular momentum of gas particles
         Lgas = (np.cross(rgas, vgas).T * mgas).T
@@ -830,17 +885,15 @@ class TNGsimulation(object):
         # definition of z-direction: direction of the total angular momentum
         return Ldisk/np.sqrt(Ldisk[0]**2 + Ldisk[1]**2 + Ldisk[2]**2)
 
-    def getRotationCurve(self, rmin_pkpc=0, rmax_pkpc=30, Nbins=20):
+    def getRotationCurve(self, rmin_pkpc=0, rmax_pkpc=30, Nbins=20, min_flux_threshold=1e-13):
         ''' Generate the gas rotation velocity curve given radial binning
         '''
-        a = 1/(1+self.redshift)
-        h0 = self.cosmo.h
         R_bins = np.linspace(rmin_pkpc, rmax_pkpc, Nbins+1)
-        mgas = self.gasPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
-        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
-        vgas = (self.gasPrtl['Velocities']-self.veldm)*a**0.5*u.Unit('km s-1')
+        mgas = self.gasPrtl['Masses'][:]*self._mass_unit
+        rgas = (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
+        vgas = (self.gasPrtl['Velocities']*self._partvel_unit - self.vel)
         Rgas = np.sum(rgas*rgas, axis=1)**0.5
-        gasIDs = np.where(np.logical_and(self._line_flux.value>1e-5,
+        gasIDs = np.where(np.logical_and(self._line_flux.value>min_flux_threshold,
             Rgas<rmax_pkpc*u.kpc))[0]
         ### Angular momentum of gas particles
         Lgas = (np.cross(rgas, vgas).T * mgas).T
@@ -862,8 +915,8 @@ class TNGsimulation(object):
         vcirc_std = np.zeros(Nbins)
         for i in range(Nbins):
             pid = gas2Dmap[i+1]
-            _vcirc = np.average(vtan[pid], weights=SFR[pid])
-            _vstd = np.average((vtan[pid]-_vcirc)**2, weights=SFR[pid])**0.5
+            _vcirc = np.average(vtan[pid], weights=self._line_flux.value[pid])
+            _vstd = np.average((vtan[pid]-_vcirc)**2, weights=self._line_flux.value[pid])**0.5
             vcirc_mean[i] = _vcirc.to('km s-1').value
             vcirc_std[i] = _vstd.to('km s-1').value
         self.vrot = vcirc_mean
@@ -873,26 +926,23 @@ class TNGsimulation(object):
     def getCircularVelocity(self, rmin_pkpc=0, rmax_pkpc=30, Nbins=20):
         ''' Generate the gas circular velocity curve given the radial binning
         '''
-        a = 1/(1+self.redshift)
-        h0 = self.cosmo.h
         R_bins = np.linspace(rmin_pkpc, rmax_pkpc, Nbins+1)
         R_cen = (R_bins[1:]+R_bins[:-1])/2.
 
-        mgas = self.gasPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
-        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        mgas = self.gasPrtl['Masses'][:]*self._mass_unit
+        rgas = (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
         Rgas = np.sum(rgas*rgas, axis=1)**0.5
 
-        mstar = self.starPrtl['Masses'][:]*1e10*const.M_sun/h0 # 1e10 Msol/h
-        rstar = (self.starPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        mstar = self.starPrtl['Masses'][:]*self._mass_unit
+        rstar = (self.starPrtl['Coordinates']*self._length_unit - self.CoM)
         Rstar = np.sum(rstar*rstar, axis=1)**0.5
 
-        mdm = self.header['MassTable'][1] * 1e10*const.M_sun/h0
-        rdm = (self.dmPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        rdm = (self.dmPrtl['Coordinates']*self._length_unit - self.CoM)
         Rdm = np.sum(rdm*rdm, axis=1)**0.5
 
         dm3Dhist, skip, dm3Dbin_id = binned_statistic(
             Rdm.to('kpc').value, Rdm.value, statistic='count', bins=R_bins)
-        dm3Dhist = dm3Dhist*mdm
+        dm3Dhist = dm3Dhist*self.mdm
         gas3Dhist, skip, gas3Dbin_id = binned_statistic(
             Rgas.to('kpc').value, mgas.to('kg').value,
             statistic='sum', bins=R_bins)
@@ -903,7 +953,7 @@ class TNGsimulation(object):
         star3Dhist = star3Dhist*u.kg
         BH3Dhist = np.zeros(Nbins)
         BH3Dhist[0] = self._particleData['PartType5']['Masses'][0]
-        BH3Dhist = BH3Dhist * 1e10*const.M_sun/h0
+        BH3Dhist = BH3Dhist * self._mass_unit
         Menclose = dm3Dhist + gas3Dhist + star3Dhist + BH3Dhist
         for i in range(1, Nbins):
             Menclose[i] += Menclose[i-1]
@@ -911,20 +961,18 @@ class TNGsimulation(object):
         return (R_bins[1:]+R_bins[:-1])/2., self.vcirc
 
     def getFaceOnDirection(self):
-        a = 1.0/(1.0+self.redshift)
-        h0 = self.cosmo.h
         SFR = self.gasPrtl['StarFormationRate'][:]
-        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc # kpc
+        rgas = (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
         Rgas = np.sum(rgas*rgas, axis=1)**0.5
-        _rmax = 2*self.hmr_stars/(1+self.redshift)/self.cosmo.h*u.kpc
+        _rmax = 2*self.hmr_stars
         inds = np.where(Rgas < _rmax)[0]
         if len(inds)>=50:
             Iij = np.sum(
                 [np.outer(r, r) for r,sfr in zip(rgas[inds], SFR[inds])],
                 axis=0)
         else:
-            mstar = self.starPrtl['Masses'][:]*1e10*const.M_sun/h0
-            rstar = (self.starPrtl['Coordinates']-self.CoMdm)*a/h0*u.kpc
+            mstar = self.starPrtl['Masses'][:]*self._mass_unit
+            rstar = (self.starPrtl['Coordinates']*self._length_unit - self.CoM)
             Rstar = np.sum(rstar*rstar, axis=1)**0.5
             inds = np.where(Rstar < _rmax/2.)[0]
             Iij = np.sum(
@@ -936,10 +984,8 @@ class TNGsimulation(object):
         return zFaceOn
 
     def getStarMomentInertiaEigvals(self):
-        a = 1.0/(1.0+self.redshift)
-        h0 = self.cosmo.h
-        mstar = self.starPrtl['Masses'][:]
-        rstar = (self.starPrtl['Coordinates']-self.CoMdm)*a/h0
+        mstar = self.starPrtl['Masses'][:]*self._mass_unit
+        rstar = (self.starPrtl['Coordinates']*self._length_unit - self.CoM)
         Iij = np.sum(
             [np.outer(r, r)*m for r,m in \
             zip(rstar[self._starIDs], mstar[self._starIDs])], axis=0)
@@ -948,12 +994,10 @@ class TNGsimulation(object):
         print(f'Eigenvals of Stellar mass moment of inertia {w}')
         return w
 
-    def getGasMomentInertiaEigvals(self):
-        a = 1.0/(1.0+self.redshift)
-        h0 = self.cosmo.h
-        inds = np.where( (self._line_flux.value > 1e-5) & \
+    def getGasMomentInertiaEigvals(self, min_flux_threshold=1e-13):
+        inds = np.where( (self._line_flux.value > min_flux_threshold) & \
                 (np.isfinite(self._line_flux.value)) )[0]
-        rgas = (self.gasPrtl['Coordinates']-self.CoMdm)*a/h0
+        rgas = (self.gasPrtl['Coordinates']*self._length_unit - self.CoM)
         sfrgas = self.gasPrtl['StarFormationRate'][:]
         Iij = np.sum(
             [np.outer(r, r)*s for r,s in \
@@ -964,21 +1008,21 @@ class TNGsimulation(object):
         return w
 
     def getStarHMR(self, rescale = 1.0, arcsec=True):
-        shmr = self.hmr_stars/(1+self.redshift)/self.cosmo.h*u.kpc*rescale
+        shmr = self.hmr_stars * rescale
         if arcsec:
             return ((shmr/self.DA)*u.rad).to('arcsec').value
         else:
             return shmr.to('kpc').value
 
     def getGasHMR(self, rescale = 1.0, arcsec=True):
-        ghmr = self.hmr_gas/(1+self.redshift)/self.cosmo.h*u.kpc*rescale
+        ghmr = self.hmr_gas*rescale
         if arcsec:
             return ((ghmr/self.DA)*u.rad).to('arcsec').value
         else:
             return ghmr.to('kpc').value
 
     def getHMR(self, rescale=1.0, arcsec=True):
-        hmr = self.hmr/(1+self.redshift)/self.cosmo.h*u.kpc*rescale
+        hmr = self.hmr*rescale
         if arcsec:
             return ((hmr/self.DA)*u.rad).to('arcsec').value
         else:

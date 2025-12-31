@@ -1,4 +1,3 @@
-import cube
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table, join, hstack
@@ -16,6 +15,7 @@ import astropy.units as u
 from argparse import ArgumentParser
 
 import kl_tools.utils as utils
+import kl_tools.cube as cube
 from kl_tools.emission import EmissionLine, LINE_LAMBDAS
 
 import ipdb

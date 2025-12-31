@@ -940,7 +940,7 @@ class GrismLikelihood(LogLikelihood):
             # update obs conf from image with the one in YAML
             if _meta.get('obs_conf_overwrite', None) is not None:
                 yaml_conf = _meta.pop('obs_conf_overwrite')
-                assert len(yaml_conf) == self.Nobs 
+                assert len(yaml_conf) == self.Nobs, f'Overwrite conf length = {len(yaml_conf)} != Nobs = {self.Nobs}!'
                 for i in range(self.Nobs):
                     for k,v in yaml_conf[i].items():
                             if rank==0:

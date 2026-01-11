@@ -434,6 +434,154 @@ class InclinedExponential(IntensityMap):
             plt.close()
 
         return
+    
+class InclinedBulgeDisk(IntensityMap):
+    ''' Inclined Bulge-Disk Intensity Map 
+    Bulge component is coming from de Vaucouleurs profile (n=4 Sersic), and disk component is an exponential profile.
+    '''
+
+    def __init__(self, datavector, kwargs):
+        ''' Initialize geometry spec and flux of InclinedBulgeDisk profile
+        Note that the `datavector` argument is only used to extract image di-
+        mension (Nx, Ny, and pixel scale), which can be replaced by kwargs.
+        Inputs:
+        =======
+        datavector: `cube.DataCube` object
+            While this implementation will not use the datacube image expli-
+            citly (other than shape info), general intensity generation will,
+            like shapelet method relies on some specific intensity profile to
+            get reasonably good guess.
+            For `InclinedExponential`, you can pass `datavector = None` then
+            pass the shape information by kwargs:
+                theory_Nx = blahblah, theory_Ny = blahblah, scale = blahblah
+        kwargs: dict
+            optional keyword arguments, including
+            - flux: float
+                Total object flux, default is 1 for normalized intensity profile.
+            - hlr_disk: float
+                Disk half-light radius (in arcsec)
+            - hlr_bulge: float
+                Bulge half-light radius (in arcsec)
+            - F_bulge: float
+                Fraction of total flux that is contributed by bluge
+            - theory_Nx: int
+                Image size in x-axis for building the 3D model
+            - theory_Ny: int
+                Image size in y-axis for building the 3D model
+            - scale: float
+                Pixel size for building the 3D model
+            - em_PaA_hlr:
+                Emission line profile half-light radius (in arcsec)
+
+        '''
+        ### Setting the intensity profile shape specification
+        if kwargs.get("theory_Nx", None) is not None and kwargs.get("theory_Ny", None) is not None:
+            nx, ny = kwargs["theory_Nx"], kwargs["theory_Ny"]
+        else:
+            nx, ny = datavector.Nx, datavector.Ny
+        super(InclinedBulgeDisk, self).__init__('inclined_bulgedisk', nx, ny)
+        self.pix_scale = kwargs.get("scale", None)
+        if (self.pix_scale is None) and (datavector is not None):
+            self.pix_scale = datavector.pix_scale
+
+        ### Setting the intensity profile astrophysical info
+        self.pars = {'flux': kwargs.get("flux", 1), 
+                     'hlr_disk': kwargs.get("hlr_disk", None), 
+                     'hlr_bulge': kwargs.get("hlr_bulge", None),
+                     'F_bulge': kwargs.get("F_bulge", 0.0),
+                     'imap_return_gal': kwargs.get("imap_return_gal", False)}
+        ### Setting the intensity profile of emission lines
+        for emline,vacwave in LINE_LAMBDAS.items():
+            if kwargs.get(f'em_{emline}_hlr', None) is not None:
+                self.pars[f'em_{emline}_hlr'] = kwargs[f'em_{emline}_hlr']
+        for name, val in self.pars.items():
+            if not isinstance(val, (float, int)):
+                raise TypeError(f'{name} must be a float or int!')
+        # same as default, but to make it explicit
+        self.is_static = False
+
+        return
+
+    def _render(self, theta_pars, datavector, pars):
+        '''
+        theta_pars: dict (not being used)
+            A dict of the sampled mcmc params for both the velocity
+            map and the tranformation matrices
+        datavector: DataCube (not being used)
+            Truncated data cube of emission line
+        pars: dict (being used)
+            A meta dictionary that includes the most updated parameters
+
+        return: np.ndarray
+            The rendered intensity map
+        '''
+        sini = pars['sini']
+        g1 = pars['g1']
+        g2 = pars['g2']
+        theta_int = pars['theta_int']
+        dx_disk = pars["intensity"]["dx_disk"] * self.pars["hlr"]
+        dy_disk = pars["intensity"]["dy_disk"] * self.pars["hlr"]
+        dx_spec = pars["intensity"]["dx_spec"] * self.pars["hlr"]
+        dy_spec = pars["intensity"]["dy_spec"] * self.pars["hlr"]
+
+
+        inc = Angle(np.arcsin(sini), radians)
+        rot_angle = Angle(theta_int, radians)
+
+        self.gal = {}
+        self.image = {}
+        # photometry image intensity profile
+        start = time()*1000
+        self.gal["phot"] = gs.InclinedExponential(
+            inc, flux=self.pars["flux"], half_light_radius=self.pars["hlr"]
+        ).rotate(rot_angle).shear(g1=g1, g2=g2).shift(dx_disk, dy_disk)
+        #print(self.gal)
+        try:
+            self.image["phot"] = self.gal["phot"].drawImage(nx=self.nx, ny=self.ny,
+                scale=self.pix_scale).array
+        except gs.GalSimFFTSizeError:
+            self.image["phot"] = np.zeros([self.ny, self.nx])
+        # print('\t\t--- photometry profile | %.2f seconds'%(time()*1000-start))
+        # emission lines + continuum intensity profile
+        for emline,vacwave in LINE_LAMBDAS.items():
+            if f'em_{emline}_hlr' in pars['intensity']:
+                eml_hlr = pars['intensity'][f'em_{emline}_hlr']
+                self.gal[f'em_{emline}'] = gs.InclinedExponential(
+                    inc, flux=1, half_light_radius=eml_hlr).rotate(rot_angle).shear(g1=g1, g2=g2).shift(dx_spec,dy_spec)
+                try:
+                    self.image[f'em_{emline}'] = self.gal[f'em_{emline}'].drawImage(
+                        nx=self.nx, ny=self.ny, scale=self.pix_scale).array
+                except gs.GalSimFFTSizeError:
+                    self.image[f'em_{emline}'] = np.zeros([self.ny, self.nx])
+                #print(self.gal)
+                # print('\t\t--- emission profile | %.2f seconds'%(time()*1000-start))
+            if f'cont_{emline}_hlr' in pars['intensity']:
+                self.gal[f'cont_{emline}'] = gs.InclinedSersic(4, inc, half_light_radius=pars['intensity'][f'cont_{emline}_hlr'], flux=1.0, trunc=5*pars['intensity'][f'cont_{emline}_hlr'], flux_untruncated=True)#.rotate(rot_angle).shear(g1=g1, g2=g2)
+                try:
+                    self.image[f'cont_{emline}'] = self.gal[f'cont_{emline}'].drawImage(
+                        nx=self.nx, ny=self.ny, scale=self.pix_scale).array
+                except gs.GalSimFFTSizeError:
+                    self.image[f'cont_{emline}'] = np.zeros([self.ny, self.nx])
+
+        # Only add knots if a psf is provided
+        # NOTE: no longer workds due to psf conovlution
+        # happening later in modeling
+        # if 'psf' in pars:
+        #     if 'knots' in pars:
+        #         knot_pars = pars['knots']
+        #         knots = gs.RandomKnots(**knot_pars)
+        #         gal = gal + knots
+
+        # try:
+        #     self.image = gal.drawImage(nx=self.nx, ny=self.ny,
+        #         scale=self.pix_scale).array
+        # except gs.GalSimFFTSizeError:
+        #     #print(f'WARNING: FFT size too large, return -np.inf')
+        #     self.image = np.zeros([self.ny, self.nx])
+        if self.pars['imap_return_gal']:
+            return self.image, self.gal
+        else:
+            return self.image
 
 class BasisIntensityMap(IntensityMap):
     '''

@@ -1091,10 +1091,15 @@ class GrismLikelihood(LogLikelihood):
         _meta_update = self.meta.copy_with_sampled_pars(theta_pars)
         _meta_update['run_options']['imap_return_gal'] = True
         parametriz =  _meta_update['run_options'].get('alignment_params', 'sini_pa')
-        if _meta_update['intensity']['type']=='inclined_exp':
+
+        ### Handle different inclination parametrizations
+        ### NOTE: This customized parametrization only supports `inclined_exp`, `bulge_disk`, and `inclined_sersic` types.
+        if _meta_update['intensity']['type'] in ['inclined_exp', 'bulge_disk', 'inclined_sersic']:
             if parametriz=='inc_pa':
+                ### Sampled parameters: inclination angle, position angle
                 _meta_update['sini'] = np.sin(_meta_update['inc'])
             elif parametriz=='eint':
+                ### Sampled parameters: intrinsic ellipticity 1 & 2.
                 eint1 = _meta_update['eint1']
                 eint2 = _meta_update['eint2']
                 eint = np.abs(eint1 + 1j * eint2)

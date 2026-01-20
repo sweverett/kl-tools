@@ -14,6 +14,8 @@ import zeus
 import emcee
 import pocomc as pc
 import ultranest
+import nautilus
+import scipy
 
 import kl_tools.utils as utils
 import kl_tools.priors as priors
@@ -1186,6 +1188,207 @@ class KLensUltranestRunner(UltranestRunner):
         plt.plot(chain[:,indx], alpha=0.5)
         return
 
+class NautilusRunner(MCMCRunner): #added by Lauren, feel free to adjust
+    def _initialize_sampler(self, pool=None):
+        sampler = nautilus.Sampler(
+            self.make_nautilus_prior(),
+            self.likelihood,
+            n_dim = self.ndim,
+            n_live = self.nlive,
+            likelihood_args = self.loglike_args,
+            likelihood_kwargs = self.loglike_kwargs,
+            pool=pool, pass_dict=False, resume=self.resume, filepath=self.output_dir)
+        return sampler
+
+    #had to convert kl-tools prior into a Nautilus prior
+    def make_nautilus_prior(self):
+        nautilus_prior = nautilus.Prior()
+        param_names = list(self.prior.priors.keys())
+        for param_name in self.prior.priors.keys():
+            dist = self.prior.priors[param_name]
+            dist_name = self.prior.priors[param_name].__class__.__name__
+            if dist_name == 'UniformPrior':
+                nautilus_prior.add_parameter(param_name, dist=(dist.left, dist.right))
+            elif dist_name == 'GaussPrior':
+                nautilus_prior.add_parameter(param_name, dist=scipy.stats.norm(loc=dist.mu, scale=dist.scale))
+            elif dist_name == 'LognormalPrior':
+                nautilus_prior.add_parameter(param_name, dist=scipy.stats.lognorm(scale=dist.mu, s=dist.dex))
+        return nautilus_prior
+    
+    @property
+    def prior(self):
+        return self.logprior
+    
+    @property
+    def likelihood(self):
+        return self.loglike
+
+    @property
+    def nlive(self):
+        return self.nwalkers
+    
+    @property
+    def prior_args(self):
+        return self.logprior_args
+
+    @property
+    def prior_kwargs(self):
+        return self.logprior_kwargs
+    
+    @property
+    def likelihood_args(self):
+        return self.loglike_args
+
+    @property
+    def likelihood_kwargs(self):
+        return self.loglike_kwargs
+
+    @property
+    def args(self):
+        return self.loglike_args
+
+    @property
+    def kwargs(self):
+        return self.loglike_kwargs
+    
+    @property
+    def meta(self):
+        return self.pars.meta.pars
+    
+class KLensNautilusRunner(NautilusRunner):
+    def __init__(self, nlive, ndim, likelihood, prior,
+                 datacube, pars,
+                 likelihood_args=[], likelihood_kwargs={},
+                 prior_args=None, prior_kwargs=None, 
+                 resume=False, output_dir=None):
+
+        #commented out since I define a likelihood wrapper below instead
+        #likelihood_args = [datacube] + likelihood_args
+
+        likelihood_wrapper = lambda pars: likelihood(pars, datacube)
+         
+        super(KLensNautilusRunner, self).__init__(
+        nlive, ndim,
+        loglike=likelihood_wrapper, logprior=prior,
+        loglike_args=likelihood_args, loglike_kwargs=likelihood_kwargs,
+        logprior_args=prior_args, logprior_kwargs=prior_kwargs)
+
+        self.datacube = datacube
+        self.pars = pars
+        self.pars_order = self.pars.sampled.pars_order
+        self.MAP_vmap = None
+        self.resume = resume
+        self.output_dir = output_dir
+
+    def _run_sampler(self, start, nsteps=np.inf, f_live = 0.01, n_shell=1, n_eff=10000, progress=True, discard_exploration=False):
+        '''
+        The Nautilus-specific way to run the sampler object
+        https://nautilus-sampler.readthedocs.io/en/stable/api_full.html#nautilus.sampler.Sampler.run
+        '''
+
+        if self.sampler is None:
+            raise AttributeError('sampler has not yet been initialized!')
+
+        self.sampler.run(verbose=True, n_like_max = nsteps, f_live = f_live, n_shell = n_shell, n_eff = n_eff, discard_exploration = discard_exploration) #other arguments?
+        return
+
+    def plot_corner(self, reference=None, discard=None, thin=1, crange=None,
+        show=True, close=True, outfile=None, size=(20,20),
+        show_titles=True, title=None, use_derived=True,
+        title_fmt='.3f'):
+
+        # discard & thin kwargs don't make sense for Nautilus
+        self.discard = None
+        self.thin = None
+        assert (self.burn_in == 0) or (self.burn_in is None)
+        
+        chain, weights, logl = self.get_chain(flat=True, discard=discard, thin=thin)
+
+        if use_derived is True:
+            # add derived quantity sini*vcirc
+            new_shape = (chain.shape[0], chain.shape[1]+1)
+            new_chain = np.zeros((new_shape))
+            new_chain[:,0:-1] = chain
+            i1, i2 = self.pars_order['sini'], self.pars_order['vcirc']
+            new_chain[:,-1] = chain[:,i1] * chain[:,i2]
+            chain = new_chain
+        
+        if reference is not None:
+            if len(reference) != self.ndim:
+                raise ValueError('Length of reference list must be same as Ndim!')
+            if use_derived is True:
+                ref = reference[i1]*reference[i2]
+                if isinstance(reference, list):
+                    reference.append(ref)
+                elif isinstance(reference, np.ndarray):
+                    arr = np.zeros(len(reference)+1)
+                    arr[0:-1] = reference
+                    arr[-1] = ref
+                    reference = arr
+
+            names = self.ndim*['']
+            for name, indx in self.pars_order.items():
+                names[indx] = name
+            if use_derived is True:
+                names.append('sini*vcirc')
+        else:
+            names = None
+
+        if crange is not None:
+            if use_derived is True:
+                crange.append(crange[-1])
+            if len(crange) != len(names):
+                raise ValueError('Length of crange list must be same as names!')
+
+        #Nautilus has unequal-weight posteriors by default
+        p = corner(
+        chain, weights=np.exp(log_w), bins=20, labels=prior.keys, color='purple',
+        plot_datapoints=False, range=np.repeat(0.999, len(prior.keys)))
+
+        plt.suptitle(title, fontsize=18)
+        
+        if size is not None:
+            plt.gcf().set_size_inches(size)
+
+        plt.tight_layout()
+
+        if outfile is not None:
+            plt.savefig(outfile, bbox_inches='tight', dpi=300)
+
+        if show is True:
+            plt.show()
+
+        if close is True:
+            plt.close()
+
+        return
+
+    #Nautilus has unequal-weight posteriors by default
+    def get_chain(self, *args, **kwargs):
+        '''
+        ignore most kwargs used for other samplers
+        '''
+        posterior = self.sampler.posterior()
+        points, weights, logl = posterior
+        return points, weights, logl
+
+    def get_loglike(self):
+        posterior = self.sampler.posterior()
+        points, weights, logl = posterior
+        return logl
+
+
+    def set_burn_in(self, index):
+        '''
+        Nested samplers don't need a burn-in, so ignore
+        '''
+
+        print('Warning: requested to set a burn-in for a nested ' +\
+              'sampler; ignoring')
+
+        return
+
+
 def get_runner_types():
     return RUNNER_TYPES
 
@@ -1196,6 +1399,7 @@ RUNNER_TYPES = {
     'zeus': KLensZeusRunner,
     'poco': KLensPocoRunner,
     'ultranest': KLensUltranestRunner,
+    'nautilus': KLensNautilusRunner,
     }
 
 def build_mcmc_runner(name, args, kwargs):

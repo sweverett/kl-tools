@@ -158,3 +158,16 @@ data/
 
 # mac
 .DS_Store
+
+# local data / outputs (added 2026-11-06 during machine migration)
+manga/
+tests/test_data/
+tests/muse-mcmc-run/
+kl_tools/kross/vmap_fits/
+scripts/demo_plots/
+.ipynb_checkpoints/
+*.DS_Store
+scripts/*.pdf
+scripts/*.png
+scripts/*.fits
+scripts/*.vot.gz
